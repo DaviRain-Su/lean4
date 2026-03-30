@@ -681,7 +681,7 @@ meta def simpTargetTelescope (mvarId : MVarId) : VCGenM MVarId := do
   let methods := { methods with pre := Sym.Simp.simpTelescope }
   let (result, simpState') ← Sym.Simp.SimpM.run (Sym.Simp.simp target) methods {} simpState
   modify fun s => { s with simpState := simpState' }
-  let mvarId ← match result with
+  match result with
     | .rfl .. => pure mvarId
     | .step newTarget proof .. => mvarId.replaceTargetEq newTarget proof
 
