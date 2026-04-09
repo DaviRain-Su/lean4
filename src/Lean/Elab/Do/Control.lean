@@ -178,13 +178,15 @@ def ControlStack.mkReturn (base : ControlStack) (r : Expr) : DoElabM Expr := do
   synthUsingDefEq "early return result type" mγ mγ'
   base.runInBase <| mkApp5 (mkConst ``EarlyReturnT.return [mi.u, mi.v]) ρ mi.m δ instMonad r
 
-def ControlStack.mkPure (base : ControlStack) (resultName : Name) : DoElabM Expr := do
+def ControlStack.mkPure (base : ControlStack) (resultName : Name)
+    (expectedResultType : Expr) : DoElabM Expr := do
   let mi := { (← read).monadInfo with m := (← base.m) }
   let instMonad ← mkInstMonad mi
   let instPure := instMonad |> mkApp2 (mkConst ``Monad.toApplicative [mi.u, mi.v]) mi.m
                             |> mkApp2 (mkConst ``Applicative.toPure [mi.u, mi.v]) mi.m
   let r ← getFVarFromUserName resultName
-  base.runInBase <| mkApp4 (mkConst ``Pure.pure [mi.u, mi.v]) mi.m instPure (← inferType r) r
+  let r ← Term.ensureHasType expectedResultType r
+  base.runInBase <| mkApp4 (mkConst ``Pure.pure [mi.u, mi.v]) mi.m instPure expectedResultType r
 
 structure ControlLifter where
   origCont : DoElemCont
@@ -263,7 +265,17 @@ def ControlLifter.lift (l : ControlLifter) (elabElem : DoElemCont → DoElabM Ex
     | some returnBase => { oldReturnCont with k := returnBase.mkReturn }
     | _ => oldReturnCont
   let contInfo := ContInfo.toContInfoRef { breakCont, continueCont, returnCont }
-  let pureCont := { l.origCont with k := l.pureBase.mkPure l.origCont.resultName, kind := .duplicable }
+  -- Use a fresh result type for the pure continuation, mirroring the legacy elaborator's
+  -- `DoResultPR` pattern. This allows monad resolution to succeed independently of the
+  -- expected result type. For example, `evalConstCheck Nat ``Nat name : ?m Nat` in a
+  -- `CoreM (Option Nat)` context: with `dec.resultType = Option Nat`, Lean cannot decompose
+  -- `?m Nat =?= CoreM (Option Nat)` (since `Nat ≠ Option Nat`), leaving `?m` stuck.
+  -- With a fresh `?α`, Lean decomposes `?m Nat =?= CoreM ?α` successfully.
+  -- The coercion from `?α` to the original result type is inserted by `mkPure`.
+  let pureCont := { l.origCont with
+    resultType := (← mkFreshResultType `α),
+    k := l.pureBase.mkPure l.origCont.resultName l.origCont.resultType,
+    kind := .duplicable }
   withReader (fun ctx => { ctx with contInfo, doBlockResultType := l.liftedDoBlockResultType }) do
     elabElem pureCont
 
