@@ -196,6 +196,18 @@ structure ControlLifter where
   pureBase : ControlStack
   pureDeadCode : CodeLiveness
   liftedDoBlockResultType : Expr
+  /--
+  Whether `pureBase` adds any monad transformer on top of the base monad. When it does, the body
+  is elaborated with a fresh result type `?α` (rather than `origCont.resultType`), allowing
+  monad-polymorphic terms like `evalConstCheck Nat ``Nat name : ?m Nat` in a
+  `CoreM (Option Nat)` context to resolve their implicit monad cleanly. The coercion from `?α`
+  to the outer result type is then inserted by `mkPure` via `ensureHasType`.
+  When no transformers are added, we keep `origCont.resultType` so that structural coercions
+  (such as `Bool → Option Bool` inside a tuple literal) propagate into the body.
+  This mirrors the legacy elaborator, which only used the `DoResultPR`/`MProd` wrapping (and
+  thereby a fresh inner type for the body) when some form of lifting was necessary.
+  -/
+  hasTransformers : Bool
 
 -- abbrev M := List
 -- #reduce (types := true) M (Except Nat (Option (Option Bool) × String))
@@ -238,6 +250,8 @@ def ControlLifter.ofCont (info : ControlInfo) (dec : DoElemCont) : DoElabM Contr
     -- regular exit.
     pureDeadCode := if info.numRegularExits > 0 then .alive else .deadSemantically,
     liftedDoBlockResultType := (← controlStack.stM dec.resultType),
+    hasTransformers :=
+      needEarlyReturn.isSome || needState.isSome || needBreak || needContinue,
   }
 
 /--
@@ -265,15 +279,16 @@ def ControlLifter.lift (l : ControlLifter) (elabElem : DoElemCont → DoElabM Ex
     | some returnBase => { oldReturnCont with k := returnBase.mkReturn }
     | _ => oldReturnCont
   let contInfo := ContInfo.toContInfoRef { breakCont, continueCont, returnCont }
-  -- Use a fresh result type for the pure continuation, mirroring the legacy elaborator's
-  -- `DoResultPR` pattern. This allows monad resolution to succeed independently of the
-  -- expected result type. For example, `evalConstCheck Nat ``Nat name : ?m Nat` in a
-  -- `CoreM (Option Nat)` context: with `dec.resultType = Option Nat`, Lean cannot decompose
-  -- `?m Nat =?= CoreM (Option Nat)` (since `Nat ≠ Option Nat`), leaving `?m` stuck.
-  -- With a fresh `?α`, Lean decomposes `?m Nat =?= CoreM ?α` successfully.
-  -- The coercion from `?α` to the original result type is inserted by `mkPure`.
+  -- When the body is elaborated under an actual transformer stack (and thus its result is
+  -- subsequently re-wrapped by the lifter), we give the pure continuation a fresh result type.
+  -- This lets monad-polymorphic terms like `evalConstCheck Nat ``Nat name : ?m Nat` resolve
+  -- their implicit monad cleanly (`?m Nat =?= m ?α` instead of `?m Nat =?= m (Option Nat)`).
+  -- Without transformers, we keep `l.origCont.resultType` so that the outer expected type
+  -- propagates structurally into the body (e.g. so that `pure (a, false)` with expected
+  -- `m (Option Bool × Bool)` can coerce `a : Bool` to `Option Bool` inside the tuple).
+  let resultType ← if l.hasTransformers then mkFreshResultType `α else pure l.origCont.resultType
   let pureCont := { l.origCont with
-    resultType := (← mkFreshResultType `α),
+    resultType,
     k := l.pureBase.mkPure l.origCont.resultName l.origCont.resultType,
     kind := .duplicable }
   withReader (fun ctx => { ctx with contInfo, doBlockResultType := l.liftedDoBlockResultType }) do
