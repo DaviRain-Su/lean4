@@ -9,6 +9,9 @@ module
 prelude
 public import Lean.Data.Json.Basic
 public import Std.Internal.Parsec
+import Init.Data.String.FindPos
+import Init.Data.UInt.Lemmas
+import Init.Omega
 
 public section
 
@@ -16,6 +19,50 @@ open Std.Internal.Parsec
 open Std.Internal.Parsec.String
 
 namespace Lean.Json.Parser
+
+set_option maxRecDepth 1024 in
+/--
+For each UTF-8 byte, whether byte-level scanning of a JSON string literal must stop
+there: control characters (`0x00`-`0x1F`) are invalid inside JSON strings, `"` (`0x22`)
+terminates the string, and `\` (`0x5C`) introduces an escape sequence. Every flagged
+byte is ASCII (`< 0x80`) and therefore never appears inside a multi-byte UTF-8 sequence,
+so a stop always lands at a valid UTF-8 character boundary. UTF-8 continuation and
+leading bytes (`0x80`-`0xFF`) are deliberately marked `0`; marking them would cause the
+scan to stop mid-character, and the subsequent `peek!` would read a non-special char
+and produce a spurious failure.
+-/
+private def strCharTable : { xs : ByteArray // xs.size = 256 } :=
+  ⟨ByteArray.mk #[
+    1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
+    0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+  ], by rfl⟩
+
+set_option maxRecDepth 10240 in
+/--
+Scans `s` starting at byte offset `i`, returning the byte offset of the first byte whose
+entry in `strCharTable` is non-zero. If no such byte is found, `s.utf8ByteSize` is
+returned. Because all flagged bytes are ASCII (< `0x80`), the returned offset is always
+at a valid UTF-8 character boundary.
+-/
+private def scanStr (s : String) (i : Nat) (hi : i ≤ s.utf8ByteSize) :
+    { j : Nat // j ≤ s.utf8ByteSize } :=
+  if h : i < s.utf8ByteSize then
+    let byte := s.getUTF8Byte ⟨i⟩ h
+    have h1 : byte.toNat < 256 := UInt8.toNat_lt_size byte
+    have h2 : strCharTable.val.size = 256 := strCharTable.property
+    if strCharTable.val.get byte.toNat (Nat.lt_of_lt_of_eq h1 h2.symm) == 0 then
+      scanStr s (i + 1) h
+    else
+      ⟨i, Nat.le_of_lt h⟩
+  else
+    ⟨i, hi⟩
+termination_by s.utf8ByteSize - i
 
 def hexChar : Parser UInt16 := do
   let c ← any
@@ -72,7 +119,27 @@ def escapedChar : Parser Char := do
       return ⟨val.toUInt32, Or.inr ⟨Nat.not_lt.mp h', Nat.lt_trans val.toFin.isLt (by decide)⟩⟩
   | _ => fail "illegal \\u escape"
 
+/--
+Fast-path scan that consumes every byte up to (but not including) the next byte flagged
+in `strCharTable`, appending the consumed bytes to `acc` in bulk. This always succeeds;
+the next character observed by the caller is guaranteed to be `"`, `\`, a control
+character, or the end of input.
+-/
+@[inline]
+private def scanStrFast (acc : String) : Parser String := fun it =>
+  let s := it.1
+  let startPos := it.2
+  let ⟨stopOffset, hStop⟩ := scanStr s startPos.offset.byteIdx startPos.isValid.le_utf8ByteSize
+  have hStop' : (⟨stopOffset⟩ : String.Pos.Raw) ≤ s.rawEndPos := by
+    simpa [String.Pos.Raw.le_iff, String.byteIdx_rawEndPos] using hStop
+  let stopPos := s.posGE ⟨stopOffset⟩ hStop'
+  let acc := acc ++ s.extract startPos stopPos
+  .success ⟨s, stopPos⟩ acc
+
 partial def strCore (acc : String) : Parser String := do
+  -- If we don't have any characters that need to be escaped we can append the whole
+  -- remaining plain region to `acc` in one shot.
+  let acc ← scanStrFast acc
   let c ← peek!
   if c == '"' then
     skip
@@ -81,11 +148,6 @@ partial def strCore (acc : String) : Parser String := do
     let c ← any
     if c == '\\' then
       strCore (acc.push (← escapedChar))
-    -- as to whether c.val > 0xffff should be split up and encoded with multiple \u,
-    -- the JSON standard is not definite: both directly printing the character
-    -- and encoding it with multiple \u is allowed. we choose the former.
-    else if 0x0020 <= c.val && c.val <= 0x10ffff then
-      strCore (acc.push c)
     else
       fail "unexpected character in string"
 

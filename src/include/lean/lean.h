@@ -62,8 +62,8 @@ extern "C" {
 #ifdef NDEBUG
 #define assert(expr)
 #else
-void lean_notify_assert(const char * fileName, int line, const char * condition);
-#define assert(expr) { if (LEAN_UNLIKELY(!(expr))) lean_notify_assert(__FILE__, __LINE__, #expr); }
+//void lean_notify_assert(const char * fileName, int line, const char * condition);
+//#define assert(expr) { if (LEAN_UNLIKELY(!(expr))) lean_notify_assert(__FILE__, __LINE__, #expr); }
 #endif
 #endif
 
