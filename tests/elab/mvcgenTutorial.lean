@@ -211,8 +211,8 @@ instance : Monad Result where
 instance : LawfulMonad Result :=
   LawfulMonad.mk' _
     (by dsimp only [Functor.map]; grind)
-    (by dsimp only [bind]; grind)
-    (by dsimp only [bind]; grind)
+    (by dsimp only [bind, pure]; grind)
+    (by dsimp only [bind, pure]; grind)
 
 instance Result.instWP : WP Result (.except Error .pure) where
   wp

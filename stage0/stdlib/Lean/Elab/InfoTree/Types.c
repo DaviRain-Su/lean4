@@ -363,7 +363,7 @@ v___x_60_ = 0;
 v___x_61_ = lean_obj_once(&l_Lean_Elab_instInhabitedTermInfo_default___closed__2, &l_Lean_Elab_instInhabitedTermInfo_default___closed__2_once, _init_l_Lean_Elab_instInhabitedTermInfo_default___closed__2);
 v___x_62_ = lean_box(0);
 v___x_63_ = l_Lean_instInhabitedLocalContext_default;
-v___x_64_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default___closed__0));
+v___x_64_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default));
 v___x_65_ = lean_alloc_ctor(0, 4, 2);
 lean_ctor_set(v___x_65_, 0, v___x_64_);
 lean_ctor_set(v___x_65_, 1, v___x_63_);
@@ -396,7 +396,7 @@ _start:
 lean_object* v___x_68_; lean_object* v___x_69_; lean_object* v___x_70_; lean_object* v___x_71_; 
 v___x_68_ = lean_box(0);
 v___x_69_ = l_Lean_instInhabitedLocalContext_default;
-v___x_70_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default___closed__0));
+v___x_70_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default));
 v___x_71_ = lean_alloc_ctor(0, 3, 0);
 lean_ctor_set(v___x_71_, 0, v___x_70_);
 lean_ctor_set(v___x_71_, 1, v___x_69_);
@@ -830,7 +830,7 @@ _start:
 lean_object* v___x_218_; lean_object* v___x_219_; lean_object* v___x_220_; lean_object* v___x_221_; 
 v___x_218_ = lean_box(0);
 v___x_219_ = lean_obj_once(&l_Lean_Elab_instInhabitedTacticInfo_default___closed__2, &l_Lean_Elab_instInhabitedTacticInfo_default___closed__2_once, _init_l_Lean_Elab_instInhabitedTacticInfo_default___closed__2);
-v___x_220_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default___closed__0));
+v___x_220_ = ((lean_object*)(l_Lean_Elab_instInhabitedElabInfo_default));
 v___x_221_ = lean_alloc_ctor(0, 5, 0);
 lean_ctor_set(v___x_221_, 0, v___x_220_);
 lean_ctor_set(v___x_221_, 1, v___x_219_);

@@ -1694,7 +1694,7 @@ v_target_378_ = lean_ctor_get(v_info_317_, 0);
 v_kind_379_ = lean_ctor_get(v_info_317_, 1);
 v_data_380_ = lean_ctor_get(v_info_317_, 2);
 v_facet_381_ = lean_ctor_get(v_info_317_, 3);
-v_facetConfigs_382_ = lean_ctor_get(v_toContext_377_, 7);
+v_facetConfigs_382_ = lean_ctor_get(v_toContext_377_, 6);
 v___x_383_ = l_Lake_FacetConfigMap_get_x3f(v_facet_381_, v_facetConfigs_382_);
 if (lean_obj_tag(v___x_383_) == 1)
 {

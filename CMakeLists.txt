@@ -86,7 +86,7 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
       set(LEANTAR_TARGET x86_64-pc-windows-msvc)
     else()
       set(LEANTAR_ARCHIVE_SUFFIX .tar.gz)
-      if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+      if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
         set(LEANTAR_TARGET_ARCH aarch64)
       else()
         set(LEANTAR_TARGET_ARCH x86_64)
@@ -129,6 +129,7 @@ if(USE_MIMALLOC)
     # cadical, it might be worth reorganizing the directory structure.
     SOURCE_DIR
     "${CMAKE_BINARY_DIR}/mimalloc/src/mimalloc"
+    EXCLUDE_FROM_ALL
   )
   FetchContent_MakeAvailable(mimalloc)
 endif()
