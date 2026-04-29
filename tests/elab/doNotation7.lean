@@ -1,3 +1,5 @@
+set_option backward.do.legacy false
+
 -- #3126
 /-- error: Unknown identifier `IAmIgnored` -/
 #guard_msgs in

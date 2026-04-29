@@ -1,6 +1,8 @@
 import Lean
 import Std
 
+set_option backward.do.legacy false
+
 open Lean Meta
 
 structure Foo (n : Nat) where
