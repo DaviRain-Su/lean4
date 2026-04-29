@@ -38,6 +38,17 @@ example (arr : Array Nat) : Unit := Id.run do
         continue
       abc := 0
 
+-- #9037
+def test9037 (x : Option Nat) : Nat := Id.run do
+  let mut i ←
+    match x with
+    | .some v =>
+      pure v
+    | none =>
+      pure 0
+  i := i + 1
+  return i
+
 -- #8119
 /--
 error: Type mismatch
