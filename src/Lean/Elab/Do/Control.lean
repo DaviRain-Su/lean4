@@ -178,15 +178,13 @@ def ControlStack.mkReturn (base : ControlStack) (r : Expr) : DoElabM Expr := do
   synthUsingDefEq "early return result type" mγ mγ'
   base.runInBase <| mkApp5 (mkConst ``EarlyReturnT.return [mi.u, mi.v]) ρ mi.m δ instMonad r
 
-def ControlStack.mkPure (base : ControlStack) (resultName : Name)
-    (expectedResultType : Expr) : DoElabM Expr := do
+def ControlStack.mkPure (base : ControlStack) (resultName : Name) : DoElabM Expr := do
   let mi := { (← read).monadInfo with m := (← base.m) }
   let instMonad ← mkInstMonad mi
   let instPure := instMonad |> mkApp2 (mkConst ``Monad.toApplicative [mi.u, mi.v]) mi.m
                             |> mkApp2 (mkConst ``Applicative.toPure [mi.u, mi.v]) mi.m
   let r ← getFVarFromUserName resultName
-  let r ← Term.ensureHasType expectedResultType r
-  base.runInBase <| mkApp4 (mkConst ``Pure.pure [mi.u, mi.v]) mi.m instPure expectedResultType r
+  base.runInBase <| mkApp4 (mkConst ``Pure.pure [mi.u, mi.v]) mi.m instPure (← inferType r) r
 
 structure ControlLifter where
   origCont : DoElemCont
@@ -196,18 +194,6 @@ structure ControlLifter where
   pureBase : ControlStack
   pureDeadCode : CodeLiveness
   liftedDoBlockResultType : Expr
-  /--
-  Whether `pureBase` adds any monad transformer on top of the base monad. When it does, the body
-  is elaborated with a fresh result type `?α` (rather than `origCont.resultType`), allowing
-  monad-polymorphic terms like `evalConstCheck Nat ``Nat name : ?m Nat` in a
-  `CoreM (Option Nat)` context to resolve their implicit monad cleanly. The coercion from `?α`
-  to the outer result type is then inserted by `mkPure` via `ensureHasType`.
-  When no transformers are added, we keep `origCont.resultType` so that structural coercions
-  (such as `Bool → Option Bool` inside a tuple literal) propagate into the body.
-  This mirrors the legacy elaborator, which only used the `DoResultPR`/`MProd` wrapping (and
-  thereby a fresh inner type for the body) when some form of lifting was necessary.
-  -/
-  hasTransformers : Bool
 
 -- abbrev M := List
 -- #reduce (types := true) M (Except Nat (Option (Option Bool) × String))
@@ -249,8 +235,6 @@ def ControlLifter.ofCont (info : ControlInfo) (dec : DoElemCont) : DoElabM Contr
     -- The success continuation `origCont` is dead code iff the `ControlInfo` says so semantically.
     pureDeadCode := if info.noFallthrough then .deadSemantically else .alive,
     liftedDoBlockResultType := (← controlStack.stM dec.resultType),
-    hasTransformers :=
-      needEarlyReturn.isSome || needState.isSome || needBreak || needContinue,
   }
 
 /--
@@ -278,18 +262,7 @@ def ControlLifter.lift (l : ControlLifter) (elabElem : DoElemCont → DoElabM Ex
     | some returnBase => { oldReturnCont with k := returnBase.mkReturn }
     | _ => oldReturnCont
   let contInfo := ContInfo.toContInfoRef { breakCont, continueCont, returnCont }
-  -- When the body is elaborated under an actual transformer stack (and thus its result is
-  -- subsequently re-wrapped by the lifter), we give the pure continuation a fresh result type.
-  -- This lets monad-polymorphic terms like `evalConstCheck Nat ``Nat name : ?m Nat` resolve
-  -- their implicit monad cleanly (`?m Nat =?= m ?α` instead of `?m Nat =?= m (Option Nat)`).
-  -- Without transformers, we keep `l.origCont.resultType` so that the outer expected type
-  -- propagates structurally into the body (e.g. so that `pure (a, false)` with expected
-  -- `m (Option Bool × Bool)` can coerce `a : Bool` to `Option Bool` inside the tuple).
-  let resultType ← if l.hasTransformers then mkFreshResultType `α else pure l.origCont.resultType
-  let pureCont := { l.origCont with
-    resultType,
-    k := l.pureBase.mkPure l.origCont.resultName l.origCont.resultType,
-    kind := .duplicable }
+  let pureCont := { l.origCont with k := l.pureBase.mkPure l.origCont.resultName, kind := .duplicable }
   withReader (fun ctx => { ctx with contInfo, doBlockResultType := l.liftedDoBlockResultType }) do
     elabElem pureCont
 

@@ -702,6 +702,8 @@ private partial def extractMonadInfo (expectedType? : Option Expr) : Term.TermEl
     unless ← isType resultType do return none
     let u ← getDecLevel resultType
     let v ← getDecLevel type
+    let u := u.normalize
+    let v := v.normalize
     return some ({ m, u, v }, resultType)
   let rec extract? (type : Expr) : Term.TermElabM (Option (MonadInfo × Expr)) := do
     match (← extractStep? type) with
