@@ -378,17 +378,6 @@ if(NOT "${CMAKE_SYSTEM_NAME}" MATCHES "Emscripten")
   endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  string(APPEND LEANSHARED_LINKER_FLAGS " -Wl,-rpath,\\$$ORIGIN")
-endif()
-
-if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-  string(APPEND LEANSHARED_LINKER_FLAGS " -lcrypt32 -lgdi32")
-  if(NOT LEAN_STANDALONE)
-    string(APPEND LEAN_EXTRA_LINKER_FLAGS " -lcrypt32 -lgdi32")
-  endif()
-endif()
-
 # Windows SDK (for ICU)
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
   # Pass 'tools' to skip MSVC version check (as MSVC/Visual Studio is not necessarily installed)

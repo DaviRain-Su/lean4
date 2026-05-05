@@ -42,7 +42,6 @@ gcp llvm/lib/libc++.dylib stage1/lib/libc
 # and apparently since Sonoma does not do so implicitly either
 install_name_tool -id /usr/lib/libc++.dylib stage1/lib/libc/libc++.dylib
 echo -n " -DLEAN_STANDALONE=ON"
-echo -n " -DOPENSSL_INCLUDE_DIR=$OPENSSL/include -DOPENSSL_SSL_LIBRARY=$OPENSSL/lib/libssl.a -DOPENSSL_CRYPTO_LIBRARY=$OPENSSL/lib/libcrypto.a"
 # do not change C++ compiler; libc++ etc. being system libraries means there's no danger of conflicts,
 # and the custom clang++ outputs a myriad of warnings when consuming the SDK
 echo -n " -DLEAN_EXTRA_CXX_FLAGS='${EXTRA_FLAGS:-}'"
