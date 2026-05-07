@@ -16,7 +16,8 @@ public import Lean.Meta.Sym.Simp.EvalGround
 public import Lean.Meta.Sym.Simp.Forall
 public import Lean.Meta.Sym.Simp.Rewrite
 public import Lean.Meta.Sym.Simp.Simproc
-import Lean.Elab.Tactic.Grind.Main
+public import Lean.Elab.Tactic.Grind.Main
+public import Lean.Elab.Tactic.Grind.Basic
 
 open Lean Parser Meta Elab Tactic Sym
 open Lean.Elab.Tactic.Do Lean.Elab.Tactic.Do.SpecAttr
@@ -26,7 +27,7 @@ namespace Lean.Elab.Tactic.Do.Internal
 
 /-!
 `mvcgen'` tactic frontend: parse the user-facing argument syntax into a
-`VCGen.Context`, run `VCGen.main`, and replace the main goal with the
+`VCGen.Context`, run `VCGen.run`, and replace the main goal with the
 resulting invariants and VCs.
 -/
 
@@ -269,8 +270,8 @@ private def parseInvariantMap (stx : Syntax) :
 
 /--
 Run after VC generation: iterate the (unfiltered) `invariants` array returned by
-`Driver.main`, look up each entry in the pre-parsed `alts` map by its 1-based
-position (which equals the `inv<n>` tag the entry carries — `Driver.main` assigns
+`VCGen.run`, look up each entry in the pre-parsed `alts` map by its 1-based
+position (which equals the `inv<n>` tag the entry carries — `VCGen.run` assigns
 tags consecutively), and elaborate the matching alt. Invariants that were already
 elaborated inline by `Driver.emitVC` (tracked in `inlineHandled`) are skipped, so
 we don't warn about alts that were already consumed there. -/
@@ -292,8 +293,17 @@ private def elabRemainingInvariants (alts : Std.HashMap Nat Syntax)
     unless handled.contains n do
       logWarningAt alt s!"Invariant alternative `inv{n}` does not match any invariant goal."
 
-@[builtin_tactic Lean.Parser.Tactic.mvcgen']
-public def elabMVCGen' : Tactic := fun stx => withMainContext do
+/-- Parsed `mvcgen'` arguments shared by the two entry points. -/
+private structure ParsedArgs where
+  config : VCGen.Config
+  ctx : VCGen.Context
+  params : Grind.Params
+  invariantAlts? : Option (Std.HashMap Nat Syntax)
+
+/-- Parse `mvcgen'` arguments. Lives in `TacticM` because the elaboration
+helpers it calls do; `evalMVCGen'Grind` reaches it via a `Tactic.run`
+excursion. -/
+private def parseArgs (stx : Syntax) : TacticM ParsedArgs := withMainContext do
   if mvcgen.warning.get (← getOptions) then
     logWarningAt stx "The `mvcgen'` tactic is an experimental drop-in replacement for `mvcgen` \
       that will eventually replace it. Avoid using it in production projects."
@@ -316,15 +326,56 @@ public def elabMVCGen' : Tactic := fun stx => withMainContext do
     errorOnMissingSpec := config.errorOnMissingSpec,
     debug := config.debug,
     invariantAlts := invariantAlts?.getD {} }
-  let result ← Grind.GrindM.run (VCGen.main goal ctx config.stepLimit) params
-  -- For `invariants?` (suggest), defer entirely to the upstream elaborator.
-  -- Otherwise, dispatch any still-unassigned invariants via the pre-parsed map.
-  if let some alts := invariantAlts? then
+  return { config, ctx, params, invariantAlts? }
+
+/-- `mvcgen'` step inside `sym => …` blocks; the `invariants?` suggester
+form is unsupported here. -/
+@[builtin_grind_tactic Lean.Parser.Tactic.Grind.mvcgen']
+def evalMVCGen'Grind : Lean.Elab.Tactic.Grind.GrindTactic := fun stx => do
+  let goal ← Lean.Elab.Tactic.Grind.getMainGoal
+  -- `TacticM` excursion to parse args; capture via `IO.Ref` since `Tactic.run`
+  -- only propagates leftover `MVarId`s.
+  let argsRef : IO.Ref (Option ParsedArgs) ← IO.mkRef none
+  let _ ← Lean.Elab.Tactic.run goal.mvarId do
+    argsRef.set (some (← parseArgs stx))
+  let some args ← argsRef.get
+    | throwError "internal error: `mvcgen'` parsing produced no args"
+  let result ← Lean.Elab.Tactic.Grind.liftGrindM <|
+    VCGen.run goal args.ctx args.config.stepLimit
+  match args.invariantAlts? with
+  | some alts =>
+    let _ ← Lean.Elab.Tactic.run goal.mvarId <|
+      elabRemainingInvariants alts result.invariants result.inlineHandledInvariants
+  | none =>
+    if !stx[3].isNone then
+      throwError "`mvcgen' invariants?` (suggest mode) is not supported inside `sym => …` blocks"
+  let invariants ← result.invariants.filterM (not <$> ·.isAssigned)
+  let newGoals ← Lean.Elab.Tactic.Grind.liftGrindM do
+    -- VCs inherit the parent's E-graph; `processHypotheses` internalizes
+    -- fvars introduced during VC generation. Invariants are discharged via
+    -- term values, so a fresh `mkGoalCore` is enough.
+    let invGoals ← invariants.toList.mapM Grind.mkGoalCore
+    let vcGoals ← result.vcs.toList.mapM Grind.processHypotheses
+    return invGoals ++ vcGoals
+  Lean.Elab.Tactic.Grind.replaceMainGoal newGoals
+  if result.preTacFailed then
+    throwError "pre-tactic failed on at least one VC; see errors above"
+
+/-- Tactic-level `mvcgen'`. Cannot wrap `evalMVCGen'Grind` because routing
+through `runAtGoal`/`withProtectedMCtx` wraps the proof in an aux theorem,
+which rejects unsolved leftover VCs. -/
+@[builtin_tactic Lean.Parser.Tactic.mvcgen']
+public def elabMVCGen' : Tactic := fun stx => withMainContext do
+  let args ← parseArgs stx
+  let mvarId ← getMainGoal
+  let result ← Grind.GrindM.run (do
+    VCGen.run (← Grind.mkGoalCore mvarId) args.ctx args.config.stepLimit) args.params
+  if let some alts := args.invariantAlts? then
     elabRemainingInvariants alts result.invariants result.inlineHandledInvariants
   else
-    elabInvariants stx[3] result.invariants (suggestInvariant result.vcs)
+    elabInvariants stx[3] result.invariants (suggestInvariant (result.vcs.map (·.mvarId)))
   let invariants ← result.invariants.filterM (not <$> ·.isAssigned)
-  replaceMainGoal (invariants ++ result.vcs).toList
+  replaceMainGoal (invariants.toList ++ result.vcs.toList.map (·.mvarId))
   if result.preTacFailed then
     throwError "pre-tactic failed on at least one VC; see errors above"
 

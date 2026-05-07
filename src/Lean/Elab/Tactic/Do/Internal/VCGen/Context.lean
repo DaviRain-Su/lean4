@@ -123,9 +123,10 @@ public structure VCGen.State where
   -/
   invariants : Array MVarId := #[]
   /--
-  The verification conditions that have been generated so far.
+  The verification conditions that have been generated so far. Each entry
+  shares the parent `Grind.Goal`'s state.
   -/
-  vcs : Array MVarId := #[]
+  vcs : Array Grind.Goal := #[]
   /--
   Persistent cache for the `Sym.Simp` simplifier used to pre-simplify hypotheses
   before grind internalization. Threading this cache across VCGen iterations avoids

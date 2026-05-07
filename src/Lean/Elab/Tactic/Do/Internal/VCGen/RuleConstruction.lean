@@ -133,11 +133,13 @@ public def mkBackwardRuleFromSpec (specThm : SpecTheoremNew) (m σs ps instWP : 
   let_expr f@Triple m' ps' instWP' α prog P Q := specTy
     | liftMetaM <| throwError "target not a Triple application {specTy}"
   -- Reject the spec and try the next if the monad doesn't match.
-  unless ← isDefEqGuarded m m' do -- TODO: Try isDefEqS?
+  -- `withDefault`: spec/goal instance projections (e.g. `WPMonad.toWP`)
+  -- need defaults to unfold; the ambient grind transparency is `reducible`.
+  unless ← Meta.withDefault <| isDefEqGuarded m m' do
     throwError "Post program defeq Monad mismatch: {m} ≠ {m'}"
-  unless ← isDefEqGuarded ps ps' do
+  unless ← Meta.withDefault <| isDefEqGuarded ps ps' do
     throwError "Post program defeq Postshape mismatch: {ps} ≠ {ps'}"
-  unless ← isDefEqGuarded instWP instWP' do
+  unless ← Meta.withDefault <| isDefEqGuarded instWP instWP' do
     throwError "Post program defeq WP instance mismatch: {instWP} ≠ {instWP'}"
 
   -- We must ensure that P and Q are pattern variables so that the spec matches for every potential

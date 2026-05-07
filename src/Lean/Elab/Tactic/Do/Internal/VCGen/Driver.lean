@@ -108,7 +108,7 @@ so they never reach this path.
 -/
 public def emitVC (goal : Grind.Goal) : VCGenM Unit := do
   let goal ← (← read).preTac.processHypotheses goal
-  let mut vcs := #[]
+  let mut vcs : Array Grind.Goal := #[]
   -- `trivial`: when false, skip `repeatAndRfl` (which collapses And-chains via rfl);
   -- emit the goal as-is.
   let mvarId ←
@@ -120,7 +120,7 @@ public def emitVC (goal : Grind.Goal) : VCGenM Unit := do
   let goal := { goal with mvarId := mvarId }
   for mvarId in (← (← read).preTac.run goal) do
     mvarId.setKind .syntheticOpaque
-    vcs := vcs.push mvarId
+    vcs := vcs.push { goal with mvarId }
   modify fun s => { s with vcs := s.vcs ++ vcs }
 
 public def work (goal : Grind.Goal) : VCGenM Unit := do
@@ -166,8 +166,8 @@ public structure Result where
   invariant number. Some entries may already be assigned (inline-elaborated by
   `Driver.emitVC`); the caller is responsible for filtering before discharging. -/
   invariants : Array MVarId
-  /-- Unassigned VCs. -/
-  vcs : Array MVarId
+  /-- Unassigned VCs. Each shares the parent `Grind.Goal`'s state. -/
+  vcs : Array Grind.Goal
   /-- Invariant numbers handled inline by `Driver.emitVC`. Used by `Frontend` to
   avoid spurious "alt does not match any invariant" warnings for inline-consumed
   alts. -/
@@ -182,16 +182,15 @@ Return the VCs and invariant goals.
 
 `stepLimit?`, when `some n`, seeds the fuel counter to `n`; when `none`, fuel is unlimited.
 -/
-public partial def main (goal : MVarId) (ctx : Context) (stepLimit? : Option Nat := none) :
+public partial def run (goal : Grind.Goal) (ctx : Context) (stepLimit? : Option Nat := none) :
     Grind.GrindM Result := do
-  let grindGoal ← Grind.mkGoalCore goal
   let initState : State := { fuel := match stepLimit? with | some n => .limited n | none => .unlimited }
-  let ((), state) ← StateRefT'.run (ReaderT.run (work grindGoal) ctx) initState
+  let ((), state) ← StateRefT'.run (ReaderT.run (work goal) ctx) initState
   _ ← state.invariants.mapIdxM fun idx mv => do
     mv.setTag (Name.mkSimple ("inv" ++ toString (idx + 1)))
-  _ ← state.vcs.mapIdxM fun idx mv => do
-    mv.setTag (Name.mkSimple ("vc" ++ toString (idx + 1)) ++ (← mv.getTag).eraseMacroScopes)
-  let vcs ← state.vcs.filterM (not <$> ·.isAssigned)
+  _ ← state.vcs.mapIdxM fun idx g => do
+    g.mvarId.setTag (Name.mkSimple ("vc" ++ toString (idx + 1)) ++ (← g.mvarId.getTag).eraseMacroScopes)
+  let vcs ← state.vcs.filterM (not <$> ·.mvarId.isAssigned)
   return {
     invariants := state.invariants,
     vcs,
