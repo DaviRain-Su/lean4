@@ -157,3 +157,23 @@ theorem imp_curry {P Q : SVal.StateTuple σs → Prop} : (SVal.curry (fun t => �
   induction σs
   case nil => rfl
   case cons σ σs ih => intro s; simp only [imp_cons, SVal.curry_cons]; exact ih
+
+/-! # `evalsTo` — relate an `SVal` to a pure value -/
+
+/-- Relates a stateful value to a pure value, lifting equality through the state layers. -/
+def evalsTo {α : Type u} {σs : List (Type u)} (f : SVal σs α) (a : α) : SPred σs :=
+  match σs with
+  | [] => ⌜a = f⌝
+  | _ :: _ => fun s => evalsTo (f s) a
+
+@[simp, grind =] theorem evalsTo_nil {f : SVal [] α} {a : α} :
+    evalsTo f a = ⌜a = f⌝ := rfl
+
+@[simp, grind =] theorem evalsTo_cons {f : σ → SVal σs α} {a : α} {s : σ} :
+    evalsTo (σs := σ::σs) f a s = evalsTo (f s) a := rfl
+
+theorem evalsTo_total {P : SPred σs} (f : SVal σs α) :
+    P ⊢ₛ ∃ m, evalsTo f m := by
+  induction σs with
+  | nil => intro _; exact ⟨f, rfl⟩
+  | cons _ _ ih => intro s; apply ih
