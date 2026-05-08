@@ -101,8 +101,10 @@ theorem Spec.whileM
     rw [whileM_eq_of_monadTail (f := f) init]
     mvcgen [step, ih] with
     | vc1.ind.success.h_1 =>
-      mrename_i h
-      mcases h with ⟨ma', ⟨hmeasure, ⌜hma'⌝, h⟩⟩
+      apply SPred.exists_elim
+      intro ma'
+      mintro h
+      mcases h with ⟨hmeasure, ⌜hma'⌝, h⟩
       mspec Triple.of_entails_wp (ih ma' hma')
 
 /--
@@ -142,6 +144,84 @@ theorem Spec.forIn_loop
   apply Triple.bind
   · exact step b mb
   · rintro (b' | b') <;> apply Triple.pure <;> simp
+
+end
+
+section
+
+variable {α β : Type u} {m : Type u → Type v} {ps : PostShape.{u}}
+variable [Monad m] [LawfulMonad m] [MonadAttach m] [LawfulMonadAttach m]
+variable [WPMonad m ps] [WPAdequate m ps]
+
+/--
+Specification for `whileM` for monads where no global fixpoint of `whileM.body f` exists, but
+execution is structurally well-founded. The user supplies a `Nat`-valued termination measure
+that strictly decreases on `.inl` results, plus a `Prop`-valued invariant. Not marked
+`@[spec]` — `Spec.whileM` (which exploits `MonadTail`) is preferred when it applies.
+-/
+theorem Spec.whileM_of_acc
+    {init : α} {f : α → m (α ⊕ β)} [Nonempty β]
+    (μ : α → Nat)
+    (inv : α ⊕ β → Prop)
+    {exc : ExceptConds ps}
+    (step : ∀ a,
+      Triple (f a) (⌜inv (.inl a)⌝)
+        (fun r => match r with
+          | .inl a' => spred(⌜inv (.inl a') ∧ μ a' < μ a⌝)
+          | .inr b => ⌜inv (.inr b)⌝, exc)) :
+    Triple (_root_.whileM f init) (⌜inv (.inl init)⌝)
+        (fun b => ⌜inv (.inr b)⌝, exc) := by
+  refine Triple.iff.mpr <| SPred.pure_elim' fun hInv => ?_
+  suffices key : ∀ a, inv (.inl a) →
+      ⊢ₛ wp⟦(_root_.whileM f a : m β)⟧ (fun b => ⌜inv (.inr b)⌝, exc) from
+    key init hInv
+  intro a hInv'
+  have (eq := hn) n := μ a
+  induction n using Nat.strongRecOn generalizing a with
+  | _ n ih =>
+  have hacc : Acc (whileM.IsPlausibleStep f) a := by
+    refine whileM.IsPlausibleStep.acc_of_wp μ a hInv' fun y =>
+      Triple.iff.mpr <| (Triple.iff.mp (step y)).trans <|
+        (wp _).mono _ _ ⟨fun r => ?_, ExceptConds.entails.refl _⟩
+    cases r with
+    | inl _ => exact SPred.pure_mono fun ⟨hI, hM⟩ =>
+        ⟨hI, fun _ h => by injection h with h; exact h ▸ hM⟩
+    | inr _ => exact SPred.pure_mono fun hI =>
+        ⟨hI, fun _ h => by injection h⟩
+  rw [whileM_eq_of_acc _ hacc]
+  unfold whileM.body
+  change Triple _ ⌜True⌝ _
+  apply Triple.bind _ _
+    (Triple.iff.mpr (Triple.entails_wp_of_pre (step a) (SPred.pure_intro hInv')))
+  rintro (a' | b)
+  · exact Triple.iff.mpr <| SPred.pure_elim' fun ⟨hI, hM⟩ => ih (μ a') (hn ▸ hM) a' hI rfl
+  · exact Triple.pure b (by simp)
+
+/--
+Specification for `forIn` over a `Lean.Loop` for monads without `MonadTail`, mirroring
+`Spec.whileM_of_acc`. Not marked `@[spec]`.
+-/
+theorem Spec.forIn_loop_of_acc
+    {l : Lean.Loop} {init : β} {f : Unit → β → m (ForInStep β)}
+    (μ : β → Nat)
+    (inv : β ⊕ β → Prop)
+    {exc : ExceptConds ps}
+    (step : ∀ b,
+      Triple
+        (f () b)
+        (⌜inv (.inl b)⌝)
+        (fun r => match r with
+          | .yield b' => spred(⌜inv (.inl b') ∧ μ b' < μ b⌝)
+          | .done b' => ⌜inv (.inr b')⌝, exc)) :
+    Triple (forIn l init f) (⌜inv (.inl init)⌝) (fun b => ⌜inv (.inr b)⌝, exc) := by
+  change Triple (_root_.Lean.Loop.forIn l init f) _ _
+  simp only [_root_.Lean.Loop.forIn]
+  have : Nonempty β := ⟨init⟩
+  apply Spec.whileM_of_acc μ inv
+  intro a
+  apply Triple.bind
+  · apply step a
+  · rintro (b | b) <;> apply Triple.pure <;> simp
 
 end
 

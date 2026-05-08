@@ -19,3 +19,4 @@ public import Init.Control.ExceptCps
 public import Init.Control.MonadAttach
 public import Init.Control.EState
 public import Init.Control.Do
+public import Init.Control.Ensures
