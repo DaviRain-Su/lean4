@@ -10,7 +10,6 @@ public import Std.Do.Triple.Basic
 public import Init.Data.Range.Polymorphic.Iterators
 import Init.Data.Range.Polymorphic
 public import Init.Data.Slice.Array
-public import Std.Do.WP.Adequate
 public import Init.While
 
 -- This public import is a workaround for #10652.
@@ -2191,75 +2190,4 @@ theorem Spec.forIn_stringSlice
       next => apply Triple.pure; simp
       next b => simp [ih _ _ hsp.next]
   | endPos => simpa using Triple.pure _ (by simp)
-
-section ErasesTo
-
-variable {α : Type u₁} {m : Type u₁ → Type v} {ps : PostShape.{u₁}}
-variable [Monad m] [WPMonad m ps]
-
-/--
-Specification for any `Internal.ErasesTo`-witnessed refinement `y` of `x`: the precondition is the
-weakest precondition of `x` with a postcondition that universally quantifies over the subtype proof.
--/
-theorem Spec.of_erasesTo
-    {α : Type u₁} {P : α → Prop} {x : m α} {y : m (Subtype P)}
-    (h : Internal.ErasesTo y x) {Q : PostCond (Subtype P) ps} :
-    ⦃ wp⟦x⟧ ⟨fun a => spred(∀ (hP : P a), Q.1 ⟨a, hP⟩), Q.2⟩ ⦄ y ⦃Q⦄ := by
-  apply Triple.iff.mpr
-  conv in wp x => rw [← h.map_eq]
-  simp only [WPMonad.wp_map]
-  rw [PredTrans.apply_Functor_map]
-  apply (wp y).mono
-  refine ⟨fun ⟨a, hP⟩ => SPred.forall_elim hP, ExceptConds.entails.refl _⟩
-
-/--
-Specification for an `Internal.IsAttach`-witnessed attach: the precondition is the weakest
-precondition of `x` with a postcondition that universally quantifies over the `MayReturn` proof.
--/
-theorem Spec.isAttach
-    {x : m α} {Q : PostCond {a : α // Internal.MayReturn x a} ps}
-    (attach : ⦃α : Type u₁⦄ → (x : m α) → m {a : α // Internal.MayReturn x a})
-    (hAttach : Internal.IsAttach attach) :
-    ⦃ wp⟦x⟧ ⟨fun a => spred(∀ (h : Internal.MayReturn x a), Q.1 ⟨a, h⟩), Q.2⟩ ⦄ attach x ⦃Q⦄ :=
-  Spec.of_erasesTo (hAttach.erases x)
-
-variable [MonadAttach m] [WeaklyLawfulMonadAttach m]
-
-/--
-Specification for `MonadAttach.attach`: the precondition is the weakest precondition of `x` with
-a postcondition that universally quantifies over the `CanReturn` proof.
--/
-@[spec]
-theorem Spec.attach
-    {x : m α} {Q : PostCond (Subtype (MonadAttach.CanReturn x)) ps} :
-    ⦃ wp⟦x⟧ ⟨fun a => spred(∀ (h : MonadAttach.CanReturn x a), Q.1 ⟨a, h⟩), Q.2⟩ ⦄ MonadAttach.attach x ⦃Q⦄ :=
-  Spec.of_erasesTo Internal.ErasesTo.of_attach
-
-end ErasesTo
-
-section AccOfWp
-
-variable {α β : Type u} {m : Type u → Type v} {ps : PostShape.{u}}
-variable [Monad m] [WP m ps] [WPAdequate m ps]
-
-/--
-A `wp`-provable measure that strictly decreases on `.inl` witnesses an `Acc` chain at `init`,
-unblocking `whileM_eq_of_acc`.
--/
-theorem _root_.whileM.IsPlausibleStep.acc_of_wp
-    {f : α → m (α ⊕ β)} {P : α ⊕ β → Prop} (measure : α → Nat) (init : α) (hP : P (.inl init))
-    (h : ∀ a, ⦃⌜P (.inl a)⌝⦄ f a ⦃(fun r => ⌜P r ∧ ∀ a', r = .inl a' → measure a' < measure a⌝, exc)⦄) :
-    Acc (whileM.IsPlausibleStep f) init := by
-  have (eq := hn) n := measure init
-  induction n using Nat.strongRecOn generalizing init with
-  | _ n ih =>
-  refine Acc.intro _ fun a' hStep => ?_
-  have hwp : ⊢ₛ wp⟦f init⟧
-      (⇓? r => ⌜P r ∧ ∀ a', r = .inl a' → measure a' < measure init⌝) := by
-    apply SPred.entails.trans (by simpa [hP] using h init)
-    apply (wp _).mono; simp [PostCond.entails]
-  have hpost := hStep.imp (WPAdequate.ensures_of_wp hwp)
-  exact ih _ (hn ▸ hpost.2 a' rfl) _ hpost.1 rfl
-
-end AccOfWp
 
