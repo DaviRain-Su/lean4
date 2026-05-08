@@ -29,6 +29,11 @@ variable {α : Type u} {m : Type u → Type v} [Monad m]
 
 /-- Pinning predicate for `whileM.impl`: trivial unless `whileM.body f` has a fixed point,
 in which case `r` is pinned to that fixed point applied to `a`. -/
+-- For monads like `List`, `Multiset`, `PMF`, no fixed point of `whileM.body f` need exist:
+-- e.g. for `List`, `f a = [.inr 0, .inl a]` forces `g a = [0] ++ g a`, unsatisfiable in
+-- finite lists because `++` isn't idempotent. There this `Pred` collapses to `True`;
+-- a future per-point `Acc` / `MonadAttach` branch could pin `r` for the cases where
+-- execution from `a` is structurally well-founded.
 private noncomputable abbrev whileM.Pred (f : α → m (α ⊕ β)) (a : α) (r : m β) : Prop :=
   open scoped Classical in
   if h : ∃ g, whileM.body f g = g then

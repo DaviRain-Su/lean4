@@ -29,6 +29,17 @@ this file.
 
 variable {α : Type u} {m : Type u → Type v} [Monad m]
 
+/-- One-step unfolding of `whileM` whenever `whileM.body f` is provably monotone
+in its `recur` argument under some CCPO on `m β`. The order-theoretic least fixed
+point `Lean.Order.fix` then discharges the existential expected by `whileM_eq`.
+This is strictly weaker than asking for a `MonadTail` instance: it only needs a
+per-`f` monotonicity proof, which suffices e.g. for `Cont r α` over a CCPO `r`
+(where `bind` isn't monotone for arbitrary `m` but is for the specific `f` in use). -/
+public theorem whileM_eq_of_monotone [Lean.Order.CCPO (m β)] [Nonempty β]
+    {f : α → m (α ⊕ β)} (hMono : Lean.Order.monotone (whileM.body f)) (a : α) :
+    whileM f a = whileM.body f (whileM f) a :=
+  whileM_eq a ⟨Lean.Order.fix (whileM.body f) hMono, (Lean.Order.fix_eq hMono).symm⟩
+
 /-- `whileM.body f` is monotone in its `recur` argument whenever `m` admits `MonadTail`. -/
 private theorem whileM.body_monotone_of_monadTail [Lean.Order.MonadTail m] [Nonempty β]
     (f : α → m (α ⊕ β)) :
@@ -37,19 +48,11 @@ private theorem whileM.body_monotone_of_monadTail [Lean.Order.MonadTail m] [None
     | .inl a' => h a'
     | .inr _ => Lean.Order.PartialOrder.rel_refl
 
-/-- For any `MonadTail m`, `whileM.body f` has a fixed point (the order-theoretic
-`Lean.Order.fix`). -/
-private theorem whileM.body_has_fixpoint_of_monadTail [Lean.Order.MonadTail m] [Nonempty β]
-    (f : α → m (α ⊕ β)) :
-    ∃ g, whileM.body f g = g :=
-  ⟨Lean.Order.fix (whileM.body f) (whileM.body_monotone_of_monadTail f),
-   (Lean.Order.fix_eq (whileM.body_monotone_of_monadTail f)).symm⟩
-
 /-- One-step unfolding of `whileM` for any `MonadTail m`. -/
 public theorem whileM_eq_of_monadTail [Lean.Order.MonadTail m] [Nonempty β]
     {f : α → m (α ⊕ β)} (a : α) :
     whileM f a = whileM.body f (whileM f) a :=
-  whileM_eq a (whileM.body_has_fixpoint_of_monadTail f)
+  whileM_eq_of_monotone (whileM.body_monotone_of_monadTail f) a
 
 /-- `whileM.body f` is monotone in its `recur` argument whenever `m` admits `MonoBind`. -/
 private theorem whileM.body_monotone_of_monoBind
