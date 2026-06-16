@@ -360,6 +360,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibHashSet.lean
     StdlibIO.lean
     StdlibInt.lean
+    StdlibIterators.lean
     StdlibNatBig.lean
     StdlibNatInt.lean
     StdlibSlice.lean
