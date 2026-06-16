@@ -654,8 +654,9 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_string_get_byte_fast", joinLines [
     "inline fn lean_string_get_byte_fast(s: LeanObj, i: LeanObj) u8 {",
-    "  const str: [*:0]const u8 = @ptrCast(lean_heap_obj(s));",
-    "  return str[lean_unbox(i)];",
+    "  const str: *lean_string_object = @ptrCast(@alignCast(lean_heap_obj(s)));",
+    "  const data: [*]const u8 = @ptrCast(&str.m_data);",
+    "  return data[lean_unbox(i)];",
     "}"
   ]),
   ("lean_uint8_land", joinLines [

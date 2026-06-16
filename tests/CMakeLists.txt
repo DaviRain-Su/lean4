@@ -352,6 +352,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibSlice.lean
     StdlibString.lean
     StdlibStringOps.lean
+    StdlibStringReplace.lean
     StdlibStringSearch.lean
     StdlibSubstring.lean
     StdlibTask.lean

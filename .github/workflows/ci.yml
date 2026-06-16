@@ -305,7 +305,7 @@ jobs:
                 "secondary": true,
                 "skip-test-binary": true,
                 "CMAKE_OPTIONS": "-DLEAN_ZIG_RUNTIME=ON",
-                "CTEST_OPTIONS": "-R 'runtime/zig|emitzig/zigrt|emitzig/zig-symbols'",
+                "CTEST_OPTIONS": "-R 'runtime/zig|emitzig/zigrt|emitzig/stdlib|emitzig/zig-symbols'",
               },
               {
                 "name": "Linux RelWithAssert",
