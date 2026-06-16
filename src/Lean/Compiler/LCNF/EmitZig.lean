@@ -369,6 +369,19 @@ def isGlobalVarSignature (env : Environment) (sig : Signature .impure) : Bool :=
 @[inline] def cUIntLit (n : Nat) : String :=
   s!"@as(c_uint, {n})"
 
+public def renderDecRefKnownLines (target : String) (n objs : Nat) : List String :=
+  if n == 1 then
+    [s!"  lean_dec_ref_known({target}, {cUIntLit objs});"]
+  else
+    [
+      "  {",
+      "    var i: usize = 0;",
+      s!"    while (i < {usizeLit n}) : (i += 1) \{",
+      s!"      lean_dec_ref_known({target}, {cUIntLit objs});",
+      "    }",
+      "  }"
+    ]
+
 def quoteZigString (s : String) : String :=
   let escaped := s.replace "\\" "\\\\"
   let escaped := escaped.replace "\"" "\\\""
@@ -1035,9 +1048,7 @@ partial def emitBasicBlock (code0 : Code .impure) : EmitM Unit := do
           let target := zigIdent fvarId.name
           match objs? with
           | some objs =>
-              if n != 1 then
-                throwError "EmitZig does not support known-object dec with n != 1"
-              emitLn s!"  lean_dec_ref_known({target}, {cUIntLit objs});"
+              emitLns <| renderDecRefKnownLines target n objs
           | none =>
               if n == 1 then
                 let decFn := if check then "lean_dec" else "lean_dec_ref"
@@ -1444,6 +1455,7 @@ end Lean.Compiler.LCNF
 namespace EmitZig
 
 public def renderCoreLetValueLines? (binder : Name) (type : Expr) (value : LetValue .impure) : Option (List String) := Lean.Compiler.LCNF.renderCoreLetValueLines? binder type value
+public def renderDecRefKnownLines (target : String) (n objs : Nat) : List String := Lean.Compiler.LCNF.renderDecRefKnownLines target n objs
 public def renderSsetLine (fvarId : FVarId) (i offset : Nat) (y : FVarId) (type : Expr) : String := Lean.Compiler.LCNF.renderSsetLine fvarId i offset y type
 public def emitZig (modName : Name) : CoreM String := Lean.Compiler.LCNF.emitZig modName
 
