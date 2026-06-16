@@ -317,6 +317,7 @@ if(LEAN_ZIG_RUNTIME)
     List.lean
     Loop.lean
     LoopControl.lean
+    MixedScalar.lean
     Nat.lean
     Recursion.lean
     SetStdout.lean
@@ -374,6 +375,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibNumericExterns.lean
     StdlibParsec.lean
     StdlibRange.lean
+    StdlibSatAIG.lean
     StdlibSatCNF.lean
     StdlibSInt.lean
     StdlibSlice.lean

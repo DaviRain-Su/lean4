@@ -402,10 +402,15 @@ private def mvpInlineHelperEntries : List (String × String) := [
     "  return @intFromBool((str[idx] & 0x80) == 0 or (str[idx] & 0xC0) != 0x80);",
     "}"
   ]),
+  ("lean_ctor_payload_base", joinLines [
+    "inline fn lean_ctor_payload_base(o: LeanObj) [*]u8 {",
+    "  std.debug.assert(lean_is_ctor(o));",
+    "  return @as([*]u8, @ptrCast(lean_ctor_obj_cptr(o)));",
+    "}"
+  ]),
   ("lean_ctor_scalar_base", joinLines [
     "inline fn lean_ctor_scalar_base(o: LeanObj) [*]u8 {",
-    "  const bytes: [*]u8 = @ptrCast(lean_heap_obj(o));",
-    "  return bytes + @sizeOf(lean_object) + @sizeOf(usize) * @as(usize, lean_ctor_num_objs(o));",
+    "  return lean_ctor_payload_base(o) + @sizeOf(usize) * @as(usize, lean_ctor_num_objs(o));",
     "}"
   ]),
   ("lean_ctor_set", joinLines [
@@ -424,85 +429,85 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_ctor_get_usize", joinLines [
     "inline fn lean_ctor_get_usize(o: LeanObj, i: c_uint) usize {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * @as(usize, i)))).*;",
     "}"
   ]),
   ("lean_ctor_set_usize", joinLines [
     "inline fn lean_ctor_set_usize(o: LeanObj, i: c_uint, v: usize) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * @as(usize, i)))).* = v;",
     "}"
   ]),
   ("lean_ctor_get_uint8", joinLines [
     "inline fn lean_ctor_get_uint8(o: LeanObj, offset: c_uint) u8 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*u8, @ptrCast(base + offset)).*;",
     "}"
   ]),
   ("lean_ctor_get_uint16", joinLines [
     "inline fn lean_ctor_get_uint16(o: LeanObj, offset: c_uint) u16 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*u16, @ptrCast(@alignCast(base + offset))).*;",
     "}"
   ]),
   ("lean_ctor_get_uint32", joinLines [
     "inline fn lean_ctor_get_uint32(o: LeanObj, offset: c_uint) u32 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*u32, @ptrCast(@alignCast(base + offset))).*;",
     "}"
   ]),
   ("lean_ctor_get_uint64", joinLines [
     "inline fn lean_ctor_get_uint64(o: LeanObj, offset: c_uint) u64 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*u64, @ptrCast(@alignCast(base + offset))).*;",
     "}"
   ]),
   ("lean_ctor_get_float", joinLines [
     "inline fn lean_ctor_get_float(o: LeanObj, offset: c_uint) f64 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*f64, @ptrCast(@alignCast(base + offset))).*;",
     "}"
   ]),
   ("lean_ctor_get_float32", joinLines [
     "inline fn lean_ctor_get_float32(o: LeanObj, offset: c_uint) f32 {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  return @as(*f32, @ptrCast(@alignCast(base + offset))).*;",
     "}"
   ]),
   ("lean_ctor_set_uint8", joinLines [
     "inline fn lean_ctor_set_uint8(o: LeanObj, offset: c_uint, v: u8) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*u8, @ptrCast(base + offset)).* = v;",
     "}"
   ]),
   ("lean_ctor_set_uint16", joinLines [
     "inline fn lean_ctor_set_uint16(o: LeanObj, offset: c_uint, v: u16) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*u16, @ptrCast(@alignCast(base + offset))).* = v;",
     "}"
   ]),
   ("lean_ctor_set_uint32", joinLines [
     "inline fn lean_ctor_set_uint32(o: LeanObj, offset: c_uint, v: u32) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*u32, @ptrCast(@alignCast(base + offset))).* = v;",
     "}"
   ]),
   ("lean_ctor_set_uint64", joinLines [
     "inline fn lean_ctor_set_uint64(o: LeanObj, offset: c_uint, v: u64) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*u64, @ptrCast(@alignCast(base + offset))).* = v;",
     "}"
   ]),
   ("lean_ctor_set_float", joinLines [
     "inline fn lean_ctor_set_float(o: LeanObj, offset: c_uint, v: f64) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*f64, @ptrCast(@alignCast(base + offset))).* = v;",
     "}"
   ]),
   ("lean_ctor_set_float32", joinLines [
     "inline fn lean_ctor_set_float32(o: LeanObj, offset: c_uint, v: f32) void {",
-    "  const base = lean_ctor_scalar_base(o);",
+    "  const base = lean_ctor_payload_base(o);",
     "  @as(*f32, @ptrCast(@alignCast(base + offset))).* = v;",
     "}"
   ]),
