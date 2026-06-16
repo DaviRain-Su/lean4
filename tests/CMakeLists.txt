@@ -375,6 +375,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibTask.lean
     StdlibTreeMap.lean
     StdlibTreeSet.lean
+    StdlibVector.lean
   )
   foreach(T ${EMITZIG_STDLIB_TESTS})
     add_test(
