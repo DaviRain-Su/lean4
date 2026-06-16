@@ -2,3 +2,5 @@ string:lean:123:xy
 string-error:offset 6: digit expected
 bytes:42:4:155
 bytes-error:offset 9: unexpected end of input
+bounded:Lean:abcde:F:7:xyz
+bounded-error:offset 3: expected at least one char
