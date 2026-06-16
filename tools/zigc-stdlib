@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -337,8 +338,7 @@ def save_cache_meta(cache_dir: pathlib.Path, module: str, meta: dict) -> None:
 def expected_cache_meta(src: pathlib.Path, lean: pathlib.Path) -> dict:
     return {
         "src_mtime": src.stat().st_mtime,
-        "lean_mtime": lean.stat().st_mtime,
-        "lean": str(lean),
+        "lean": lean_fingerprint(lean),
     }
 
 
@@ -351,6 +351,115 @@ def cache_valid(module: str, src: pathlib.Path, lean: pathlib.Path, cache_dir: p
     if meta is None:
         return False
     return meta == expected_cache_meta(src, lean)
+
+
+def file_stamp(path: pathlib.Path) -> dict:
+    resolved = path.resolve()
+    st = resolved.stat()
+    return {
+        "path": str(resolved),
+        "mtime_ns": st.st_mtime_ns,
+        "size": st.st_size,
+    }
+
+
+@functools.lru_cache(maxsize=None)
+def file_sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def lean_fingerprint(lean: pathlib.Path) -> dict:
+    result = subprocess.run(
+        [str(lean), "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    resolved = lean.resolve()
+    return {
+        "path": str(resolved),
+        "sha256": file_sha256(str(resolved)),
+        "version": result.stdout.strip(),
+    }
+
+
+def dependency_cache_path(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+) -> pathlib.Path:
+    h = hashlib.sha256()
+    for value in [str(lean.resolve()), str(src_root.resolve())]:
+        h.update(value.encode())
+        h.update(b"\0")
+    for seed in seeds:
+        h.update(str(seed.resolve()).encode())
+        h.update(b"\0")
+    return cache_dir / f"deps-{h.hexdigest()[:16]}.json"
+
+
+def dependency_cache_meta(
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+    modules: list[str],
+) -> dict | None:
+    paths = seeds + [module_to_path(module, src_root) for module in modules]
+    unique_paths = sorted({str(path.resolve()): path for path in paths}.values(), key=lambda p: str(p.resolve()))
+    try:
+        stamps = [file_stamp(path) for path in unique_paths]
+    except FileNotFoundError:
+        return None
+    return {
+        "lean": lean_fingerprint(lean),
+        "src_root": str(src_root.resolve()),
+        "seeds": [str(seed.resolve()) for seed in seeds],
+        "files": stamps,
+    }
+
+
+def load_cached_dependencies(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+) -> list[str] | None:
+    path = dependency_cache_path(cache_dir, lean, src_root, seeds)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        modules = data["modules"]
+        if not isinstance(modules, list) or not all(isinstance(module, str) for module in modules):
+            return None
+        meta = dependency_cache_meta(lean, src_root, seeds, modules)
+        if meta is not None and data.get("meta") == meta:
+            return modules
+    except Exception:
+        return None
+    return None
+
+
+def save_dependency_cache(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+    modules: list[str],
+) -> None:
+    meta = dependency_cache_meta(lean, src_root, seeds, modules)
+    if meta is None:
+        return
+    path = dependency_cache_path(cache_dir, lean, src_root, seeds)
+    path.write_text(json.dumps({"meta": meta, "modules": modules}, indent=2))
 
 
 def files_equal(a: pathlib.Path, b: pathlib.Path) -> bool:
@@ -530,8 +639,13 @@ def main() -> int:
             modules = list(args.module)
         else:
             seeds = [driver] + [module_to_path(m, src_root) for m in args.module]
-            modules = discover_dependencies(lean, src_root, seeds)
-            print(f"discovered {len(modules)} stdlib module(s)")
+            modules = None if args.force else load_cached_dependencies(cache_dir, lean, src_root, seeds)
+            if modules is None:
+                modules = discover_dependencies(lean, src_root, seeds)
+                save_dependency_cache(cache_dir, lean, src_root, seeds, modules)
+                print(f"discovered {len(modules)} stdlib module(s)")
+            else:
+                print(f"[cache] discovered {len(modules)} stdlib module(s)")
 
 
         # Compile each stdlib module.
