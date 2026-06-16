@@ -349,6 +349,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibFind.lean
     StdlibDHashMap.lean
     StdlibExtHashMap.lean
+    StdlibExtHashSet.lean
     StdlibHashMap.lean
     StdlibHashSet.lean
     StdlibIO.lean
