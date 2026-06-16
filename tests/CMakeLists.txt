@@ -366,6 +366,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibIterators.lean
     StdlibNatBig.lean
     StdlibNatInt.lean
+    StdlibName.lean
     StdlibNumericExterns.lean
     StdlibRange.lean
     StdlibSInt.lean
