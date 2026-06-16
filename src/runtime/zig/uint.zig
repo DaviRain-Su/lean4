@@ -12,6 +12,16 @@ fn natLowWord(o: *anyopaque) u64 {
     return @intCast(mpz_object.mpzValue(o).getLimb(0));
 }
 
+fn uintLog2(comptime T: type, a0: T) T {
+    var a = a0;
+    var res: T = 0;
+    while (a >= 2) {
+        res += 1;
+        a /= 2;
+    }
+    return res;
+}
+
 export fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8 {
     return @truncate(natLowWord(a));
 }
@@ -40,6 +50,26 @@ export fn lean_uint64_mix_hash(h: u64, k: u64) callconv(.c) u64 {
     var hash = h ^ key;
     hash *%= m;
     return hash;
+}
+
+export fn lean_uint8_log2(a: u8) callconv(.c) u8 {
+    return uintLog2(u8, a);
+}
+
+export fn lean_uint16_log2(a: u16) callconv(.c) u16 {
+    return uintLog2(u16, a);
+}
+
+export fn lean_uint32_log2(a: u32) callconv(.c) u32 {
+    return uintLog2(u32, a);
+}
+
+export fn lean_uint64_log2(a: u64) callconv(.c) u64 {
+    return uintLog2(u64, a);
+}
+
+export fn lean_usize_log2(a: usize) callconv(.c) usize {
+    return uintLog2(usize, a);
 }
 
 export fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize {
@@ -76,4 +106,16 @@ test "unsigned width conversions match all-ones boundary and mix hash goldens" {
     try testing.expectEqual(@as(u64, 0x35a98f4d286a90b9), lean_uint64_mix_hash(0, 0));
     try testing.expectEqual(@as(u64, 0xe62129c84f35c59c), lean_uint64_mix_hash(1, 2));
     try testing.expectEqual(@as(u64, 0xf625c5a4385e7d54), lean_uint64_mix_hash(0x0123456789abcdef, 0xfedcba9876543210));
+}
+
+test "unsigned log2 matches lean.h floor semantics" {
+    try testing.expectEqual(@as(u8, 0), lean_uint8_log2(0));
+    try testing.expectEqual(@as(u8, 0), lean_uint8_log2(1));
+    try testing.expectEqual(@as(u8, 1), lean_uint8_log2(2));
+    try testing.expectEqual(@as(u8, 2), lean_uint8_log2(7));
+    try testing.expectEqual(@as(u8, 7), lean_uint8_log2(255));
+    try testing.expectEqual(@as(u16, 15), lean_uint16_log2(std.math.maxInt(u16)));
+    try testing.expectEqual(@as(u32, 31), lean_uint32_log2(std.math.maxInt(u32)));
+    try testing.expectEqual(@as(u64, 63), lean_uint64_log2(std.math.maxInt(u64)));
+    try testing.expectEqual(@as(usize, @bitSizeOf(usize) - 1), lean_usize_log2(std.math.maxInt(usize)));
 }
