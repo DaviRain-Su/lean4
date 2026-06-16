@@ -345,6 +345,9 @@ def closedTermReadOpName (t : Expr) : String :=
 def toOnceTokenName (sym : String) : String :=
   sym ++ "_once"
 
+def groundObjectName (sym : String) : String :=
+  sym ++ "__obj"
+
 def toZigInitName (n : Name) : EmitM String := do
   return s!"_init_{← toZigSymbolName n}"
 
@@ -515,7 +518,7 @@ def renderGlobalRefRhs (type : Expr) (fn : Name) : EmitM String := do
   let env ← getEnv
   let callable ← toCallableZigName fn
   if isSimpleGroundDecl env fn then
-    return callable
+    return groundObjectName callable
   else if isClosedTermName env fn then
     let initName ← toZigInitName fn
     let token := toOnceTokenName callable
@@ -530,8 +533,12 @@ partial def emitGroundDecl (decl : Decl .impure) : EmitM Unit := do
   let some ground := getSimpleGroundExpr env decl.name | unreachable!
   let baseName ← toZigSymbolName decl.name
   let valueName := (← compileGroundToValueNamed baseName (groundValueName baseName) ground |>.run 0).1
-  emitLn s!"const {baseName}: LeanObj = {groundLeanObjLitOfValueName valueName};"
+  let objName := groundObjectName baseName
+  emitLn s!"const {objName}: LeanObj = {groundLeanObjLitOfValueName valueName};"
   unless isClosedTermName env decl.name do
+    emitLn (s!"fn {baseName}() callconv(.c) LeanObj " ++ "{")
+    emitLn s!"  return {objName};"
+    emitLn "}"
     emitLn <| "comptime { @export(&" ++ baseName ++ ", .{ .name = \"" ++ baseName ++ "\" }); }"
   emitLn ""
 where

@@ -29,8 +29,7 @@ def main : IO Unit := do
   IO.println (String.fromUTF8! s2.toByteArray)
   let s3 := s0.slice 4 2
   IO.println s3.size
-  let s3b := bytes.toByteSlice 2 2
-  IO.println (s3 == s3b)
+  IO.println (s3 == ByteSlice.empty)
   let s4 := "lean!".toUTF8.toByteSlice 1 4
   IO.println s4.size
   IO.println (String.fromUTF8! s4.toByteArray)
