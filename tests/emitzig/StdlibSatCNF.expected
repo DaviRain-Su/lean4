@@ -8,3 +8,17 @@ true
 p cnf 13 2
 11 12 0
 -13 11 0
+-4
+3
+4
+5
+true
+false
+3
+true
+p cnf 5 3
+1 2 0
+-3 1 0
+4 -5 0
+true
+0

@@ -163,6 +163,9 @@ def findStoredJoinState? (fvarId : FVarId) : EmitM (Option Nat) := return (← r
 def runtimeParams (ps : Array (Param .impure)) : Array (Param .impure) :=
   ps.filter (fun p => !(p.type.isVoid || p.type.isErased))
 
+def closureParams (ps : Array (Param .impure)) : Array (Param .impure) :=
+  ps.filter (fun p => !p.type.isVoid)
+
 def runtimeArgs (ps : Array (Param .impure)) (args : Array (Arg .impure)) : Array (Arg .impure) :=
   Id.run do
     let mut filtered := #[]
@@ -172,6 +175,20 @@ def runtimeArgs (ps : Array (Param .impure)) (args : Array (Arg .impure)) : Arra
       if !(p.type.isVoid || p.type.isErased) then
         filtered := filtered.push arg
     filtered
+
+def closureArgs (ps : Array (Param .impure)) (args : Array (Arg .impure)) : Array (Arg .impure) :=
+  Id.run do
+    let mut filtered := #[]
+    for h : i in [0:args.size] do
+      let arg := args[i]
+      let p := ps[i]!
+      if !p.type.isVoid then
+        filtered := filtered.push <| if p.type.isErased then .erased else arg
+    filtered
+
+def needsClosureWrapper (ps : Array (Param .impure)) : Bool :=
+  closureParams ps |>.any (fun p => p.type.isErased)
+
 def argMatchesParam (p : Param .impure) : Arg .impure → Bool
   | .fvar fvarId => p.fvarId == fvarId
   | .erased => false
@@ -314,18 +331,38 @@ def importedInitFnNames : EmitM (Array String) := do
   return names.foldl (init := #[]) fun acc name =>
     if acc.contains name then acc else acc.push name
 
-def emitParamList (ps : Array (Param .impure)) : EmitM Unit := do
-  let ps := runtimeParams ps
+def emitParamListCore (ps : Array (Param .impure)) : EmitM Unit := do
   for h : i in [0:ps.size] do
     if i > 0 then
       emit ", "
     let p := ps[i]
     emit s!"{zigParamIdent p.fvarId.name}: {p.type.toZigType}"
 
+def emitParamList (ps : Array (Param .impure)) : EmitM Unit :=
+  emitParamListCore (runtimeParams ps)
+
+def emitClosureParamList (ps : Array (Param .impure)) : EmitM Unit :=
+  emitParamListCore (closureParams ps)
+
 def emitSignature (name : String) (sig : Signature .impure) : EmitM Unit := do
   emit s!"extern fn {name}("
   emitParamList sig.params
   emitLn s!") callconv(.c) {sig.type.toZigType};"
+
+def toZigClosureSymbolName (n : Name) : EmitM String := do
+  return s!"{← toZigSymbolName n}___zig_closure"
+
+def toZigClosureDefName (n : Name) : EmitM String := do
+  return s!"{← toZigClosureSymbolName n}__def"
+
+def emitClosureSignature (name : String) (sig : Signature .impure) : EmitM Unit := do
+  emit s!"extern fn {name}("
+  emitClosureParamList sig.params
+  emitLn s!") callconv(.c) {sig.type.toZigType};"
+
+def emitClosureSignatureFor (sig : Signature .impure) : EmitM Unit := do
+  if needsClosureWrapper sig.params then
+    emitClosureSignature (← toZigClosureSymbolName sig.name) sig
 
 def emitClosedTermDecl (name : String) (type : Expr) : EmitM Unit :=
   emitLn s!"extern var {name}: {type.toZigType};"
@@ -514,6 +551,12 @@ def toCallableZigName (fn : Name) : EmitM String := do
   let env ← getEnv
   return (getExternNameFor env `c fn).getD (← toZigSymbolName fn)
 
+def toClosureCallableZigName (fn : Name) (sig : Signature .impure) : EmitM String := do
+  if needsClosureWrapper sig.params then
+    toZigClosureSymbolName fn
+  else
+    toCallableZigName fn
+
 def renderGlobalRefRhs (type : Expr) (fn : Name) : EmitM String := do
   let env ← getEnv
   let callable ← toCallableZigName fn
@@ -636,12 +679,12 @@ where
   emitPapValue (name : String) (func : Name) (args : Array SimpleGroundArg) : GroundEmitM Unit := do
     let some sig ← getImpureSignature? func | unreachable!
     let objLits ← args.toList.mapM groundArgToLeanObjLit
-    let callable ← toCallableZigName func
+    let callable ← toClosureCallableZigName func sig
     let type := "extern struct { m_header: lean_object, m_fun: ?*anyopaque, m_arity: u16, m_num_fixed: u16, m_objs: [" ++ toString args.size ++ "]LeanObj }"
     let value := ".{ .m_header = " ++
       groundHeaderLit ("@sizeOf(lean_closure_object) + @sizeOf(LeanObj) * " ++ toString args.size) "0" "245" ++
       ", .m_fun = @as(?*anyopaque, @ptrCast(@constCast(&" ++ callable ++ ")))" ++
-      ", .m_arity = @as(u16, @intCast(" ++ toString (runtimeParams sig.params).size ++ "))" ++
+      ", .m_arity = @as(u16, @intCast(" ++ toString (closureParams sig.params).size ++ "))" ++
       ", .m_num_fixed = @as(u16, @intCast(" ++ toString args.size ++ "))" ++
       ", .m_objs = " ++ renderGroundArrayLit objLits ++ " }"
     emitGroundConst name type value
@@ -705,14 +748,15 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
   let assign (rhs : String) := s!"{lhs} = {rhs};"
   let some sig ← getImpureSignature? fn
     | throwError s!"missing EmitZig signature for {fn}"
-  let args := runtimeArgs sig.params args
+  let rtArgs := runtimeArgs sig.params args
+  let clArgs := closureArgs sig.params args
   match getExternAttrData? (← getEnv) fn |>.bind (getExternEntryFor · `c) with
   | some (.standard _ externName) =>
-      pure [assign s!"{externName}({renderArgList args})"]
+      pure [assign s!"{externName}({renderArgList rtArgs})"]
   | some (.inline _ pat) =>
-      pure [assign (expandExternPattern pat (renderImpureArgs args))]
+      pure [assign (expandExternPattern pat (renderImpureArgs rtArgs))]
   | some .opaque | none =>
-      if args.isEmpty then
+      if rtArgs.isEmpty then
         let env ← getEnv
         let callable ← toCallableZigName fn
         if let some localDecl := (← getLocalDecls).find? (·.name == fn) then
@@ -726,17 +770,17 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
           pure [assign (← renderGlobalRefRhs type fn)]
         else
           pure [assign s!"{callable}()"]
-      else if args.size ≤ closureMaxArgs then
+      else if rtArgs.size ≤ closureMaxArgs then
         let callable ← toCallableZigName fn
-        pure [assign s!"{callable}({renderArgList args})"]
+        pure [assign s!"{callable}({renderArgList rtArgs})"]
       else
-        let callable ← toCallableZigName fn
+        let callable ← toClosureCallableZigName fn sig
         let fnVar := s!"{lhs}__fn"
         let argsVar := s!"{lhs}__args"
         pure [
-          "var " ++ argsVar ++ " = [_]LeanObj{ " ++ renderArgList args ++ " };",
-          s!"const {fnVar} = lean_alloc_closure(@ptrCast(&{callable}), {cUIntLit (runtimeParams sig.params).size}, {cUIntLit 0});",
-          assign s!"lean_apply_n({fnVar}, {cUIntLit args.size}, &{argsVar})"
+          "var " ++ argsVar ++ " = [_]LeanObj{ " ++ renderArgList clArgs ++ " };",
+          s!"const {fnVar} = lean_alloc_closure(@ptrCast(&{callable}), {cUIntLit (closureParams sig.params).size}, {cUIntLit 0});",
+          assign s!"lean_apply_n({fnVar}, {cUIntLit clArgs.size}, &{argsVar})"
         ]
   | _ =>
       throwError s!"failed to emit extern application {fn}"
@@ -747,10 +791,10 @@ def renderPapLines (binder : Name) (fn : Name) (args : Array (Arg .impure)) :
   let assign (rhs : String) := s!"{lhs} = {rhs};"
   let some sig ← getImpureSignature? fn
     | throwError s!"missing EmitZig signature for {fn}"
-  let callable ← toCallableZigName fn
-  let args := runtimeArgs sig.params args
+  let callable ← toClosureCallableZigName fn sig
+  let args := closureArgs sig.params args
   pure <|
-    [assign s!"lean_alloc_closure(@ptrCast(&{callable}), {cUIntLit (runtimeParams sig.params).size}, {cUIntLit args.size})"] ++
+    [assign s!"lean_alloc_closure(@ptrCast(&{callable}), {cUIntLit (closureParams sig.params).size}, {cUIntLit args.size})"] ++
     ((List.range args.size).map fun i =>
       s!"lean_closure_set({lhs}, {cUIntLit i}, {renderImpureArg args[i]!});")
 
@@ -777,6 +821,24 @@ def renderLetValueLines? (binder : Name) (type : Expr) (value : LetValue .impure
     | .pap fn args => return some (← renderPapLines binder fn args)
     | .fvar fvarId args => return some (renderFVarAppLines binder fvarId args)
     | _ => pure none
+
+def emitClosureWrapper (decl : Decl .impure) : EmitM Unit := do
+  unless needsClosureWrapper decl.params do
+    return ()
+  let defName ← toZigClosureDefName decl.name
+  let exportName ← toZigClosureSymbolName decl.name
+  let targetName ← toZigDefName decl.name
+  emit s!"fn {defName}("
+  emitClosureParamList decl.params
+  emitLn (s!") callconv(.c) {decl.type.toZigType} " ++ "{")
+  for p in closureParams decl.params do
+    if p.type.isErased then
+      emitLn s!"  _ = {zigParamIdent p.fvarId.name};"
+  let args := runtimeParams decl.params |>.toList.map (fun p => zigParamIdent p.fvarId.name)
+  emitLn s!"  return {targetName}({String.intercalate ", " args});"
+  emitLn "}"
+  emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ exportName ++ "\" }); }"
+  emitLn ""
 
 def isTailCall (code : Code .impure) : EmitM Bool :=
   match code with
@@ -1242,6 +1304,8 @@ def emitFnDecls : EmitM Unit := do
       emitClosedTermDecl name sig.type
     else
       emitSignature name sig
+    if (isStandardExternC? env sig.name).isNone then
+      emitClosureSignatureFor sig
   for decl in (← getLocalDecls) do
     let env ← getEnv
     if hasInitAttr env decl.name then
@@ -1250,7 +1314,9 @@ def emitFnDecls : EmitM Unit := do
       continue
     match decl.value with
     | .extern .. => pure ()
-    | _ => emitSignature (← toZigSymbolName decl.name) decl.toSignature
+    | _ =>
+        emitSignature (← toZigSymbolName decl.name) decl.toSignature
+        emitClosureSignatureFor decl.toSignature
   emitLn ""
 
 def emitDecl (decl : Decl .impure) : EmitM Unit := do
@@ -1350,6 +1416,7 @@ def emitDecl (decl : Decl .impure) : EmitM Unit := do
     emitLn "}"
     emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ exportName ++ "\" }); }"
     emitLn ""
+    emitClosureWrapper decl
 
 def emitFns : EmitM Unit := do
   for decl in (← getLocalDecls) do
