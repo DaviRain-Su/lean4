@@ -22,6 +22,21 @@ OUT="$OUT_DIR/$BASENAME.zig"
 [[ -s "$OUT" ]] || { echo "Zig output is empty"; exit 1; }
 grep -q "module: .*${BASENAME}" "$OUT" || { echo "Missing module marker"; exit 1; }
 
+# Unsupported EmitZig paths must fail the test at generation time, not hide
+# behind a generated Zig runtime panic that may only be reached by a later
+# execution path.
+python3 - "$OUT" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r'EmitZig [^"\n]*not implemented[^"\n]*', text)
+if match:
+    print(f"Unsupported EmitZig placeholder in generated Zig: {match.group(0)}", file=sys.stderr)
+    sys.exit(1)
+PY
+
+
 # Syntactic sanity via zig fmt.
 if command -v zig &> /dev/null; then
   zig fmt "$OUT"
@@ -44,7 +59,11 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
           [[ -n "$MODULE" ]] && STDLIB_ARGS+=(--module "$MODULE")
         done
       fi
-      BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR" "${STDLIB_ARGS[@]}"
+      if [[ ${#STDLIB_ARGS[@]} -gt 0 ]]; then
+        BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR" "${STDLIB_ARGS[@]}"
+      else
+        BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR"
+      fi
     elif [[ "${LEAN_ZIG_ZIGRT:-0}" == "1" ]]; then
       BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-zigrt" "$OUT" "$EXE"
     else
@@ -62,4 +81,3 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
 fi
 
 echo "ok"
-

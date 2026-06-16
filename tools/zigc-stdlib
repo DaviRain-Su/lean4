@@ -265,21 +265,69 @@ def save_cache_meta(cache_dir: pathlib.Path, module: str, meta: dict) -> None:
     meta_path.write_text(json.dumps(meta, indent=2))
 
 
+def expected_cache_meta(src: pathlib.Path, lean: pathlib.Path) -> dict:
+    return {
+        "src_mtime": src.stat().st_mtime,
+        "lean_mtime": lean.stat().st_mtime,
+        "lean": str(lean),
+    }
+
+
 def cache_valid(module: str, src: pathlib.Path, lean: pathlib.Path, cache_dir: pathlib.Path) -> bool:
     zig = cache_dir / module_to_zig_file(module)
     obj = cache_dir / f"{module}.o"
-    if not zig.exists() or not obj.exists():
+    if not zig.exists() or not obj.exists() or obj.stat().st_size == 0:
         return False
     meta = load_cache_meta(cache_dir, module)
     if meta is None:
         return False
-    src_mtime = src.stat().st_mtime
-    lean_mtime = lean.stat().st_mtime
-    return (
-        meta.get("src_mtime") == src_mtime
-        and meta.get("lean_mtime") == lean_mtime
-        and meta.get("lean") == str(lean)
-    )
+    return meta == expected_cache_meta(src, lean)
+
+
+def files_equal(a: pathlib.Path, b: pathlib.Path) -> bool:
+    if not a.exists() or not b.exists():
+        return False
+    if a.stat().st_size != b.stat().st_size:
+        return False
+    with a.open("rb") as fa, b.open("rb") as fb:
+        while True:
+            ca = fa.read(1024 * 1024)
+            cb = fb.read(1024 * 1024)
+            if ca != cb:
+                return False
+            if not ca:
+                return True
+
+
+def temp_zig_path(cache_dir: pathlib.Path, module: str) -> pathlib.Path:
+    fd, path = tempfile.mkstemp(prefix=f".{module}.", suffix=".zig", dir=cache_dir)
+    os.close(fd)
+    return pathlib.Path(path)
+
+
+def emit_cached_module(
+    lean: pathlib.Path,
+    src: pathlib.Path,
+    src_root: pathlib.Path,
+    module: str,
+    zig_file: pathlib.Path,
+    obj_file: pathlib.Path,
+    cache_dir: pathlib.Path,
+) -> bool:
+    """Emit a module and return true if the cached object can still be reused."""
+    if not zig_file.exists() or not obj_file.exists() or obj_file.stat().st_size == 0:
+        emit_zig(lean, src, src_root, zig_file)
+        return False
+
+    tmp_zig = temp_zig_path(cache_dir, module)
+    try:
+        emit_zig(lean, src, src_root, tmp_zig)
+        if files_equal(tmp_zig, zig_file):
+            return True
+        tmp_zig.replace(zig_file)
+        return False
+    finally:
+        tmp_zig.unlink(missing_ok=True)
 
 
 def discover_dependencies(
@@ -422,6 +470,7 @@ def main() -> int:
             src = module_to_path(module, src_root)
             zig_file = cache_dir / module_to_zig_file(module)
             obj_file = cache_dir / f"{module}.o"
+            meta = expected_cache_meta(src, lean)
 
             if not args.force and cache_valid(module, src, lean, cache_dir):
                 print(f"[cache] {module}")
@@ -430,12 +479,20 @@ def main() -> int:
 
             print(f"emitting {module}")
             try:
-                emit_zig(lean, src, src_root, zig_file)
+                unchanged = False if args.force else emit_cached_module(
+                    lean, src, src_root, module, zig_file, obj_file, cache_dir
+                )
+                if args.force:
+                    emit_zig(lean, src, src_root, zig_file)
             except subprocess.CalledProcessError as e:
                 print(f"  emit failed for {module}: {e}", file=sys.stderr)
                 failed_modules.append(module)
-                zig_file.unlink(missing_ok=True)
-                obj_file.unlink(missing_ok=True)
+                continue
+
+            if unchanged:
+                print(f"[unchanged] {module}")
+                save_cache_meta(cache_dir, module, meta)
+                objs.append(obj_file)
                 continue
 
             print(f"compiling {module}")
@@ -447,11 +504,7 @@ def main() -> int:
                 obj_file.unlink(missing_ok=True)
                 continue
 
-            save_cache_meta(cache_dir, module, {
-                "src_mtime": src.stat().st_mtime,
-                "lean_mtime": lean.stat().st_mtime,
-                "lean": str(lean),
-            })
+            save_cache_meta(cache_dir, module, meta)
             objs.append(obj_file)
 
         if failed_modules:

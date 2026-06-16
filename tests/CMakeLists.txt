@@ -315,6 +315,7 @@ if(LEAN_ZIG_RUNTIME)
     Float.lean
     JoinPoint.lean
     List.lean
+    Loop.lean
     Nat.lean
     Recursion.lean
     SetStdout.lean
@@ -371,7 +372,7 @@ if(LEAN_ZIG_RUNTIME)
         LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
         bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
-    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES RUN_SERIAL TRUE)
+    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES RESOURCE_LOCK emitzig_stdlib_cache)
   endforeach()
   add_test(
     NAME emitzig/zig-symbols
