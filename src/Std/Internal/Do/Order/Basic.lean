@@ -244,7 +244,7 @@ instance : PartialOrder Prop where
   rel_trans := fun h1 h2 x => h2 (h1 x)
   rel_antisymm := fun h1 h2 => propext ⟨h1, h2⟩
 
-@[simp] theorem entails_prop_eq_imp (p q : Prop) : (p ⊑ q) = (p → q) := rfl
+@[grind =, simp] theorem le_prop_eq_imp (p q : Prop) : (p ⊑ q) = (p → q) := rfl
 
 /-- Supremum for Prop: true iff some element of the set is true -/
 def propSup (c : Prop → Prop) : Prop := ∃ p, c p ∧ p
@@ -261,11 +261,20 @@ theorem propSup_is_sup (c : Prop → Prop) : is_sup c (propSup c) := by
 instance : CompleteLattice Prop where
   has_sup c := ⟨propSup c, propSup_is_sup c⟩
 
-theorem prop_pre_intro (x y : Prop) : (x → (⊤ : Prop) ⊑ y) → x ⊑ y :=
+theorem le_of_imp_top_le (x y : Prop) : (x → (⊤ : Prop) ⊑ y) → x ⊑ y :=
   fun h hx => h hx (le_top True trivial)
 
-theorem prop_pre_elim (x : Prop) : x → (⊤ : Prop) ⊑ x :=
+theorem top_le_prop (x : Prop) : x → (⊤ : Prop) ⊑ x :=
   fun hx _ => hx
+
+theorem le_of_right (x y : Prop) : y → x ⊑ y :=
+  fun hy _ => hy
+
+theorem of_top_le_prop {x : Prop} : (⊤ : Prop) ⊑ x → x :=
+  fun h => h (le_top True trivial)
+
+theorem true_le_of_top_le (x : Prop) : ((⊤ : Prop) ⊑ x) → (True : Prop) ⊑ x :=
+  fun h => le_of_right True x (of_top_le_prop h)
 
 @[simp] theorem iInf_prop_eq_forall {ι : Type u} (f : ι → Prop) :
     (iInf f : Prop) = (∀ i, f i) := by
@@ -325,6 +334,7 @@ theorem CompleteLattice.ofProp_true (l : Type v) [CompleteLattice l] : ⌜True�
 theorem CompleteLattice.ofProp_false (l : Type v) [CompleteLattice l] : ⌜False⌝ = (⊥ : l) := by
   simp [CompleteLattice.ofProp]
 
+@[grind .]
 theorem CompleteLattice.ofProp_imp [CompleteLattice l]
   (p₁ p₂ : Prop) : (p₁ → p₂) → ⌜p₁⌝ ⊑ (⌜p₂⌝ : l) := by
   simp only [CompleteLattice.ofProp]
@@ -388,6 +398,7 @@ theorem CompleteLattice.ofProp_intro_r [CompleteLattice l] (p : Prop) (x y : l) 
   simp only [CompleteLattice.ofProp]
   rcases Classical.em p with h | h <;> simp [h]
 
+@[grind .]
 theorem top_le_ofProp [CompleteLattice l] (p : Prop) : p → (⊤ : l) ⊑ ⌜p⌝ := by
   simp only [CompleteLattice.ofProp]
   rcases Classical.em p with h | h <;> simp [h]
@@ -405,6 +416,17 @@ theorem ofProp_le [CompleteLattice l] (p : Prop) (rhs : l) :
 /-- Entailment between functions is pointwise. -/
 theorem le_iff_forall_le {σ α : Type u} [PartialOrder α] {f g : σ → α} :
     (f ⊑ g) ↔ (∀ s, f s ⊑ g s) := Iff.rfl
+
+/-- Entailment between functions follows from pointwise entailment. -/
+theorem le_of_forall_le {σ α : Type u} [PartialOrder α] {f g : σ → α} :
+    (∀ s, f s ⊑ g s) → f ⊑ g := le_iff_forall_le.mpr
+
+/-- `⊤ ⊑ g` for a function `g` follows from pointwise `⊤ ⊑ g s`. -/
+theorem top_le_of_forall_top_le {σ α : Type u} [CompleteLattice α] {g : σ → α} :
+    (∀ s, (⊤ : α) ⊑ g s) → (⊤ : σ → α) ⊑ g := by
+  intro h s
+  rw [top_apply]
+  exact h s
 
 /-- The top element of the `Prop` lattice is `True`. Not a global `@[simp]` lemma: collapsing the
 lattice `⊤`/`⊥`/`⌜·⌝` to `True`/`False`/`p` would change how `mvcgen` discharge lattice

@@ -294,7 +294,7 @@ Normalises a specification proof so its conclusion is in `pre ⊑ wp …` form.
 def tripleToWpProof? (proof type : Expr) : MetaM (Option (Expr × Expr)) := do
   let type ← whnfR type
   if type.isAppOfArity ``Triple 12 then
-    -- Build the `Triple.rel_wp` projection application explicitly from the `Triple` type's own
+    -- Build the `Triple.le_wp` projection application explicitly from the `Triple` type's own
     -- arguments rather than via `mkAppM`. `mkAppM` would re-synthesise the instance arguments
     -- (`Monad m`, `WPMonad m …`), which fails for transformer specs whose monad is a partially
     -- applied transformer with still-unassigned parameters (e.g. `ExceptT ?ε ?m` in
@@ -302,7 +302,7 @@ def tripleToWpProof? (proof type : Expr) : MetaM (Option (Expr × Expr)) := do
     -- caller has unified the spec's program against the goal. Reusing the type's arguments keeps
     -- those instance metavariables shared with the proof, so no premature synthesis happens.
     let lvls := type.getAppFn.constLevels!
-    let proof := mkAppN (.const ``Triple.rel_wp lvls) (type.getAppArgs.push proof)
+    let proof := mkAppN (.const ``Triple.le_wp lvls) (type.getAppArgs.push proof)
     let type ← instantiateMVars (← inferType proof)
     return some (proof, type)
   else if type.isAppOfArity ``PartialOrder.rel 4 then

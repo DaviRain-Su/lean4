@@ -37,7 +37,7 @@ structure Triple [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EP
   /-- Construct a triple from a weakest precondition entailment. -/
   intro ::
   /-- The weakest precondition entailment witnessing the triple. -/
-  rel_wp : pre ⊑ wp x post epost
+  le_wp : pre ⊑ wp x post epost
 
 /-- Hoare triple notation without exception postcondition (defaults to `⊥`). -/
 scoped notation:60 "⦃ " pre " ⦄ " x " ⦃ " post " ⦄" => Triple pre x post Lean.Order.bot
@@ -103,6 +103,16 @@ theorem bind (x : m α) (f : α → m β)
   apply PartialOrder.rel_trans (WPMonad.wp_consequence x mid (fun a => wp (f a) post epost) epost
     (fun a => iff.mp (hf a)))
   exact WPMonad.wp_bind x f post epost
+
+theorem map (f : α → β) (x : m α)
+    (h : Triple pre x (fun a => post (f a)) epost) :
+    Triple pre (f <$> x) post epost :=
+  iff.mpr (PartialOrder.rel_trans (iff.mp h) (WPMonad.wp_map f x post epost))
+
+theorem seq (x : m (α → β)) (y : m α)
+    (h : Triple pre x (fun f => wp y (fun a => post (f a)) epost) epost) :
+    Triple pre (x <*> y) post epost :=
+  iff.mpr (PartialOrder.rel_trans (iff.mp h) (WPMonad.wp_seq x y post epost))
 
 end Triple
 

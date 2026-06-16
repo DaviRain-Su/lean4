@@ -75,7 +75,7 @@ exception postcondition `epost`. -/
 def wp [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] {α} (x : m α) (post : α → Pred) (epost : EPred) : Pred :=
   (WPMonad.wpTrans x).apply post epost
 
-@[simp, grind =] theorem WPMonad.wp_impl_eq_wp [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] {α} (x : m α) :
+@[simp, grind =] theorem WPMonad.wpTrans_apply_eq [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] {α} (x : m α) :
   (WPMonad.wpTrans x).apply = wp x := rfl
 
 /-!
@@ -219,7 +219,7 @@ instance ExceptT.instWPMonad {Pred : Type v}
     · exact htail
 
 @[simp, grind =]
-theorem ExceptT.apply_wp {α ε Pred EPred}
+theorem ExceptT.wp_apply_eq {α ε Pred EPred}
   [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] (x : ExceptT ε m α)
   (post : α → Pred) (epost : EPost.Cons (ε → Pred) EPred) :
     wp x post epost = wp x.run (epost.pushExcept post) epost.tail := rfl
@@ -250,7 +250,7 @@ instance OptionT.instWPMonad {Pred : Type u}
     · exact hepost'.2
 
 @[simp, grind =]
-theorem OptionT.apply_wp {α : Type u} {Pred : Type u} {EPred}
+theorem OptionT.wp_apply_eq {α : Type u} {Pred : Type u} {EPred}
   [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] (x : OptionT m α)
   (post : α → Pred) (epost : EPost.Cons Pred EPred) :
     wp x post epost = wp x.run (epost.pushOption post) epost.tail := rfl
@@ -272,7 +272,7 @@ instance (priority := low) StateT.instWPMonad {EPred : Type v} {σ : Type u} {Pr
     · exact hepost
 
 @[simp, grind =]
-theorem StateT.apply_wp {σ : Type u}
+theorem StateT.wp_apply_eq {σ : Type u}
   [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] (x : StateT σ m α)
   (post : α → σ → Pred) (epost : EPred) (s : σ) :
     wp x post epost s = wp (x.run s) (fun (a, s) => post a s) epost := rfl
@@ -297,7 +297,7 @@ instance ReaderT.instWPMonad {Pred : Type v}
     · exact hepost
 
 @[simp, grind =]
-theorem ReaderT.apply_wp {ρ : Type u}
+theorem ReaderT.wp_apply_eq {ρ : Type u}
   [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] (x : ReaderT ρ m α)
   (post : α → ρ → Pred) (epost : EPred) (r : ρ) :
     wp x post epost r = wp (x.run r) (fun a => post a r) epost := rfl

@@ -296,6 +296,14 @@ public def id? (self : Package) : Option PkgId :=
 @[inline] public def allowImportAll (self : Package) : Bool :=
   self.config.allowImportAll
 
+/-- The package's `requiresModuleSystem` configuration. -/
+@[inline] public def requiresModuleSystem (self : Package) : Bool :=
+  self.config.requiresModuleSystem
+
+/-- The package's `allowNonModules` configuration. -/
+@[inline] public def allowNonModules (self : Package) : Bool :=
+  self.config.allowNonModules
+
 /-- The package's `dynlibs` configuration. -/
 @[inline] public def dynlibs (self : Package) : TargetArray Dynlib :=
   self.config.dynlibs
