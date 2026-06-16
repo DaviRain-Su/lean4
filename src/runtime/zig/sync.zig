@@ -119,7 +119,91 @@ pub const Condvar = struct {
     }
 };
 
+pub const RecursiveMutex = struct {
+    raw: c.pthread_mutex_t,
+
+    pub fn init() RecursiveMutex {
+        var attr: c.pthread_mutexattr_t = undefined;
+        checkErrno("pthread_mutexattr_init", c.pthread_mutexattr_init(&attr));
+        defer checkErrno("pthread_mutexattr_destroy", c.pthread_mutexattr_destroy(&attr));
+
+        checkErrno("pthread_mutexattr_settype", c.pthread_mutexattr_settype(&attr, c.PTHREAD_MUTEX_RECURSIVE));
+
+        var raw: c.pthread_mutex_t = undefined;
+        checkErrno("pthread_mutex_init", c.pthread_mutex_init(&raw, &attr));
+        return .{ .raw = raw };
+    }
+
+    pub fn deinit(self: *RecursiveMutex) void {
+        checkErrno("pthread_mutex_destroy", c.pthread_mutex_destroy(&self.raw));
+    }
+
+    pub fn lock(self: *RecursiveMutex) void {
+        checkErrno("pthread_mutex_lock", c.pthread_mutex_lock(&self.raw));
+    }
+
+    pub fn tryLock(self: *RecursiveMutex) bool {
+        const rc = c.pthread_mutex_trylock(&self.raw);
+        if (rc == 0) return true;
+        if (rc == @intFromEnum(std.c.E.BUSY)) return false;
+        checkErrno("pthread_mutex_trylock", rc);
+        unreachable;
+    }
+
+    pub fn unlock(self: *RecursiveMutex) void {
+        checkErrno("pthread_mutex_unlock", c.pthread_mutex_unlock(&self.raw));
+    }
+};
+
+pub const SharedMutex = struct {
+    raw: c.pthread_rwlock_t,
+
+    pub fn init() SharedMutex {
+        var raw: c.pthread_rwlock_t = undefined;
+        checkErrno("pthread_rwlock_init", c.pthread_rwlock_init(&raw, null));
+        return .{ .raw = raw };
+    }
+
+    pub fn deinit(self: *SharedMutex) void {
+        checkErrno("pthread_rwlock_destroy", c.pthread_rwlock_destroy(&self.raw));
+    }
+
+    pub fn write(self: *SharedMutex) void {
+        checkErrno("pthread_rwlock_wrlock", c.pthread_rwlock_wrlock(&self.raw));
+    }
+
+    pub fn tryWrite(self: *SharedMutex) bool {
+        const rc = c.pthread_rwlock_trywrlock(&self.raw);
+        if (rc == 0) return true;
+        if (rc == @intFromEnum(std.c.E.BUSY)) return false;
+        checkErrno("pthread_rwlock_trywrlock", rc);
+        unreachable;
+    }
+
+    pub fn unlockWrite(self: *SharedMutex) void {
+        checkErrno("pthread_rwlock_unlock", c.pthread_rwlock_unlock(&self.raw));
+    }
+
+    pub fn read(self: *SharedMutex) void {
+        checkErrno("pthread_rwlock_rdlock", c.pthread_rwlock_rdlock(&self.raw));
+    }
+
+    pub fn tryRead(self: *SharedMutex) bool {
+        const rc = c.pthread_rwlock_tryrdlock(&self.raw);
+        if (rc == 0) return true;
+        if (rc == @intFromEnum(std.c.E.BUSY)) return false;
+        checkErrno("pthread_rwlock_tryrdlock", rc);
+        unreachable;
+    }
+
+    pub fn unlockRead(self: *SharedMutex) void {
+        checkErrno("pthread_rwlock_unlock", c.pthread_rwlock_unlock(&self.raw));
+    }
+};
+
 var g_basemutex_class: ?*lean.lean_external_class = null;
+var g_baserecmutex_class: ?*lean.lean_external_class = null;
+var g_basesharedmutex_class: ?*lean.lean_external_class = null;
 var g_condvar_class: ?*lean.lean_external_class = null;
 
 fn noopForeach(_: *anyopaque, _: ?*anyopaque) callconv(.c) void {}
@@ -132,6 +216,18 @@ fn allocExternalData(comptime T: type, value: T) *T {
 
 fn baseMutexFinalize(data: *anyopaque) callconv(.c) void {
     const mutex: *Mutex = @ptrCast(@alignCast(data));
+    mutex.deinit();
+    gpa.destroy(mutex);
+}
+
+fn baseRecMutexFinalize(data: *anyopaque) callconv(.c) void {
+    const mutex: *RecursiveMutex = @ptrCast(@alignCast(data));
+    mutex.deinit();
+    gpa.destroy(mutex);
+}
+
+fn baseSharedMutexFinalize(data: *anyopaque) callconv(.c) void {
+    const mutex: *SharedMutex = @ptrCast(@alignCast(data));
     mutex.deinit();
     gpa.destroy(mutex);
 }
@@ -149,6 +245,20 @@ fn ensureBaseMutexClass() *lean.lean_external_class {
     return g_basemutex_class.?;
 }
 
+fn ensureBaseRecMutexClass() *lean.lean_external_class {
+    if (g_baserecmutex_class == null) {
+        g_baserecmutex_class = rt_object.lean_register_external_class(@ptrCast(&baseRecMutexFinalize), @ptrCast(&noopForeach));
+    }
+    return g_baserecmutex_class.?;
+}
+
+fn ensureBaseSharedMutexClass() *lean.lean_external_class {
+    if (g_basesharedmutex_class == null) {
+        g_basesharedmutex_class = rt_object.lean_register_external_class(@ptrCast(&baseSharedMutexFinalize), @ptrCast(&noopForeach));
+    }
+    return g_basesharedmutex_class.?;
+}
+
 fn ensureCondvarClass() *lean.lean_external_class {
     if (g_condvar_class == null) {
         g_condvar_class = rt_object.lean_register_external_class(@ptrCast(&condvarFinalize), @ptrCast(&noopForeach));
@@ -157,6 +267,14 @@ fn ensureCondvarClass() *lean.lean_external_class {
 }
 
 fn baseMutexPtr(mtx: *anyopaque) *Mutex {
+    return @ptrCast(@alignCast(rt_object.lean_get_external_data(mtx).?));
+}
+
+fn baseRecMutexPtr(mtx: *anyopaque) *RecursiveMutex {
+    return @ptrCast(@alignCast(rt_object.lean_get_external_data(mtx).?));
+}
+
+fn baseSharedMutexPtr(mtx: *anyopaque) *SharedMutex {
     return @ptrCast(@alignCast(rt_object.lean_get_external_data(mtx).?));
 }
 
@@ -179,6 +297,56 @@ pub export fn lean_io_basemutex_try_lock(mtx: *anyopaque) callconv(.c) u8 {
 
 pub export fn lean_io_basemutex_unlock(mtx: *anyopaque) callconv(.c) *anyopaque {
     baseMutexPtr(mtx).unlock();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_baserecmutex_new() callconv(.c) *anyopaque {
+    return rt_object.lean_alloc_external(ensureBaseRecMutexClass(), allocExternalData(RecursiveMutex, RecursiveMutex.init()));
+}
+
+pub export fn lean_io_baserecmutex_lock(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseRecMutexPtr(mtx).lock();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_baserecmutex_try_lock(mtx: *anyopaque) callconv(.c) u8 {
+    return if (baseRecMutexPtr(mtx).tryLock()) 1 else 0;
+}
+
+pub export fn lean_io_baserecmutex_unlock(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseRecMutexPtr(mtx).unlock();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_basesharedmutex_new() callconv(.c) *anyopaque {
+    return rt_object.lean_alloc_external(ensureBaseSharedMutexClass(), allocExternalData(SharedMutex, SharedMutex.init()));
+}
+
+pub export fn lean_io_basesharedmutex_write(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseSharedMutexPtr(mtx).write();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_basesharedmutex_try_write(mtx: *anyopaque) callconv(.c) u8 {
+    return if (baseSharedMutexPtr(mtx).tryWrite()) 1 else 0;
+}
+
+pub export fn lean_io_basesharedmutex_unlock_write(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseSharedMutexPtr(mtx).unlockWrite();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_basesharedmutex_read(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseSharedMutexPtr(mtx).read();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_basesharedmutex_try_read(mtx: *anyopaque) callconv(.c) u8 {
+    return if (baseSharedMutexPtr(mtx).tryRead()) 1 else 0;
+}
+
+pub export fn lean_io_basesharedmutex_unlock_read(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseSharedMutexPtr(mtx).unlockRead();
     return rt_object.lean_box(0).?;
 }
 
@@ -278,6 +446,29 @@ test "mutex and condvar contention completes within one second" {
     const elapsed = wallClockNanos() - started;
     try testing.expect(elapsed < std.time.ns_per_s);
     try testing.expectEqual(@as(usize, 3), state.counter);
+}
+
+test "recursive mutex permits repeated locking by the owner" {
+    var mutex = RecursiveMutex.init();
+    defer mutex.deinit();
+
+    mutex.lock();
+    try testing.expect(mutex.tryLock());
+    mutex.unlock();
+    mutex.unlock();
+}
+
+test "shared mutex permits multiple readers and a writer after release" {
+    var mutex = SharedMutex.init();
+    defer mutex.deinit();
+
+    mutex.read();
+    try testing.expect(mutex.tryRead());
+    mutex.unlockRead();
+    mutex.unlockRead();
+
+    try testing.expect(mutex.tryWrite());
+    mutex.unlockWrite();
 }
 
 var g_once_counter = std.atomic.Value(usize).init(0);

@@ -349,6 +349,13 @@ def emitSignature (name : String) (sig : Signature .impure) : EmitM Unit := do
   emitParamList sig.params
   emitLn s!") callconv(.c) {sig.type.toZigType};"
 
+def emitExternVarDecl (name : String) (type : Expr) : EmitM Unit :=
+  emitLn s!"extern var {name}: {type.toZigType};"
+
+def emitLocalVarDecl (name : String) (type : Expr) : EmitM Unit := do
+  emitLn s!"var {name}: {type.toZigType} = undefined;"
+  emitLn <| "comptime { @export(&" ++ name ++ ", .{ .name = \"" ++ name ++ "\" }); }"
+
 def toZigClosureSymbolName (n : Name) : EmitM String := do
   return s!"{← toZigSymbolName n}___zig_closure"
 
@@ -562,6 +569,8 @@ def renderGlobalRefRhs (type : Expr) (fn : Name) : EmitM String := do
   let callable ← toCallableZigName fn
   if isSimpleGroundDecl env fn then
     return groundObjectName callable
+  else if hasInitAttr env fn then
+    return callable
   else if isClosedTermName env fn then
     let initName ← toZigInitName fn
     let token := toOnceTokenName callable
@@ -759,7 +768,9 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
       if rtArgs.isEmpty then
         let env ← getEnv
         let callable ← toCallableZigName fn
-        if let some localDecl := (← getLocalDecls).find? (·.name == fn) then
+        if hasInitAttr env fn then
+          pure [assign (← renderGlobalRefRhs type fn)]
+        else if let some localDecl := (← getLocalDecls).find? (·.name == fn) then
           if isSimpleGroundDecl env fn then
             pure [assign (← renderGlobalRefRhs type fn)]
           else if (runtimeParams localDecl.params).isEmpty then
@@ -1300,15 +1311,19 @@ def emitFnDecls : EmitM Unit := do
       continue
     if runtimeExternNames.contains name then
       continue
-    if isGlobalVarSignature env sig then
+    if hasInitAttr env sig.name then
+      emitExternVarDecl name sig.type
+    else if isGlobalVarSignature env sig then
       emitClosedTermDecl name sig.type
     else
       emitSignature name sig
-    if (isStandardExternC? env sig.name).isNone then
+    if !hasInitAttr env sig.name && (isStandardExternC? env sig.name).isNone then
       emitClosureSignatureFor sig
   for decl in (← getLocalDecls) do
     let env ← getEnv
     if hasInitAttr env decl.name then
+      if decl.params.isEmpty then
+        emitLocalVarDecl (← toZigSymbolName decl.name) decl.type
       continue
     if isSimpleGroundDecl env decl.name then
       continue
@@ -1422,7 +1437,32 @@ def emitFns : EmitM Unit := do
   for decl in (← getLocalDecls) do
     emitDecl decl
 
+def emitErrRetCall (call : String) : EmitM Unit := do
+  emitLn s!"  res = {call};"
+  emitLn "  if (lean_io_result_is_error(res)) return res;"
+
+def emitMarkPersistent (name : String) (type : Expr) : EmitM Unit := do
+  if type.isObj then
+    emitLn s!"  lean_mark_persistent({name});"
+
+def emitDeclInit (decl : Decl .impure) : EmitM Unit := do
+  let env ← getEnv
+  if isIOUnitInitFn env decl.name then
+    emitErrRetCall s!"{← toCallableZigName decl.name}()"
+    emitLn "  lean_dec_ref(res);"
+  else if decl.params.isEmpty then
+    if let some initFn := getInitFnNameFor? env decl.name then
+      let name ← toCallableZigName decl.name
+      emitErrRetCall s!"{← toCallableZigName initFn}()"
+      if decl.type.isScalar then
+        emitLn s!"  {name} = {decl.type.unboxOpName}(lean_io_result_get_value(res));"
+      else
+        emitLn s!"  {name} = lean_io_result_get_value(res);"
+        emitMarkPersistent name decl.type
+      emitLn "  lean_dec_ref(res);"
+
 def emitInitFn : EmitM Unit := do
+  let env ← getEnv
   let imported ← importedInitFnNames
   imported.forM fun fn => emitLn s!"extern fn {fn}(builtin: u8) callconv(.c) LeanObj;"
   if !imported.isEmpty then
@@ -1439,6 +1479,12 @@ def emitInitFn : EmitM Unit := do
   emitLn "  lean_initialize_thread();"
   for fn in imported do
     emitLn s!"  lean_dec_ref({fn}(builtin));"
+  let initDecls := (← getLocalDecls).filter fun decl =>
+    isIOUnitInitFn env decl.name || (decl.params.isEmpty && (getInitFnNameFor? env decl.name).isSome)
+  if !initDecls.isEmpty then
+    emitLn "  var res: LeanObj = lean_box(0);"
+  for decl in initDecls do
+    emitDeclInit decl
   emitLn "  return lean_io_result_mk_ok(lean_box(0));"
   emitLn "}"
   emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ initName ++ "\" }); }"
