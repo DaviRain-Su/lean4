@@ -2,6 +2,10 @@
 set -euo pipefail
 
 LEAN="${LEAN:-lean}"
+LEAN_BIN="$LEAN"
+if [[ "$LEAN_BIN" != /* ]]; then
+  LEAN_BIN="$(command -v "$LEAN_BIN")"
+fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build/release/stage1}"
 OUT_DIR="${LEAN_ZIG_OUT_DIR:-$BUILD_DIR/tests/emitzig}"
@@ -12,7 +16,7 @@ BASENAME="$(basename "$TEST" .lean)"
 mkdir -p "$OUT_DIR"
 OUT="$OUT_DIR/$BASENAME.zig"
 # Emit Zig code for the module.
-"$LEAN" -Dbackward.do.legacy=false "$TEST" -z "$OUT"
+"$LEAN_BIN" -Dbackward.do.legacy=false "$TEST" -z "$OUT"
 
 # Basic sanity: the file must be non-empty and mention the module.
 [[ -s "$OUT" ]] || { echo "Zig output is empty"; exit 1; }
@@ -29,16 +33,31 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
   LEANC="${LEANC:-$BUILD_DIR/bin/leanc}"
   if [[ -x "$LEANC" ]]; then
     EXE="$OUT_DIR/$BASENAME"
-    if [[ "${LEAN_ZIG_ZIGRT:-0}" == "1" ]]; then
-      if [[ "$BASENAME" == "StdlibString" ]]; then
-        BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN" --build-dir "$BUILD_DIR" --module Init.Data.String.Basic
-      else
-        BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-zigrt" "$OUT" "$EXE"
+    if [[ "${LEAN_ZIG_STDLIB:-0}" == "1" ]]; then
+      STDLIB_ARGS=()
+      if [[ -n "${LEAN_ZIG_STDLIB_CACHE_DIR:-}" ]]; then
+        STDLIB_ARGS+=(--cache-dir "$LEAN_ZIG_STDLIB_CACHE_DIR")
       fi
+      if [[ -n "${LEAN_ZIG_STDLIB_MODULES:-}" ]]; then
+        IFS=',' read -ra MODULES <<< "$LEAN_ZIG_STDLIB_MODULES"
+        for MODULE in "${MODULES[@]}"; do
+          [[ -n "$MODULE" ]] && STDLIB_ARGS+=(--module "$MODULE")
+        done
+      fi
+      BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR" "${STDLIB_ARGS[@]}"
+    elif [[ "${LEAN_ZIG_ZIGRT:-0}" == "1" ]]; then
+      BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-zigrt" "$OUT" "$EXE"
     else
       "$ROOT/tools/zigc" "$OUT" "$EXE"
     fi
-    "$EXE"
+    EXPECTED="$TEST_DIR/$BASENAME.expected"
+    if [[ -f "$EXPECTED" ]]; then
+      ACTUAL="$OUT_DIR/$BASENAME.out.actual"
+      "$EXE" > "$ACTUAL"
+      diff -u "$EXPECTED" "$ACTUAL"
+    else
+      "$EXE"
+    fi
   fi
 fi
 

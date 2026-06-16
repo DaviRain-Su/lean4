@@ -355,7 +355,7 @@ def isStandardExternC? (env : Environment) (name : Name) : Option String :=
     | _ => none
 
 def isGlobalVarSignature (env : Environment) (sig : Signature .impure) : Bool :=
-  (runtimeParams sig.params).isEmpty && (isStandardExternC? env sig.name).isNone
+  isSimpleGroundDecl env sig.name && !isClosedTermName env sig.name && (isStandardExternC? env sig.name).isNone
 
 @[inline] def zigIdent (name : Name) : String :=
   name.mangle (pre := "v_")
@@ -702,10 +702,10 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
             pure [assign s!"{callable}()"]
           else
             pure [assign s!"{callable}()"]
-        else if (isStandardExternC? env fn).isSome then
-          pure [assign s!"{callable}()"]
-        else
+        else if isSimpleGroundDecl env fn || isClosedTermName env fn then
           pure [assign (← renderGlobalRefRhs type fn)]
+        else
+          pure [assign s!"{callable}()"]
       else if args.size ≤ closureMaxArgs then
         let callable ← toCallableZigName fn
         pure [assign s!"{callable}({renderArgList args})"]

@@ -323,6 +323,7 @@ pub export fn lean_nat_to_int(a: *anyopaque) callconv(.c) *anyopaque {
 pub export fn lean_nat_abs(i: *anyopaque) callconv(.c) *anyopaque {
     if (lean_int_dec_lt(i, object.lean_box(0).?) != 0) {
         const neg = lean_int_neg(i);
+        if (object.lean_is_scalar(neg)) return neg;
         return lean_big_int_to_nat(neg);
     }
     if (!object.lean_is_scalar(i)) rc.lean_inc(i);
@@ -691,6 +692,14 @@ test "compat numeric wrappers handle representative cases" {
     try testing.expectEqual(@as(u8, 0), lean_float_to_uint8(-1.0));
     try testing.expectEqual(@as(u8, 255), lean_float_to_uint8(999.0));
     try testing.expectEqual(@as(u16, 7), lean_float32_to_uint16(7.9));
+}
+
+test "lean_nat_abs handles small negative Ints" {
+    const neg = object.lean_box(@as(usize, @intCast(@as(u32, @bitCast(@as(i32, -20)))))).?;
+    const abs = lean_nat_abs(neg);
+    defer rc.lean_dec(abs);
+    try testing.expect(object.lean_is_scalar(abs));
+    try testing.expectEqual(@as(usize, 20), object.lean_unbox(abs));
 }
 
 test "compat thunk wrappers allocate and return owned values" {

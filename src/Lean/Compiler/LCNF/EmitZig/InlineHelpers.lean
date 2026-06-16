@@ -347,16 +347,18 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_string_utf8_get_fast", joinLines [
     "inline fn lean_string_utf8_get_fast(s: LeanObj, i: LeanObj) u32 {",
-    "  const str: [*:0]const u8 = @ptrCast(lean_heap_obj(s));",
+    "  const bytes: [*]u8 = @ptrCast(lean_heap_obj(s));",
+    "  const str: [*:0]const u8 = @ptrCast(bytes + @sizeOf(lean_object) + 3 * @sizeOf(usize));",
     "  const idx = lean_unbox(i);",
     "  const c = str[idx];",
     "  if ((c & 0x80) == 0) return @as(u32, c);",
-    "  return lean_string_utf8_get_fast_cold(str, idx, lean_string_size(s), c);",
+    "  return lean_string_utf8_get_fast_cold(str, idx, lean_string_size(s) - 1, c);",
     "}"
   ]),
   ("lean_string_utf8_next_fast", joinLines [
     "inline fn lean_string_utf8_next_fast(s: LeanObj, i: LeanObj) LeanObj {",
-    "  const str: [*:0]const u8 = @ptrCast(lean_heap_obj(s));",
+    "  const bytes: [*]u8 = @ptrCast(lean_heap_obj(s));",
+    "  const str: [*:0]const u8 = @ptrCast(bytes + @sizeOf(lean_object) + 3 * @sizeOf(usize));",
     "  const idx = lean_unbox(i);",
     "  const c = str[idx];",
     "  if ((c & 0x80) == 0) return lean_box(idx + 1);",
@@ -395,7 +397,8 @@ private def mvpInlineHelperEntries : List (String × String) := [
     "  const idx = lean_unbox(i);",
     "  const size = lean_string_size(s) - 1;",
     "  if (idx >= size) return 0;",
-    "  const str: [*:0]const u8 = @ptrCast(lean_heap_obj(s));",
+    "  const bytes: [*]u8 = @ptrCast(lean_heap_obj(s));",
+    "  const str: [*:0]const u8 = @ptrCast(bytes + @sizeOf(lean_object) + 3 * @sizeOf(usize));",
     "  return @intFromBool((str[idx] & 0x80) == 0 or (str[idx] & 0xC0) != 0x80);",
     "}"
   ]),

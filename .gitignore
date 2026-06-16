@@ -38,5 +38,6 @@ src/runtime/zig/.zig-cache/
 src/runtime/zig/zig-out/
 tests/emitzig/*
 !tests/emitzig/*.lean
+!tests/emitzig/*.expected
 !tests/emitzig/*.sh
 .zigc-stdlib-cache/

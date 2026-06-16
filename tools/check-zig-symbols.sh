@@ -56,7 +56,8 @@ for TEST in "${TESTS[@]}"; do
   OUT="$TMP_DIR/$(basename "$TEST_PATH" .lean).zig"
   "$LEAN" -Dbackward.do.legacy=false "$TEST_PATH" -z "$OUT"
 
-  # Extract runtime symbols actually invoked by emitted Zig (skip extern/inline declarations).
+  # Extract runtime symbols actually invoked by emitted Zig. Do not count
+  # declarations or local definitions such as `_lean_main__def`.
   python3 - "$OUT" >> "$TMP_DIR/needed.unsorted.txt" <<'PY'
 import re, sys
 text = open(sys.argv[1]).read().splitlines()
@@ -64,7 +65,7 @@ syms = set()
 for line in text:
     if re.match(r"\s*(extern fn|inline fn)", line):
         continue
-    for m in re.finditer(r"lean_[A-Za-z0-9_]+\(", line):
+    for m in re.finditer(r"(?<![A-Za-z0-9_])lean_[A-Za-z0-9_]+\(", line):
         syms.add(m.group(0)[:-1])
 for sym in sorted(syms):
     print(sym)
@@ -91,18 +92,6 @@ sort -u "$TMP_DIR/defined.txt" "$TMP_DIR/zig_provided.txt" "$TMP_DIR/inline_prov
 # Symbols referenced but not covered by either runtime.
 comm -23 "$TMP_DIR/needed.txt" "$TMP_DIR/available.txt" > "$TMP_DIR/missing.txt"
 
-# Known inline C runtime functions not yet exported from the Zig runtime.
-KNOWN_MISSING=(
-  lean_closure_set
-  lean_del_object
-  lean_main__def
-)
-
-# Remove known missing symbols from the report.
-for sym in "${KNOWN_MISSING[@]}"; do
-  sed -i.bak "/^$sym$/d" "$TMP_DIR/missing.txt" 2>/dev/null || true
-done
-rm -f "$TMP_DIR/missing.txt.bak"
 
 COUNT="$(grep -c '^lean_' "$TMP_DIR/missing.txt" || true)"
 

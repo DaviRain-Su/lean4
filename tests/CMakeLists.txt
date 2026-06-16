@@ -338,6 +338,40 @@ if(LEAN_ZIG_RUNTIME)
         bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
   endforeach()
+  set(EMITZIG_STDLIB_TESTS
+    StdlibArray.lean
+    StdlibByteArray.lean
+    StdlibDirPath.lean
+    StdlibFile.lean
+    StdlibFilePath.lean
+    StdlibFind.lean
+    StdlibIO.lean
+    StdlibInt.lean
+    StdlibNatBig.lean
+    StdlibNatInt.lean
+    StdlibSlice.lean
+    StdlibString.lean
+    StdlibStringOps.lean
+    StdlibStringSearch.lean
+    StdlibSubstring.lean
+    StdlibTask.lean
+  )
+  foreach(T ${EMITZIG_STDLIB_TESTS})
+    add_test(
+      NAME "emitzig/stdlib/${T}"
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/emitzig"
+      COMMAND
+        "${CMAKE_COMMAND}" -E env
+        LEAN_ZIG_EXE=1
+        LEAN_ZIG_STDLIB=1
+        BUILD_DIR=${MANGLED_BINARY_DIR}
+        LEANC=${MANGLED_BINARY_DIR}/bin/leanc
+        LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
+        LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
+        bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
+    )
+    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES RUN_SERIAL TRUE)
+  endforeach()
   add_test(
     NAME emitzig/zig-symbols
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/.."
