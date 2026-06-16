@@ -102,7 +102,15 @@ pub export fn lean_finalize_thread() callconv(.c) void {
 
 fn setCurrentThreadName(name: [:0]const u8) void {
     if (builtin.os.tag == .macos) {
-        const rc = c.pthread_setname_np(name.ptr);
+        const rc = std.c.pthread_setname_np(name.ptr);
+        if (rc != 0) {
+            std.debug.panic("pthread_setname_np failed with errno {}", .{rc});
+        }
+    } else if (builtin.os.tag == .linux) {
+        var truncated: [16]u8 = [_]u8{0} ** 16;
+        const len = @min(name.len, truncated.len - 1);
+        @memcpy(truncated[0..len], name[0..len]);
+        const rc = std.c.pthread_setname_np(std.c.pthread_self(), @ptrCast(&truncated));
         if (rc != 0) {
             std.debug.panic("pthread_setname_np failed with errno {}", .{rc});
         }
@@ -182,8 +190,8 @@ fn nameWorker(state: *NameState) void {
     state.mutex.lock();
     defer state.mutex.unlock();
 
-    if (builtin.os.tag == .macos) {
-        state.name_status = c.pthread_getname_np(c.pthread_self(), &buffer, buffer.len);
+    if (builtin.os.tag == .macos or builtin.os.tag == .linux) {
+        state.name_status = std.c.pthread_getname_np(std.c.pthread_self(), @ptrCast(&buffer), buffer.len);
         if (state.name_status == 0) {
             copyZ(&state.observed_name, @ptrCast(&buffer));
         }
@@ -191,22 +199,22 @@ fn nameWorker(state: *NameState) void {
     state.saw_initialized = threadInitialized();
 }
 
-test "spawn sets thread name on darwin and initializes thread state" {
+test "spawn sets thread name on supported platforms and initializes thread state" {
     resetTestState();
 
     var state = NameState{};
     defer state.mutex.deinit();
 
     const thread_handle = try spawn(.{
-        .name = "lean-worker-test",
+        .name = "lean-worker",
         .stack_size = 256 * 1024,
     }, nameWorker, .{&state});
     thread_handle.join();
 
     try testing.expect(state.saw_initialized);
-    if (builtin.os.tag == .macos) {
+    if (builtin.os.tag == .macos or builtin.os.tag == .linux) {
         try testing.expectEqual(@as(c_int, 0), state.name_status);
-        try testing.expectEqualStrings("lean-worker-test", std.mem.sliceTo(&state.observed_name, 0));
+        try testing.expectEqualStrings("lean-worker", std.mem.sliceTo(&state.observed_name, 0));
     }
 }
 
