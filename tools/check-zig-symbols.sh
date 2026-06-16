@@ -23,30 +23,18 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 if [[ "$#" -gt 0 ]]; then
   TESTS=("$@")
 else
-  TESTS=(
-    Array.lean
-    Cases.lean
-    Closure.lean
-    Exception.lean
-    Float.lean
-    JoinPoint.lean
-    List.lean
-    Nat.lean
-    Recursion.lean
-    SetStdout.lean
-    Smoke.lean
-    Stderr.lean
-    String.lean
-    StringHelpers.lean
-    Task.lean
-  )
+  TESTS=()
+  for TEST_PATH in "$ROOT"/tests/emitzig/*.lean; do
+    TESTS+=("$(basename "$TEST_PATH")")
+  done
 fi
 
 : > "$TMP_DIR/needed.unsorted.txt"
 : > "$TMP_DIR/inline.unsorted.txt"
 
-# Emit Zig for the small emitzig corpus; together these cover the current
-# executable Zig-runtime test matrix without including stdlib-stub tests.
+# Emit Zig for the full emitzig corpus. The test pile already requires all of
+# these files to be valid EmitZig inputs; scanning the same set keeps the symbol
+# gate aligned as new stdlib-linked runtime tests are added.
 for TEST in "${TESTS[@]}"; do
   if [[ "$TEST" == /* ]]; then
     TEST_PATH="$TEST"
