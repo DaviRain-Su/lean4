@@ -363,18 +363,19 @@ def file_stamp(path: pathlib.Path) -> dict:
     }
 
 
+def normalize_lean_version(version: str) -> str:
+    return re.sub(r", commit [0-9a-f]+", ", commit <ignored>", version)
+
+
+@functools.lru_cache(maxsize=1)
+def emitzig_compiler_fingerprint() -> list[dict]:
+    compiler_root = ROOT / "src" / "Lean" / "Compiler"
+    paths = [ROOT / "src" / "Lean" / "Shell.lean"]
+    paths.extend(sorted(compiler_root.rglob("*.lean")))
+    return [file_stamp(path) for path in paths if path.exists()]
+
+
 @functools.lru_cache(maxsize=None)
-def file_sha256(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while True:
-            chunk = f.read(1024 * 1024)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def lean_fingerprint(lean: pathlib.Path) -> dict:
     result = subprocess.run(
         [str(lean), "--version"],
@@ -385,8 +386,8 @@ def lean_fingerprint(lean: pathlib.Path) -> dict:
     resolved = lean.resolve()
     return {
         "path": str(resolved),
-        "sha256": file_sha256(str(resolved)),
-        "version": result.stdout.strip(),
+        "version": normalize_lean_version(result.stdout.strip()),
+        "emitzig_compiler": emitzig_compiler_fingerprint(),
     }
 
 
