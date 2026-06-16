@@ -1,0 +1,15 @@
+HTTP/2.0
+HTTP/3.0
+true
+true
+1.0
+false
+true
+trace-a
+missing
+trace-b
+trace-b
+3
+false
+missing
+3
