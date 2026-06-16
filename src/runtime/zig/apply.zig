@@ -34,6 +34,12 @@ fn closureSlots(o: *lean.lean_closure_object) [*]Obj {
     return @ptrCast(&o.m_objs);
 }
 
+fn freeMovedClosureShell(f: *anyopaque) void {
+    const closure = closurePtr(f);
+    closure.m_num_fixed = 0;
+    alloc.lean_free_object(f);
+}
+
 fn opaqueFunPtr(fun: anytype) Obj {
     return @ptrCast(@constCast(fun));
 }
@@ -100,7 +106,7 @@ fn fixArgs(f: *anyopaque, provided: []const Obj) *anyopaque {
 
     if (rc.lean_is_exclusive(f)) {
         for (0..fixed) |i| target[i] = source[i];
-        alloc.lean_free_object(f);
+        freeMovedClosureShell(f);
     } else {
         for (0..fixed) |i| {
             target[i] = source[i];
@@ -140,7 +146,7 @@ fn applySlice(f: *anyopaque, provided: []const Obj) Obj {
         fillProvidedArgs(args, fixed, provided, provided.len);
         const result = callFunction(closure.m_fun, args);
         if (exclusive) {
-            alloc.lean_free_object(f);
+            freeMovedClosureShell(f);
         } else {
             rc.lean_dec_ref(f);
         }
@@ -270,6 +276,10 @@ fn testFn3(a1: Obj, a2: Obj, a3: Obj) callconv(.c) Obj {
     return object.lean_box(object.lean_unbox(a1) + object.lean_unbox(a2) + object.lean_unbox(a3));
 }
 
+fn returnFirst(a1: Obj, _: Obj) callconv(.c) Obj {
+    return a1;
+}
+
 fn outerCurried(a1: Obj) callconv(.c) Obj {
     const closure_ptr = alloc.lean_alloc_closure(opaqueFunPtr(&testFn2), 2, 1);
     const closure = closurePtr(closure_ptr);
@@ -304,6 +314,19 @@ test "lean_apply_2 exact arity calls the underlying function" {
     );
 
     try testing.expectEqual(@as(usize, 42), object.lean_unbox(result));
+}
+
+test "exclusive closure application moves fixed heap arguments" {
+    const fixed = alloc.lean_alloc_ctor(0, 0, 0);
+    const closure_ptr = alloc.lean_alloc_closure(opaqueFunPtr(&returnFirst), 2, 1);
+    const closure = closurePtr(closure_ptr);
+    closureSlots(closure)[0] = fixed;
+
+    const result = lean_apply_1(closure_ptr, object.lean_box(0).?) orelse @panic("expected result");
+    defer alloc.lean_free_object(result);
+
+    try testing.expectEqual(fixed, result);
+    try testing.expectEqual(@as(i32, 1), (@as(*lean.lean_object, @ptrCast(@alignCast(result)))).m_rc);
 }
 
 test "lean_apply_2 under arity returns a partial closure with existing and new fixed args" {

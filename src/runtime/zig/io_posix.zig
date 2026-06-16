@@ -125,6 +125,10 @@ fn mkOtherIoError(bytes: []const u8) *anyopaque {
     return io_result.lean_io_result_mk_error(io_error.lean_mk_io_error_other_error(0, string.mkAsciiStringBytes(bytes)));
 }
 
+fn mkInvalidArgumentIoError(bytes: []const u8) *anyopaque {
+    return io_result.lean_io_result_mk_error(io_error.lean_mk_io_error_invalid_argument(@intFromEnum(posix.E.INVAL), string.mkAsciiStringBytes(bytes)));
+}
+
 fn int64ToLean(n: i64) *anyopaque {
     const max_small: i64 = if (@sizeOf(usize) == 8) std.math.maxInt(c_int) else std.math.maxInt(c_int) >> 1;
     const min_small: i64 = if (@sizeOf(usize) == 8) std.math.minInt(c_int) else std.math.minInt(c_int) >> 1;
@@ -134,6 +138,13 @@ fn int64ToLean(n: i64) *anyopaque {
         return object.lean_box(bits).?;
     }
     return lean_big_int64_to_int(n);
+}
+
+fn durationObj(seconds: i64, nanoseconds: i64) *anyopaque {
+    const result = alloc.lean_alloc_ctor(0, 2, 0);
+    ctor.lean_ctor_set(result, 0, int64ToLean(seconds));
+    ctor.lean_ctor_set(result, 1, int64ToLean(nanoseconds));
+    return result;
 }
 
 fn systemTimeObj(sec: i64, nsec: u32) *anyopaque {
@@ -362,6 +373,22 @@ pub export fn lean_io_get_random_bytes(nbytes: usize) callconv(.c) *anyopaque {
     io.randomSecure(buf[0..nbytes]) catch return io_result.lean_io_result_mk_error(io_error.lean_mk_io_error_resource_exhausted(0, string.mkAsciiStringBytes("entropy unavailable")));
     return io_result.lean_io_result_mk_ok(res);
 }
+
+pub export fn lean_get_current_time() callconv(.c) *anyopaque {
+    const timestamp = std.Io.Clock.real.now(std.Io.Threaded.global_single_threaded.io()).nanoseconds;
+    const seconds: i64 = @intCast(@divTrunc(timestamp, std.time.ns_per_s));
+    const nanoseconds: i64 = @intCast(@rem(timestamp, std.time.ns_per_s));
+    return io_result.lean_io_result_mk_ok(durationObj(seconds, nanoseconds));
+}
+
+pub export fn lean_windows_get_next_transition(_: *anyopaque, _: u64, _: u8) callconv(.c) *anyopaque {
+    return mkInvalidArgumentIoError("failed to get timezone, its windows only.");
+}
+
+pub export fn lean_get_windows_local_timezone_id_at(_: u64) callconv(.c) *anyopaque {
+    return mkInvalidArgumentIoError("timezone retrieval is Windows-only");
+}
+
 pub export fn lean_io_timeit(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *anyopaque {
     const start = std.Io.Clock.awake.now(std.Io.Threaded.global_single_threaded.io());
     const res = lean_apply_1(fn_obj, object.lean_box(0).?) orelse @panic("lean_io_timeit: apply failed");

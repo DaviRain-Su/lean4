@@ -378,6 +378,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibStringSearch.lean
     StdlibSubstring.lean
     StdlibTask.lean
+    StdlibTime.lean
     StdlibTreeMap.lean
     StdlibTreeSet.lean
     StdlibUInt.lean
