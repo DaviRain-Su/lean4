@@ -351,6 +351,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibExtDHashMap.lean
     StdlibExtHashMap.lean
     StdlibExtHashSet.lean
+    StdlibExtTreeMap.lean
     StdlibHashMap.lean
     StdlibHashSet.lean
     StdlibIO.lean
