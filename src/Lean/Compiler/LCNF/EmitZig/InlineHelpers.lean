@@ -176,6 +176,7 @@ private def supportInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_inc_ref_n", joinLines [
     "inline fn lean_inc_ref_n(o: LeanObj, n: usize) void {",
+    "  if (lean_is_scalar(o) != 0) return;",
     "  const obj = lean_heap_obj(o);",
     "  if (lean_is_st(o)) {",
     "    obj.m_rc += @as(i32, @intCast(n));",
@@ -247,6 +248,7 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_dec_ref", joinLines [
     "inline fn lean_dec_ref(o: LeanObj) void {",
+    "  if (lean_is_scalar(o) != 0) return;",
     "  const obj = lean_heap_obj(o);",
     "  if (obj.m_rc > 1) {",
     "    obj.m_rc -= 1;",
@@ -524,6 +526,7 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_dec_ref_n", joinLines [
     "inline fn lean_dec_ref_n(o: LeanObj, n: usize) void {",
+    "  if (lean_is_scalar(o) != 0) return;",
     "  for (0..n) |_| { lean_dec_ref(o); }",
     "}"
   ]),
@@ -570,7 +573,7 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_dec_ref_known", joinLines [
     "inline fn lean_dec_ref_known(o: LeanObj, objs: c_uint) void {",
-    "  std.debug.assert(lean_is_scalar(o) == 0);",
+    "  if (lean_is_scalar(o) != 0) return;",
     "  if (lean_is_exclusive(o)) {",
     "    var i: c_uint = 0;",
     "    while (i < objs) : (i += 1) {",
@@ -605,6 +608,7 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_box_usize", joinLines [
     "inline fn lean_box_usize(value: usize) LeanObj {",
+    "  if (value <= LeanMaxSmallNat) { return lean_box(value); }",
     "  const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @sizeOf(usize));",
     "  lean_ctor_set_usize(r, @as(c_uint, 0), value);",
     "  return r;",
@@ -626,11 +630,13 @@ private def mvpInlineHelperEntries : List (String × String) := [
   ]),
   ("lean_unbox_usize", joinLines [
     "inline fn lean_unbox_usize(o: LeanObj) usize {",
+    "  if (lean_is_scalar(o) != 0) { return lean_unbox(o); }",
     "  return lean_ctor_get_usize(o, @as(c_uint, 0));",
     "}"
   ]),
   ("lean_unbox_uint64", joinLines [
     "inline fn lean_unbox_uint64(o: LeanObj) u64 {",
+    "  if (lean_is_scalar(o) != 0) { return @as(u64, @intCast(lean_unbox(o))); }",
     "  return lean_ctor_get_uint64(o, @as(c_uint, 0));",
     "}"
   ]),
