@@ -21,28 +21,10 @@ pub const force_link = true;
 
 const posix = std.posix;
 const c = std.c;
+const linux = std.os.linux;
 const gpa = std.heap.c_allocator;
 const NativeStat = switch (builtin.target.os.tag) {
-    .linux => switch (builtin.target.cpu.arch) {
-        .x86_64 => extern struct {
-            st_dev: c.dev_t,
-            st_ino: c.ino_t,
-            st_nlink: c.nlink_t,
-            st_mode: c.mode_t,
-            st_uid: c.uid_t,
-            st_gid: c.gid_t,
-            __pad0: c_int,
-            st_rdev: c.dev_t,
-            st_size: c.off_t,
-            st_blksize: c.blksize_t,
-            st_blocks: c.blkcnt_t,
-            st_atim: c.timespec,
-            st_mtim: c.timespec,
-            st_ctim: c.timespec,
-            __glibc_reserved: [3]isize,
-        },
-        else => @compileError("Linux NativeStat layout not implemented for this architecture"),
-    },
+    .linux => linux.Statx,
     else => c.Stat,
 };
 extern fn stat(path: [*:0]const u8, buf: *NativeStat) callconv(.c) c_int;
@@ -161,45 +143,38 @@ fn systemTimeObj(sec: i64, nsec: u32) *anyopaque {
     return result;
 }
 
-fn statSec(st: *const NativeStat, comptime base: []const u8) i64 {
+fn nativeStatSec(st: *const NativeStat, comptime base: []const u8) i64 {
     return switch (builtin.target.os.tag) {
-        .linux => if (std.mem.eql(u8, base, "st_at")) @intCast(st.st_atim.sec) else @intCast(st.st_mtim.sec),
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit =>
-            if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.sec) else @intCast(st.mtimespec.sec),
-        else => @panic("statSec unsupported on this platform"),
+        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.sec) else @intCast(st.mtimespec.sec),
+        else => @panic("nativeStatSec unsupported on this platform"),
     };
 }
 
-fn statNSec(st: *const NativeStat, comptime base: []const u8) u32 {
+fn nativeStatNSec(st: *const NativeStat, comptime base: []const u8) u32 {
     return switch (builtin.target.os.tag) {
-        .linux => if (std.mem.eql(u8, base, "st_at")) @intCast(st.st_atim.nsec) else @intCast(st.st_mtim.nsec),
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit =>
-            if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.nsec) else @intCast(st.mtimespec.nsec),
-        else => @panic("statNSec unsupported on this platform"),
+        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.nsec) else @intCast(st.mtimespec.nsec),
+        else => @panic("nativeStatNSec unsupported on this platform"),
     };
 }
 
-fn statMode(st: *const NativeStat) usize {
+fn nativeStatMode(st: *const NativeStat) usize {
     return switch (builtin.target.os.tag) {
-        .linux => @intCast(st.st_mode),
         .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.mode),
-        else => @panic("statMode unsupported on this platform"),
+        else => @panic("nativeStatMode unsupported on this platform"),
     };
 }
 
-fn statSize(st: *const NativeStat) u64 {
+fn nativeStatSize(st: *const NativeStat) u64 {
     return switch (builtin.target.os.tag) {
-        .linux => @intCast(st.st_size),
         .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.size),
-        else => @panic("statSize unsupported on this platform"),
+        else => @panic("nativeStatSize unsupported on this platform"),
     };
 }
 
-fn statNLink(st: *const NativeStat) u64 {
+fn nativeStatNLink(st: *const NativeStat) u64 {
     return switch (builtin.target.os.tag) {
-        .linux => @intCast(st.st_nlink),
         .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.nlink),
-        else => @panic("statNLink unsupported on this platform"),
+        else => @panic("nativeStatNLink unsupported on this platform"),
     };
 }
 
@@ -213,16 +188,39 @@ fn waitCode(status: c_int) u32 {
     };
 }
 
-fn metadataFromStat(st: *const NativeStat) *anyopaque {
-    const mode = statMode(st);
+fn metadataFromFields(at_sec: i64, at_nsec: u32, mt_sec: i64, mt_nsec: u32, mode: usize, size: u64, nlink: u64) *anyopaque {
     const ty: u8 = if ((mode & c.S.IFMT) == c.S.IFDIR) 0 else if ((mode & c.S.IFMT) == c.S.IFREG) 1 else if ((mode & c.S.IFMT) == c.S.IFLNK) 2 else 3;
     const result = alloc.lean_alloc_ctor(0, 2, 17);
-    ctor.lean_ctor_set(result, 0, systemTimeObj(statSec(st, "st_at"), statNSec(st, "st_at")));
-    ctor.lean_ctor_set(result, 1, systemTimeObj(statSec(st, "st_mt"), statNSec(st, "st_mt")));
-    ctor.lean_ctor_set_uint64(result, 2 * @sizeOf(*anyopaque), statSize(st));
-    ctor.lean_ctor_set_uint64(result, 2 * @sizeOf(*anyopaque) + @sizeOf(u64), statNLink(st));
+    ctor.lean_ctor_set(result, 0, systemTimeObj(at_sec, at_nsec));
+    ctor.lean_ctor_set(result, 1, systemTimeObj(mt_sec, mt_nsec));
+    ctor.lean_ctor_set_uint64(result, 2 * @sizeOf(*anyopaque), size);
+    ctor.lean_ctor_set_uint64(result, 2 * @sizeOf(*anyopaque) + @sizeOf(u64), nlink);
     ctor.lean_ctor_set_uint8(result, 2 * @sizeOf(*anyopaque) + 2 * @sizeOf(u64), ty);
     return result;
+}
+
+fn metadataFromNativeStat(st: *const NativeStat) *anyopaque {
+    return metadataFromFields(
+        nativeStatSec(st, "st_at"),
+        nativeStatNSec(st, "st_at"),
+        nativeStatSec(st, "st_mt"),
+        nativeStatNSec(st, "st_mt"),
+        nativeStatMode(st),
+        nativeStatSize(st),
+        nativeStatNLink(st),
+    );
+}
+
+fn metadataFromStatx(st: *const linux.Statx) *anyopaque {
+    return metadataFromFields(
+        st.atime.sec,
+        st.atime.nsec,
+        st.mtime.sec,
+        st.mtime.nsec,
+        @intCast(st.mode),
+        st.size,
+        st.nlink,
+    );
 }
 
 fn openFlags(mode: u8) c.O {
@@ -230,10 +228,23 @@ fn openFlags(mode: u8) c.O {
     flags.CLOEXEC = true;
     switch (mode) {
         0 => flags.ACCMODE = .RDONLY,
-        1 => { flags.ACCMODE = .WRONLY; flags.CREAT = true; flags.TRUNC = true; },
-        2 => { flags.ACCMODE = .WRONLY; flags.CREAT = true; flags.TRUNC = true; flags.EXCL = true; },
+        1 => {
+            flags.ACCMODE = .WRONLY;
+            flags.CREAT = true;
+            flags.TRUNC = true;
+        },
+        2 => {
+            flags.ACCMODE = .WRONLY;
+            flags.CREAT = true;
+            flags.TRUNC = true;
+            flags.EXCL = true;
+        },
         3 => flags.ACCMODE = .RDWR,
-        4 => { flags.ACCMODE = .WRONLY; flags.CREAT = true; flags.APPEND = true; },
+        4 => {
+            flags.ACCMODE = .WRONLY;
+            flags.CREAT = true;
+            flags.APPEND = true;
+        },
         else => flags.ACCMODE = .RDONLY,
     }
     return flags;
@@ -419,16 +430,30 @@ pub export fn lean_io_read_dir(dirname: *anyopaque) callconv(.c) *anyopaque {
 
 pub export fn lean_io_metadata(filename: *anyopaque) callconv(.c) *anyopaque {
     const path = pathArg(filename) orelse return invalidPath(filename);
+    if (builtin.target.os.tag == .linux) {
+        var st: linux.Statx = undefined;
+        const rc_statx = linux.statx(linux.AT.FDCWD, path, 0, linux.STATX.BASIC_STATS, &st);
+        const err = linux.errno(rc_statx);
+        if (err != .SUCCESS) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(err), filename));
+        return io_result.lean_io_result_mk_ok(metadataFromStatx(&st));
+    }
     var st: NativeStat = undefined;
     if (stat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
-    return io_result.lean_io_result_mk_ok(metadataFromStat(&st));
+    return io_result.lean_io_result_mk_ok(metadataFromNativeStat(&st));
 }
 
 pub export fn lean_io_symlink_metadata(filename: *anyopaque) callconv(.c) *anyopaque {
     const path = pathArg(filename) orelse return invalidPath(filename);
+    if (builtin.target.os.tag == .linux) {
+        var st: linux.Statx = undefined;
+        const rc_statx = linux.statx(linux.AT.FDCWD, path, linux.AT.SYMLINK_NOFOLLOW, linux.STATX.BASIC_STATS, &st);
+        const err = linux.errno(rc_statx);
+        if (err != .SUCCESS) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(err), filename));
+        return io_result.lean_io_result_mk_ok(metadataFromStatx(&st));
+    }
     var st: NativeStat = undefined;
     if (lstat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
-    return io_result.lean_io_result_mk_ok(metadataFromStat(&st));
+    return io_result.lean_io_result_mk_ok(metadataFromNativeStat(&st));
 }
 
 pub export fn lean_io_create_dir(path_obj: *anyopaque) callconv(.c) *anyopaque {
