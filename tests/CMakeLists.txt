@@ -347,6 +347,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibFile.lean
     StdlibFilePath.lean
     StdlibFind.lean
+    StdlibDHashMap.lean
     StdlibHashMap.lean
     StdlibHashSet.lean
     StdlibIO.lean
