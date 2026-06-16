@@ -1,0 +1,15 @@
+https://example.com:443/a/./b/../c?tag=a&tag=b#frag%20ment
+https://example.com:443/a/c?tag=a&tag=b#frag%20ment
+a,.,b,..,c
+tag=a&tag=b
+uri-error:http://exa_mple.com/path
+/api/search?tag=lean&tag=zig&flag
+tag=lean&tag=zig&flag
+2
+
+example.com:8080
+
+0
+missing
+/alpha/%CE%B2/../gamma
+alpha,β,..,gamma
