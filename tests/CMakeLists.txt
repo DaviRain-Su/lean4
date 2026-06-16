@@ -316,6 +316,7 @@ if(LEAN_ZIG_RUNTIME)
     JoinPoint.lean
     List.lean
     Loop.lean
+    LoopControl.lean
     Nat.lean
     Recursion.lean
     SetStdout.lean

@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -195,10 +196,78 @@ def link(
     cmd.append(f"-femit-bin={output}")
     return subprocess.run(cmd, capture_output=True, text=True)
 
-def build_helperless_zigrt(zig: pathlib.Path, work_dir: pathlib.Path) -> pathlib.Path:
+def runtime_fingerprint(zig: pathlib.Path, runtime_dir: pathlib.Path) -> dict:
+    h = hashlib.sha256()
+    for path in sorted(runtime_dir.rglob("*")):
+        if not path.is_file() or path.suffix not in {".zig", ".c", ".h", ".zon"}:
+            continue
+        rel = path.relative_to(runtime_dir).as_posix()
+        if any(part in {".zig-cache", ".zig-global-cache", "zig-out"} for part in rel.split("/")):
+            continue
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(path.read_bytes())
+        h.update(b"\0")
+    zig_version = subprocess.run(
+        [str(zig), "version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    return {
+        "runtime_sha256": h.hexdigest(),
+        "zig": str(zig),
+        "zig_version": zig_version,
+        "export_lean_helpers": False,
+        "optimize": "Debug",
+    }
+
+
+def helperless_zigrt_meta_path(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt.meta"
+
+
+def helperless_zigrt_lib_path(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt" / "lib" / "libleanrt_zig.a"
+
+
+def helperless_zigrt_cache_valid(cache_dir: pathlib.Path, expected_meta: dict) -> bool:
+    lib = helperless_zigrt_lib_path(cache_dir)
+    if not lib.exists() or lib.stat().st_size == 0:
+        return False
+    meta_path = helperless_zigrt_meta_path(cache_dir)
+    if not meta_path.exists():
+        return False
+    try:
+        return json.loads(meta_path.read_text()) == expected_meta
+    except Exception:
+        return False
+
+
+def save_helperless_zigrt_cache(cache_dir: pathlib.Path, lib: pathlib.Path, meta: dict) -> pathlib.Path:
+    cached_lib = helperless_zigrt_lib_path(cache_dir)
+    cached_lib.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(lib, cached_lib)
+    helperless_zigrt_meta_path(cache_dir).write_text(json.dumps(meta, indent=2))
+    return cached_lib
+
+
+def build_helperless_zigrt(
+    zig: pathlib.Path,
+    work_dir: pathlib.Path,
+    cache_dir: pathlib.Path,
+    *,
+    force: bool,
+) -> pathlib.Path:
     runtime_dir = ROOT / "src" / "runtime" / "zig"
+    meta = runtime_fingerprint(zig, runtime_dir)
+    if not force and helperless_zigrt_cache_valid(cache_dir, meta):
+        print("[cache] helperless Zig runtime")
+        return helperless_zigrt_lib_path(cache_dir)
+
+    print("building helperless Zig runtime")
     prefix = work_dir / "zigrt-nohelpers"
-    cache_dir = work_dir / ".zig-runtime-cache"
+    zig_cache_dir = work_dir / ".zig-runtime-cache"
     global_cache_dir = work_dir / ".zig-runtime-global-cache"
     cmd = [
         str(zig),
@@ -206,7 +275,7 @@ def build_helperless_zigrt(zig: pathlib.Path, work_dir: pathlib.Path) -> pathlib
         "--prefix",
         str(prefix),
         "--cache-dir",
-        str(cache_dir),
+        str(zig_cache_dir),
         "--global-cache-dir",
         str(global_cache_dir),
         "-Dexport-lean-helpers=false",
@@ -217,7 +286,7 @@ def build_helperless_zigrt(zig: pathlib.Path, work_dir: pathlib.Path) -> pathlib
     lib = prefix / "lib" / "libleanrt_zig.a"
     if not lib.exists():
         raise FileNotFoundError(lib)
-    return lib
+    return save_helperless_zigrt_cache(cache_dir, lib, meta)
 
 
 def extract_undefined_symbols(stderr: str) -> list[str]:
@@ -452,7 +521,7 @@ def main() -> int:
     work = pathlib.Path(tempfile.mkdtemp(prefix="zigc-stdlib-"))
 
     try:
-        zigrt_lib = build_helperless_zigrt(zig, work)
+        zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, force=args.force)
         objs: list[pathlib.Path] = []
         failed_modules: list[str] = []
 
