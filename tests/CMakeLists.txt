@@ -376,6 +376,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibParsec.lean
     StdlibRange.lean
     StdlibSatAIG.lean
+    StdlibSatAIGVec.lean
     StdlibSatCNF.lean
     StdlibSInt.lean
     StdlibSlice.lean
