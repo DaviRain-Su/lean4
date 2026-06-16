@@ -684,7 +684,7 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
   let lhs := zigIdent binder
   let assign (rhs : String) := s!"{lhs} = {rhs};"
   let some sig ← getImpureSignature? fn
-    | pure [s!"@panic(\"missing EmitZig signature for {fn}\");"]
+    | throwError s!"missing EmitZig signature for {fn}"
   let args := runtimeArgs sig.params args
   match getExternAttrData? (← getEnv) fn |>.bind (getExternEntryFor · `c) with
   | some (.standard _ externName) =>
@@ -719,14 +719,14 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
           assign s!"lean_apply_n({fnVar}, {cUIntLit args.size}, &{argsVar})"
         ]
   | _ =>
-      pure [s!"@panic(\"failed to emit extern application {fn}\");"]
+      throwError s!"failed to emit extern application {fn}"
 
 def renderPapLines (binder : Name) (fn : Name) (args : Array (Arg .impure)) :
     EmitM (List String) := do
   let lhs := zigIdent binder
   let assign (rhs : String) := s!"{lhs} = {rhs};"
   let some sig ← getImpureSignature? fn
-    | pure [s!"@panic(\"missing EmitZig signature for {fn}\");"]
+    | throwError s!"missing EmitZig signature for {fn}"
   let callable ← toCallableZigName fn
   let args := runtimeArgs sig.params args
   pure <|

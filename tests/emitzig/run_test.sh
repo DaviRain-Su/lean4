@@ -30,7 +30,7 @@ import re
 import sys
 
 text = open(sys.argv[1], encoding="utf-8").read()
-match = re.search(r'EmitZig [^"\n]*not implemented[^"\n]*', text)
+match = re.search(r'@panic\("[^"\n]*EmitZig[^"\n]*"\)|EmitZig [^"\n]*not implemented[^"\n]*', text)
 if match:
     print(f"Unsupported EmitZig placeholder in generated Zig: {match.group(0)}", file=sys.stderr)
     sys.exit(1)
