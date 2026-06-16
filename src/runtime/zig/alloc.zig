@@ -206,9 +206,8 @@ fn freeSmall(ptr: *anyopaque) void {
     const meta = metaFromPayload(ptr);
     if (meta.magic != allocation_magic) @panic("missing allocation record for small object");
     if (meta.kind != allocation_kind_small) @panic("lean_free_small on non-small allocation");
-    const slot_idx: usize = meta.slot_idx;
-    setFreeListNext(ptr, g_small_free_lists[slot_idx]);
-    g_small_free_lists[slot_idx] = ptr;
+    // Keep freed small slots mapped but do not reuse them. The current free-list
+    // path can be corrupted by stale references in broader stdlib executions.
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
 }
 

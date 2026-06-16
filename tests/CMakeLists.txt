@@ -361,6 +361,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibExtTreeSet.lean
     StdlibHashMap.lean
     StdlibHashSet.lean
+    StdlibHttpURI.lean
     StdlibIO.lean
     StdlibInt.lean
     StdlibIterators.lean

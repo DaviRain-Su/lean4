@@ -899,9 +899,8 @@ partial def emitVarDecls : Code .impure → EmitM Unit
         emitVarDecls k
   | .jp decl k => do
       for p in runtimeParams decl.params do
-        if ← codeUsesFVarRuntime p.fvarId decl.value then
-          emitLn s!"  var {zigIdent p.fvarId.name}: {p.type.toZigType} = undefined;"
-          emitLn s!"  _ = &{zigIdent p.fvarId.name};"
+        emitLn s!"  var {zigIdent p.fvarId.name}: {p.type.toZigType} = undefined;"
+        emitLn s!"  _ = &{zigIdent p.fvarId.name};"
       emitVarDecls decl.value
       emitVarDecls k
   | .inc _ _ _ _ k
@@ -1316,6 +1315,7 @@ def emitDecl (decl : Decl .impure) : EmitM Unit := do
               let mutated := tailCallMutatesParam decl.name decl.params p.fvarId code
               let bindingKw := if mutated then "var" else "const"
               emitLn s!"  {bindingKw} {zigIdent p.fvarId.name}: {p.type.toZigType} = {tailStateIdent p.fvarId.name};"
+              emitLn s!"  _ = &{zigIdent p.fvarId.name};"
             if !usedParams.isEmpty then
               emitLn ""
           emitLn "    switch (jp_state) {"
@@ -1336,6 +1336,7 @@ def emitDecl (decl : Decl .impure) : EmitM Unit := do
             let mutated := tailCallMutatesParam decl.name decl.params p.fvarId code
             let bindingKw := if mutated then "var" else "const"
             emitLn s!"  {bindingKw} {zigIdent p.fvarId.name}: {p.type.toZigType} = {tailStateIdent p.fvarId.name};"
+            emitLn s!"  _ = &{zigIdent p.fvarId.name};"
           if !usedParams.isEmpty then
             emitLn ""
           emitBasicBlock code

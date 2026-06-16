@@ -22,6 +22,7 @@ pub const misc = @import("misc.zig");
 pub const nat = @import("nat.zig");
 pub const nat_constructors = @import("nat_constructors.zig");
 pub const nat_arithmetic = @import("nat_arithmetic.zig");
+pub const net_addr = @import("net_addr.zig");
 pub const mpz_zig = @import("mpz_zig");
 pub const mpz_object = @import("mpz_object.zig");
 pub const object = @import("object.zig");
@@ -61,6 +62,7 @@ comptime {
     _ = nat;
     _ = nat_constructors;
     _ = nat_arithmetic;
+    _ = net_addr.force_link;
     _ = mpz_zig;
     _ = mpz_object;
     _ = object;
