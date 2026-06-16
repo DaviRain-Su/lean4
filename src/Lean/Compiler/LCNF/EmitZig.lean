@@ -1111,7 +1111,7 @@ partial def emitBasicBlock (code0 : Code .impure) : EmitM Unit := do
                   emitLn s!"  _ = {zigIdent decl.fvarId.name};"
               code := k
           | none =>
-              throwError "EmitZig let-value emission not implemented yet"
+              throwError "unsupported EmitZig let-value in impure LCNF"
     | .inc fvarId n check persistent k =>
         unless persistent do
           let target := zigIdent fvarId.name
@@ -1184,7 +1184,7 @@ partial def emitBasicBlock (code0 : Code .impure) : EmitM Unit := do
                   emitBasicBlock k
                   emitLn "    },"
               | .alt .. =>
-                  throwError "EmitZig pure cases not implemented yet"
+                  throwError "unexpected pure case alternative in impure EmitZig LCNF"
             emitLn "  }"
         break
     | .return fvarId =>
@@ -1204,7 +1204,7 @@ partial def emitBasicBlock (code0 : Code .impure) : EmitM Unit := do
           emitLn s!"  jp_state = {cUIntLit jpState};"
           emitLn "  continue;"
         else if codeContainsJmpTo fvarId jpDecl.value then
-          throwError "EmitZig recursive join point not implemented yet"
+          throwError "missing EmitZig state for recursive join point"
         else
           for h : i in [0:jpDecl.params.size] do
             let p := jpDecl.params[i]
@@ -1427,7 +1427,7 @@ def emitDecl (decl : Decl .impure) : EmitM Unit := do
     else
       for p in runtimeParams decl.params do
         emitLn s!"  _ = {zigParamIdent p.fvarId.name};"
-      throwError "EmitZig body emission not implemented yet"
+      throwError "unsupported EmitZig function body"
     emitLn "}"
     emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ exportName ++ "\" }); }"
     emitLn ""

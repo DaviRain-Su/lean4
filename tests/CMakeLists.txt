@@ -366,6 +366,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibHttpData.lean
     StdlibHttpExtensions.lean
     StdlibHttpInternal.lean
+    StdlibHttpH1Parser.lean
     StdlibHttpURI.lean
     StdlibHttpURIParser.lean
     StdlibIO.lean
