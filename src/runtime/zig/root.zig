@@ -4,6 +4,7 @@ pub const alloc = @import("alloc.zig");
 pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
 pub const box = @import("box.zig");
+pub const byteslice = @import("byteslice.zig");
 pub const ctor = @import("ctor.zig");
 pub const compat = @import("compat.zig");
 pub const dbg = @import("dbg.zig");
@@ -42,6 +43,7 @@ comptime {
     _ = apply;
     _ = array;
     _ = box;
+    _ = byteslice;
     _ = ctor;
     _ = compat.force_link;
     _ = dbg;

@@ -143,6 +143,7 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
     ("lean_apply_m", "LeanObj", "LeanObj, c_uint, [*c]LeanObj"),
     ("lean_dbg_stack_trace", "LeanObj", "LeanObj"),
     ("lean_byte_array_copy_slice", "LeanObj", "LeanObj, LeanObj, LeanObj, LeanObj, LeanObj, u8"),
+    ("lean_byteslice_beq", "u8", "LeanObj, LeanObj"),
     ("lean_chmod", "LeanObj", "LeanObj, u32"),
     ("lean_sharecommon_eq", "u8", "LeanObj, LeanObj"),
     ("lean_sharecommon_hash", "u64", "LeanObj"),
@@ -160,6 +161,8 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
     ("lean_io_process_child_wait", "LeanObj", "LeanObj, LeanObj"),
     ("lean_io_get_task_state", "u8", "LeanObj"),
     ("lean_io_wait_any", "LeanObj", "LeanObj"),
+    ("lean_io_eprintln", "LeanObj", "LeanObj"),
+    ("lean_io_error_to_string", "LeanObj", "LeanObj"),
     ("lean_string_front", "u32", "LeanObj"),
     ("lean_nat_land", "LeanObj", "LeanObj, LeanObj"),
     ("lean_nat_lor", "LeanObj", "LeanObj, LeanObj"),
@@ -612,11 +615,13 @@ def main() -> int:
         args = list(entry[2:])
         funcs[name] = (ret, args)
 
-    # Ensure zig-runtime-only exports are declared with signatures from the Zig sources.
-    for name, sig in sorted(zig_rt_export_signatures().items()):
+    for name, sig in sorted(scan_init_extern_decls().items()):
         funcs.setdefault(name, sig)
 
-    for name, sig in sorted(scan_init_extern_decls().items()):
+    # Ensure zig-runtime-only exports are declared with signatures from the Zig sources.
+    # Lean extern declarations take precedence because EmitZig follows the Lean-side call ABI
+    # for IO externs whose runtime implementation still accepts an ignored world token.
+    for name, sig in sorted(zig_rt_export_signatures().items()):
         funcs.setdefault(name, sig)
 
     decls: list[str] = []

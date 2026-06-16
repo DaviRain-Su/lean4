@@ -343,6 +343,7 @@ if(LEAN_ZIG_RUNTIME)
   set(EMITZIG_STDLIB_TESTS
     StdlibArray.lean
     StdlibByteArray.lean
+    StdlibByteSlice.lean
     StdlibDirPath.lean
     StdlibFile.lean
     StdlibFilePath.lean
