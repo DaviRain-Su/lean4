@@ -471,8 +471,8 @@ pub export fn lean_uint8_of_nat_mk(a: *anyopaque) callconv(.c) u8 {
 }
 
 pub export fn lean_uint8_to_nat(a: u8) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint8_add(a1: u8, a2: u8) callconv(.c) u8 { return a1 + a2; }
-pub export fn lean_uint8_sub(a1: u8, a2: u8) callconv(.c) u8 { return a1 - a2; }
+pub export fn lean_uint8_add(a1: u8, a2: u8) callconv(.c) u8 { return a1 +% a2; }
+pub export fn lean_uint8_sub(a1: u8, a2: u8) callconv(.c) u8 { return a1 -% a2; }
 pub export fn lean_uint8_mul(a1: u8, a2: u8) callconv(.c) u8 { return a1 *% a2; }
 pub export fn lean_uint8_div(a1: u8, a2: u8) callconv(.c) u8 { return divOrZero(u8, a1, a2); }
 pub export fn lean_uint8_mod(a1: u8, a2: u8) callconv(.c) u8 { return modOrSelf(u8, a1, a2); }
@@ -481,7 +481,7 @@ pub export fn lean_uint8_xor(a: u8, b: u8) callconv(.c) u8 { return a ^ b; }
 pub export fn lean_uint8_shift_left(a: u8, b: u8) callconv(.c) u8 { return shiftLeft(u8, a, b); }
 pub export fn lean_uint8_shift_right(a: u8, b: u8) callconv(.c) u8 { return shiftRight(u8, a, b); }
 pub export fn lean_uint8_complement(a: u8) callconv(.c) u8 { return ~a; }
-pub export fn lean_uint8_neg(a: u8) callconv(.c) u8 { return @bitCast(-@as(i8, @bitCast(a))); }
+pub export fn lean_uint8_neg(a: u8) callconv(.c) u8 { return 0 -% a; }
 pub export fn lean_uint8_dec_lt(a1: u8, a2: u8) callconv(.c) u8 { return @intFromBool(a1 < a2); }
 pub export fn lean_uint8_dec_le(a1: u8, a2: u8) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
 pub export fn lean_uint8_to_uint16(a: u8) callconv(.c) u16 { return a; }
@@ -501,8 +501,8 @@ pub export fn lean_uint16_of_nat_mk(a: *anyopaque) callconv(.c) u16 {
 }
 
 pub export fn lean_uint16_to_nat(a: u16) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint16_add(a1: u16, a2: u16) callconv(.c) u16 { return a1 + a2; }
-pub export fn lean_uint16_sub(a1: u16, a2: u16) callconv(.c) u16 { return a1 - a2; }
+pub export fn lean_uint16_add(a1: u16, a2: u16) callconv(.c) u16 { return a1 +% a2; }
+pub export fn lean_uint16_sub(a1: u16, a2: u16) callconv(.c) u16 { return a1 -% a2; }
 pub export fn lean_uint16_mul(a1: u16, a2: u16) callconv(.c) u16 { return a1 *% a2; }
 pub export fn lean_uint16_div(a1: u16, a2: u16) callconv(.c) u16 { return divOrZero(u16, a1, a2); }
 pub export fn lean_uint16_mod(a1: u16, a2: u16) callconv(.c) u16 { return modOrSelf(u16, a1, a2); }
@@ -512,7 +512,7 @@ pub export fn lean_uint16_xor(a: u16, b: u16) callconv(.c) u16 { return a ^ b; }
 pub export fn lean_uint16_shift_left(a: u16, b: u16) callconv(.c) u16 { return shiftLeft(u16, a, b); }
 pub export fn lean_uint16_shift_right(a: u16, b: u16) callconv(.c) u16 { return shiftRight(u16, a, b); }
 pub export fn lean_uint16_complement(a: u16) callconv(.c) u16 { return ~a; }
-pub export fn lean_uint16_neg(a: u16) callconv(.c) u16 { return @bitCast(-@as(i16, @bitCast(a))); }
+pub export fn lean_uint16_neg(a: u16) callconv(.c) u16 { return 0 -% a; }
 pub export fn lean_uint16_dec_eq(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 == a2); }
 pub export fn lean_uint16_dec_lt(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 < a2); }
 pub export fn lean_uint16_dec_le(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
@@ -539,8 +539,8 @@ pub export fn lean_uint32_of_nat_mk(a: *anyopaque) callconv(.c) u32 {
 }
 
 pub export fn lean_uint32_to_nat(a: u32) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint32_add(a1: u32, a2: u32) callconv(.c) u32 { return a1 + a2; }
-pub export fn lean_uint32_sub(a1: u32, a2: u32) callconv(.c) u32 { return a1 - a2; }
+pub export fn lean_uint32_add(a1: u32, a2: u32) callconv(.c) u32 { return a1 +% a2; }
+pub export fn lean_uint32_sub(a1: u32, a2: u32) callconv(.c) u32 { return a1 -% a2; }
 pub export fn lean_uint32_mul(a1: u32, a2: u32) callconv(.c) u32 { return a1 *% a2; }
 pub export fn lean_uint32_div(a1: u32, a2: u32) callconv(.c) u32 { return divOrZero(u32, a1, a2); }
 pub export fn lean_uint32_mod(a1: u32, a2: u32) callconv(.c) u32 { return modOrSelf(u32, a1, a2); }
@@ -550,7 +550,7 @@ pub export fn lean_uint32_xor(a: u32, b: u32) callconv(.c) u32 { return a ^ b; }
 pub export fn lean_uint32_shift_left(a: u32, b: u32) callconv(.c) u32 { return shiftLeft(u32, a, b); }
 pub export fn lean_uint32_shift_right(a: u32, b: u32) callconv(.c) u32 { return shiftRight(u32, a, b); }
 pub export fn lean_uint32_complement(a: u32) callconv(.c) u32 { return ~a; }
-pub export fn lean_uint32_neg(a: u32) callconv(.c) u32 { return @bitCast(-@as(i32, @bitCast(a))); }
+pub export fn lean_uint32_neg(a: u32) callconv(.c) u32 { return 0 -% a; }
 pub export fn lean_uint32_dec_eq(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 == a2); }
 pub export fn lean_uint32_dec_lt(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 < a2); }
 pub export fn lean_uint32_dec_le(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
@@ -572,8 +572,8 @@ pub export fn lean_uint64_of_nat_mk(a: *anyopaque) callconv(.c) u64 {
 }
 
 pub export fn lean_uint64_to_nat(a: u64) callconv(.c) *anyopaque { return uint64ToNat(a); }
-pub export fn lean_uint64_add(a1: u64, a2: u64) callconv(.c) u64 { return a1 + a2; }
-pub export fn lean_uint64_sub(a1: u64, a2: u64) callconv(.c) u64 { return a1 - a2; }
+pub export fn lean_uint64_add(a1: u64, a2: u64) callconv(.c) u64 { return a1 +% a2; }
+pub export fn lean_uint64_sub(a1: u64, a2: u64) callconv(.c) u64 { return a1 -% a2; }
 pub export fn lean_uint64_mul(a1: u64, a2: u64) callconv(.c) u64 { return a1 *% a2; }
 pub export fn lean_uint64_div(a1: u64, a2: u64) callconv(.c) u64 { return divOrZero(u64, a1, a2); }
 pub export fn lean_uint64_mod(a1: u64, a2: u64) callconv(.c) u64 { return modOrSelf(u64, a1, a2); }
@@ -583,7 +583,7 @@ pub export fn lean_uint64_xor(a: u64, b: u64) callconv(.c) u64 { return a ^ b; }
 pub export fn lean_uint64_shift_left(a: u64, b: u64) callconv(.c) u64 { return shiftLeft(u64, a, b); }
 pub export fn lean_uint64_shift_right(a: u64, b: u64) callconv(.c) u64 { return shiftRight(u64, a, b); }
 pub export fn lean_uint64_complement(a: u64) callconv(.c) u64 { return ~a; }
-pub export fn lean_uint64_neg(a: u64) callconv(.c) u64 { return @bitCast(-@as(i64, @bitCast(a))); }
+pub export fn lean_uint64_neg(a: u64) callconv(.c) u64 { return 0 -% a; }
 pub export fn lean_uint64_dec_eq(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 == a2); }
 pub export fn lean_uint64_dec_lt(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 < a2); }
 pub export fn lean_uint64_dec_le(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
@@ -605,9 +605,9 @@ pub export fn lean_usize_of_nat_mk(a: *anyopaque) callconv(.c) usize {
 }
 
 pub export fn lean_usize_to_nat(a: usize) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_usize_add(a1: usize, a2: usize) callconv(.c) usize { return a1 + a2; }
-pub export fn lean_usize_sub(a1: usize, a2: usize) callconv(.c) usize { return a1 - a2; }
-pub export fn lean_usize_mul(a1: usize, a2: usize) callconv(.c) usize { return a1 * a2; }
+pub export fn lean_usize_add(a1: usize, a2: usize) callconv(.c) usize { return a1 +% a2; }
+pub export fn lean_usize_sub(a1: usize, a2: usize) callconv(.c) usize { return a1 -% a2; }
+pub export fn lean_usize_mul(a1: usize, a2: usize) callconv(.c) usize { return a1 *% a2; }
 pub export fn lean_usize_div(a1: usize, a2: usize) callconv(.c) usize { return divOrZero(usize, a1, a2); }
 pub export fn lean_usize_mod(a1: usize, a2: usize) callconv(.c) usize { return modOrSelf(usize, a1, a2); }
 pub export fn lean_usize_land(a: usize, b: usize) callconv(.c) usize { return a & b; }
@@ -616,7 +616,7 @@ pub export fn lean_usize_xor(a: usize, b: usize) callconv(.c) usize { return a ^
 pub export fn lean_usize_shift_left(a: usize, b: usize) callconv(.c) usize { return shiftLeft(usize, a, b); }
 pub export fn lean_usize_shift_right(a: usize, b: usize) callconv(.c) usize { return shiftRight(usize, a, b); }
 pub export fn lean_usize_complement(a: usize) callconv(.c) usize { return ~a; }
-pub export fn lean_usize_neg(a: usize) callconv(.c) usize { return @bitCast(-@as(isize, @bitCast(a))); }
+pub export fn lean_usize_neg(a: usize) callconv(.c) usize { return 0 -% a; }
 pub export fn lean_usize_dec_eq(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 == a2); }
 pub export fn lean_usize_dec_lt(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 < a2); }
 pub export fn lean_usize_dec_le(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
@@ -692,6 +692,33 @@ test "compat numeric wrappers handle representative cases" {
     try testing.expectEqual(@as(u8, 0), lean_float_to_uint8(-1.0));
     try testing.expectEqual(@as(u8, 255), lean_float_to_uint8(999.0));
     try testing.expectEqual(@as(u16, 7), lean_float32_to_uint16(7.9));
+}
+
+test "compat unsigned arithmetic wrappers use fixed-width wrapping semantics" {
+    try testing.expectEqual(@as(u8, 0), lean_uint8_add(std.math.maxInt(u8), 1));
+    try testing.expectEqual(std.math.maxInt(u8), lean_uint8_sub(0, 1));
+    try testing.expectEqual(@as(u8, 254), lean_uint8_mul(std.math.maxInt(u8), 2));
+    try testing.expectEqual(@as(u8, 128), lean_uint8_neg(128));
+
+    try testing.expectEqual(@as(u16, 0), lean_uint16_add(std.math.maxInt(u16), 1));
+    try testing.expectEqual(std.math.maxInt(u16), lean_uint16_sub(0, 1));
+    try testing.expectEqual(@as(u16, 65534), lean_uint16_mul(std.math.maxInt(u16), 2));
+    try testing.expectEqual(@as(u16, 32768), lean_uint16_neg(32768));
+
+    try testing.expectEqual(@as(u32, 0), lean_uint32_add(std.math.maxInt(u32), 1));
+    try testing.expectEqual(std.math.maxInt(u32), lean_uint32_sub(0, 1));
+    try testing.expectEqual(std.math.maxInt(u32) - 1, lean_uint32_mul(std.math.maxInt(u32), 2));
+    try testing.expectEqual(@as(u32, 1) << 31, lean_uint32_neg(@as(u32, 1) << 31));
+
+    try testing.expectEqual(@as(u64, 0), lean_uint64_add(std.math.maxInt(u64), 1));
+    try testing.expectEqual(std.math.maxInt(u64), lean_uint64_sub(0, 1));
+    try testing.expectEqual(std.math.maxInt(u64) - 1, lean_uint64_mul(std.math.maxInt(u64), 2));
+    try testing.expectEqual(@as(u64, 1) << 63, lean_uint64_neg(@as(u64, 1) << 63));
+
+    try testing.expectEqual(@as(usize, 0), lean_usize_add(std.math.maxInt(usize), 1));
+    try testing.expectEqual(std.math.maxInt(usize), lean_usize_sub(0, 1));
+    try testing.expectEqual(std.math.maxInt(usize) - 1, lean_usize_mul(std.math.maxInt(usize), 2));
+    try testing.expectEqual(@as(usize, 1) << (@bitSizeOf(usize) - 1), lean_usize_neg(@as(usize, 1) << (@bitSizeOf(usize) - 1)));
 }
 
 test "lean_nat_abs handles small negative Ints" {
