@@ -373,6 +373,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibNumericExterns.lean
     StdlibParsec.lean
     StdlibRange.lean
+    StdlibSatCNF.lean
     StdlibSInt.lean
     StdlibSlice.lean
     StdlibString.lean
