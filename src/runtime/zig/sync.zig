@@ -5,10 +5,13 @@ const builtin = @import("builtin");
 const std = @import("std");
 const testing = std.testing;
 const lean = @import("lean_object.zig");
+const rt_object = @import("object.zig");
 const c = @cImport({
     @cInclude("pthread.h");
     @cInclude("sys/time.h");
 });
+
+const gpa = std.heap.c_allocator;
 
 fn checkPThread(comptime name: []const u8, rc: std.c.E) void {
     if (rc != .SUCCESS) {
@@ -79,6 +82,14 @@ pub const Mutex = struct {
         checkPThread("pthread_mutex_lock", std.c.pthread_mutex_lock(&self.raw));
     }
 
+    pub fn tryLock(self: *Mutex) bool {
+        const rc = std.c.pthread_mutex_trylock(&self.raw);
+        if (rc == .SUCCESS) return true;
+        if (rc == .BUSY) return false;
+        checkPThread("pthread_mutex_trylock", rc);
+        unreachable;
+    }
+
     pub fn unlock(self: *Mutex) void {
         checkPThread("pthread_mutex_unlock", std.c.pthread_mutex_unlock(&self.raw));
     }
@@ -107,6 +118,88 @@ pub const Condvar = struct {
         checkPThread("pthread_cond_broadcast", std.c.pthread_cond_broadcast(&self.raw));
     }
 };
+
+var g_basemutex_class: ?*lean.lean_external_class = null;
+var g_condvar_class: ?*lean.lean_external_class = null;
+
+fn noopForeach(_: *anyopaque, _: ?*anyopaque) callconv(.c) void {}
+
+fn allocExternalData(comptime T: type, value: T) *T {
+    const data = gpa.create(T) catch @panic("out of memory");
+    data.* = value;
+    return data;
+}
+
+fn baseMutexFinalize(data: *anyopaque) callconv(.c) void {
+    const mutex: *Mutex = @ptrCast(@alignCast(data));
+    mutex.deinit();
+    gpa.destroy(mutex);
+}
+
+fn condvarFinalize(data: *anyopaque) callconv(.c) void {
+    const condvar: *Condvar = @ptrCast(@alignCast(data));
+    condvar.deinit();
+    gpa.destroy(condvar);
+}
+
+fn ensureBaseMutexClass() *lean.lean_external_class {
+    if (g_basemutex_class == null) {
+        g_basemutex_class = rt_object.lean_register_external_class(@ptrCast(&baseMutexFinalize), @ptrCast(&noopForeach));
+    }
+    return g_basemutex_class.?;
+}
+
+fn ensureCondvarClass() *lean.lean_external_class {
+    if (g_condvar_class == null) {
+        g_condvar_class = rt_object.lean_register_external_class(@ptrCast(&condvarFinalize), @ptrCast(&noopForeach));
+    }
+    return g_condvar_class.?;
+}
+
+fn baseMutexPtr(mtx: *anyopaque) *Mutex {
+    return @ptrCast(@alignCast(rt_object.lean_get_external_data(mtx).?));
+}
+
+fn condvarPtr(condvar: *anyopaque) *Condvar {
+    return @ptrCast(@alignCast(rt_object.lean_get_external_data(condvar).?));
+}
+
+pub export fn lean_io_basemutex_new() callconv(.c) *anyopaque {
+    return rt_object.lean_alloc_external(ensureBaseMutexClass(), allocExternalData(Mutex, Mutex.init()));
+}
+
+pub export fn lean_io_basemutex_lock(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseMutexPtr(mtx).lock();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_basemutex_try_lock(mtx: *anyopaque) callconv(.c) u8 {
+    return if (baseMutexPtr(mtx).tryLock()) 1 else 0;
+}
+
+pub export fn lean_io_basemutex_unlock(mtx: *anyopaque) callconv(.c) *anyopaque {
+    baseMutexPtr(mtx).unlock();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_condvar_new() callconv(.c) *anyopaque {
+    return rt_object.lean_alloc_external(ensureCondvarClass(), allocExternalData(Condvar, Condvar.init()));
+}
+
+pub export fn lean_io_condvar_wait(condvar: *anyopaque, mtx: *anyopaque) callconv(.c) *anyopaque {
+    condvarPtr(condvar).wait(baseMutexPtr(mtx));
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_condvar_notify_one(condvar: *anyopaque) callconv(.c) *anyopaque {
+    condvarPtr(condvar).signal();
+    return rt_object.lean_box(0).?;
+}
+
+pub export fn lean_io_condvar_notify_all(condvar: *anyopaque) callconv(.c) *anyopaque {
+    condvarPtr(condvar).broadcast();
+    return rt_object.lean_box(0).?;
+}
 
 pub const Once = struct {
     raw: c.pthread_once_t = onceInitValue(),

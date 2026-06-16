@@ -30,6 +30,10 @@ fn asString(o: *anyopaque) *lean.lean_string_object {
     return @ptrCast(@alignCast(o));
 }
 
+fn asObject(o: *anyopaque) *lean.lean_object {
+    return @ptrCast(@alignCast(o));
+}
+
 fn stringSize(o: *anyopaque) usize {
     return asString(o).m_size;
 }
@@ -176,6 +180,23 @@ pub export fn lean_slice_dec_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8 
     return @intFromBool(std.mem.order(u8, sliceBytes(s1), sliceBytes(s2)) == .lt);
 }
 
+pub export fn lean_option_get_or_block(o_opt: *anyopaque) callconv(.c) *anyopaque {
+    if (object.lean_is_scalar(o_opt)) {
+        @panic("PANIC: Promise.result!: promise has been dropped without ever being resolved");
+    }
+
+    const value = ctor.lean_ctor_get(o_opt, 0) orelse @panic("option some missing value");
+    const hdr = asObject(o_opt);
+    if (hdr.m_rc == 1) {
+        hdr.m_other = 0;
+        alloc.lean_free_small_object(o_opt);
+    } else {
+        rc.lean_inc(value);
+        rc.lean_dec(o_opt);
+    }
+    return value;
+}
+
 fn mkNameNum(prefix: *anyopaque, nat_value: usize, hash: u64) *anyopaque {
     const result = alloc.lean_alloc_ctor(0, 2, @sizeOf(u64));
     ctor.lean_ctor_set(result, 0, prefix);
@@ -244,4 +265,15 @@ test "lean_slice_dec_lt uses lexicographic order and slice length" {
     try testing.expectEqual(@as(u8, 1), lean_slice_dec_lt(less, greater));
     try testing.expectEqual(@as(u8, 0), lean_slice_dec_lt(greater, less));
     try testing.expectEqual(@as(u8, 1), lean_slice_dec_lt(prefix, less));
+}
+
+test "lean_option_get_or_block returns the some payload" {
+    const payload = string.mkAsciiStringBytes("ready");
+    const option = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(option, 0, payload);
+
+    const result = lean_option_get_or_block(option);
+    defer decIfHeap(result);
+
+    try testing.expectEqual(payload, result);
 }
