@@ -348,6 +348,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibFilePath.lean
     StdlibFind.lean
     StdlibHashMap.lean
+    StdlibHashSet.lean
     StdlibIO.lean
     StdlibInt.lean
     StdlibNatBig.lean
