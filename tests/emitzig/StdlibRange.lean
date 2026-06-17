@@ -54,3 +54,30 @@ def main : IO Unit := do
   IO.println bytes.size
   IO.println bytes.toArray[0]!
   IO.println bytes.toArray[5]!
+
+  let emptyClosed : Rcc Nat := 5...=2
+  IO.println emptyClosed.isEmpty
+  IO.println emptyClosed.size
+
+  let emptyOpen : Roo Nat := 4<...<5
+  IO.println emptyOpen.isEmpty
+  IO.println emptyOpen.size
+
+  let openTail : Roi UInt8 := (250 : UInt8)<...*
+  IO.println openTail.size
+  IO.println openTail.toArray[0]!
+  IO.println openTail.toArray[4]!
+
+  let upperClosed : Ric UInt8 := *...=(3 : UInt8)
+  IO.println upperClosed.size
+  IO.println upperClosed.toArray[0]!
+  IO.println upperClosed.toArray[3]!
+
+  let upperOpen : Rio UInt8 := *...<(3 : UInt8)
+  IO.println upperOpen.size
+  IO.println (upperOpen.toList.foldl (fun acc n => acc + n.toNat) 0)
+
+  let fullBytes : Rii UInt8 := *...*
+  IO.println fullBytes.size
+  IO.println fullBytes.toArray[0]!
+  IO.println fullBytes.toArray[255]!
