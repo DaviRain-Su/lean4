@@ -249,11 +249,9 @@ export fn lean_string_utf8_extract(s: *anyopaque, b0: *anyopaque, e0: *anyopaque
     const bytes = stringData(s);
     const sz = stringSize(s) - 1;
     if (b_in >= e_in or b_in >= sz) {
-        rc.lean_dec(s);
         return mkStringUncheckedBytes("", 0, 0);
     }
     if (!utf8.isUtf8FirstByte(bytes[b_in])) {
-        rc.lean_dec(s);
         return mkStringUncheckedBytes("", 0, 0);
     }
     const b = b_in;
@@ -268,7 +266,6 @@ export fn lean_string_utf8_extract(s: *anyopaque, b0: *anyopaque, e0: *anyopaque
     const dest = stringDataMut(result);
     @memcpy(dest[0..new_sz], bytes[b..e]);
     dest[new_sz] = 0;
-    rc.lean_dec(s);
     return result;
 }
 
@@ -405,18 +402,8 @@ test "string mk builds string from List Char" {
 
 test "string data builds List Char from string" {
     const s = lean_mk_string("héllo");
-    defer freeString(s);
-
     const list = lean_string_data(s);
-    defer {
-        var it: ?*anyopaque = list;
-        while (it) |node| {
-            if (object.lean_is_scalar(node)) break;
-            const next = ctor.lean_ctor_get(node, 1);
-            rc.lean_dec(node);
-            it = next;
-        }
-    }
+    defer rc.lean_dec(list);
 
     const expected = [_]u32{ 'h', 0xE9, 'l', 'l', 'o' };
     var it: ?*anyopaque = list;
@@ -466,7 +453,6 @@ test "string memcmp compares slices" {
 
 test "string utf8 set replaces codepoint" {
     const s = lean_mk_string("héllo");
-    defer freeString(s);
     const replaced = lean_string_utf8_set(s, object.lean_box(1).?, 'a');
     defer freeString(replaced);
     try testing.expectEqual(@as(usize, 6), stringSize(replaced));

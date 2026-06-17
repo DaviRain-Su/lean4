@@ -116,8 +116,10 @@ def normalize_symbol(sym: str) -> str:
 
 def extract_defined_symbols(path: pathlib.Path) -> set[str]:
     """Return global defined symbols from an object file or static archive."""
+    # Use `nm -g` (not `-gU`, which is macOS-only) and filter by symbol type.
+    # Undefined symbols are marked 'U' and ignored.
     result = subprocess.run(
-        ["nm", "-gU", str(path)],
+        ["nm", "-g", str(path)],
         capture_output=True,
         text=True,
         check=False,
@@ -125,8 +127,8 @@ def extract_defined_symbols(path: pathlib.Path) -> set[str]:
     symbols: set[str] = set()
     for line in result.stdout.splitlines():
         parts = line.split()
-        if len(parts) >= 3 and parts[1] in {"T", "D", "B", "S"}:
-            symbols.add(normalize_symbol(parts[2]))
+        if len(parts) >= 2 and parts[-2] in {"T", "D", "B", "S"}:
+            symbols.add(normalize_symbol(parts[-1]))
     return symbols
 
 
@@ -202,6 +204,44 @@ def extract_duplicate_symbol_objs(stderr: str) -> list[str]:
     return objs
 
 
+def discover_lib_dirs() -> list[str]:
+    """Return library search paths for gmp and libuv.
+
+    Environment variables GMP_LIB_DIR / LIBUV_LIB_DIR take precedence;
+    otherwise fall back to pkg-config and platform-specific defaults.
+    """
+    dirs: list[str] = []
+
+    def add_dir(env_var: str, pkg_name: str | None) -> None:
+        env_value = os.environ.get(env_var)
+        if env_value:
+            dirs.append(env_value)
+            return
+        if pkg_name and shutil.which("pkg-config"):
+            try:
+                libdir = subprocess.run(
+                    ["pkg-config", "--variable=libdir", pkg_name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                if libdir:
+                    dirs.append(libdir)
+                    return
+            except Exception:
+                pass
+
+    add_dir("GMP_LIB_DIR", "gmp")
+    add_dir("LIBUV_LIB_DIR", "libuv")
+
+    if sys.platform == "darwin":
+        for prefix in ("/opt/homebrew/lib", "/usr/local/lib"):
+            if os.path.isdir(prefix):
+                dirs.append(prefix)
+
+    return dirs
+
+
 def link(
     zig: pathlib.Path,
     objs: list[pathlib.Path],
@@ -214,10 +254,12 @@ def link(
     ] + [str(o) for o in objs] + [
         "-I", str(include_dir),
         str(zigrt_lib),
-        "-lgmp", "-luv", "-lpthread",
     ]
+    for lib_dir in discover_lib_dirs():
+        cmd.extend(["-L", lib_dir])
+    cmd.extend(["-lgmp", "-luv", "-lpthread"])
     if sys.platform == "darwin":
-        cmd.extend(["-L/opt/homebrew/lib", "-framework", "CoreFoundation"])
+        cmd.extend(["-framework", "CoreFoundation"])
     cmd.append(f"-femit-bin={output}")
     return subprocess.run(cmd, capture_output=True, text=True)
 

@@ -46,15 +46,12 @@ def main : IO Unit := do
   printRequestSize "req-mixed" (requestHead .v11 mixed) false
   printResponseSize "resp-eof" (responseHead .v11 empty) true
   printResponseSize "resp-no-eof" (responseHead .v11 empty) false
-  printRequestKeepAlive "v11-default" (requestHead .v11 empty)
-  printRequestKeepAlive "v11-close" (requestHead .v11 close)
-  printRequestKeepAlive "v10-default" (requestHead .v10 empty)
-  printRequestKeepAlive "v10-keep" (requestHead .v10 keepAlive)
-
-  -- Exercise setHeaders last. Keeping the updated value alive in EmitZig
-  -- currently corrupts later `Request.Head` allocations, so avoid using it
-  -- before the keep-alive checks.
   let updated :=
     Message.Head.setHeaders (dir := .receiving) (requestHead .v11 empty)
       (empty.insert! "Host" "example.com" |>.insert! "Connection" "close")
   IO.println (updated.headers.contains .host)
+
+  printRequestKeepAlive "v11-default" (requestHead .v11 empty)
+  printRequestKeepAlive "v11-close" (requestHead .v11 close)
+  printRequestKeepAlive "v10-default" (requestHead .v10 empty)
+  printRequestKeepAlive "v10-keep" (requestHead .v10 keepAlive)

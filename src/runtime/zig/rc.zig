@@ -26,6 +26,7 @@ else
     struct {
         extern fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void;
     };
+extern fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void;
 
 fn header(o: *anyopaque) *lean.lean_object {
     return @ptrCast(@alignCast(o));
@@ -88,6 +89,78 @@ fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
     }
 }
 
+fn decObject(todo: *std.ArrayList(*anyopaque), child: ?*anyopaque) void {
+    if (child) |ptr| {
+        if (object.lean_is_scalar(ptr)) return;
+        const hdr = header(ptr);
+        if (hdr.m_rc > 1) {
+            hdr.m_rc -= 1;
+        } else if (hdr.m_rc == 1) {
+            todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
+        } else if (hdr.m_rc < 0) {
+            const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
+            if (prev == -1) {
+                todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
+            }
+        }
+    }
+}
+
+fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
+    switch (tag) {
+        lean.LeanClosure => {
+            const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
+            const slots = closureSlots(closure);
+            for (0..closure.m_num_fixed) |i| decObject(todo, slots[i]);
+            alloc.lean_free_object(o);
+        },
+        lean.LeanArray => {
+            const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
+            const slots = arraySlots(array);
+            for (0..array.m_size) |i| decObject(todo, slots[i]);
+            alloc.lean_free_object(o);
+        },
+        lean.LeanScalarArray, lean.LeanString, lean.LeanMPZ => {
+            alloc.lean_free_object(o);
+        },
+        lean.LeanThunk => {
+            const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(o));
+            decObject(todo, thunk.m_closure);
+            decObject(todo, thunk.m_value);
+            alloc.lean_free_object(o);
+        },
+        lean.LeanRef => {
+            const ref_obj: *lean.lean_ref_object = @ptrCast(@alignCast(o));
+            decObject(todo, ref_obj.m_value);
+            alloc.lean_free_object(o);
+        },
+        lean.LeanPromise => {
+            task_runtime.leanrt_task_deactivate_promise_impl(o);
+        },
+        lean.LeanTask => {
+            const task: *lean.lean_task_object = @ptrCast(@alignCast(o));
+            leanrt_task_deactivate_task_impl(task);
+        },
+        lean.LeanExternal => {
+            alloc.lean_free_object(o);
+        },
+        else => @panic("unexpected object tag in delCoreOther"),
+    }
+}
+
+fn delCore(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
+    const hdr = header(o);
+    const tag = hdr.m_tag;
+    if (tag <= lean.LeanMaxCtorTag) {
+        const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(o));
+        const slots = ctorSlots(ctor);
+        for (0..hdr.m_other) |i| decObject(todo, slots[i]);
+        alloc.lean_free_object(o);
+    } else {
+        delCoreOther(todo, o, tag);
+    }
+}
+
 pub export fn lean_inc_ref_n(o: *anyopaque, n: usize) callconv(.c) void {
     if (n == 0) return;
 
@@ -115,18 +188,27 @@ pub export fn lean_inc(o: ?*anyopaque) callconv(.c) void {
     lean_inc_n(o, 1);
 }
 
-pub export fn lean_dec_ref_cold(o: *anyopaque) callconv(.c) void {
+pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
+    var o = o_arg;
     const hdr = header(o);
     if (hdr.m_rc == 1) {
-        if (hdr.m_tag == lean.LeanPromise) {
-            task_runtime.leanrt_task_deactivate_promise_impl(o);
-            return;
+        var todo: std.ArrayList(*anyopaque) = .empty;
+        defer todo.deinit(std.heap.page_allocator);
+        while (true) {
+            delCore(&todo, o);
+            if (todo.items.len == 0) return;
+            o = todo.pop().?;
         }
-        alloc.lean_free_object(o);
     } else if (hdr.m_rc < 0) {
         const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
         if (prev == -1) {
-            alloc.lean_free_object(o);
+            var todo: std.ArrayList(*anyopaque) = .empty;
+            defer todo.deinit(std.heap.page_allocator);
+            while (true) {
+                delCore(&todo, o);
+                if (todo.items.len == 0) return;
+                o = todo.pop().?;
+            }
         }
     }
 }

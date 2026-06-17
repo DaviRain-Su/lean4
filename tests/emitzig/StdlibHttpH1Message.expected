@@ -6,8 +6,8 @@ req-chunked-v10:none
 req-mixed:none
 resp-eof:fixed:0
 resp-no-eof:none
+true
 v11-default:true
 v11-close:false
 v10-default:false
 v10-keep:true
-true

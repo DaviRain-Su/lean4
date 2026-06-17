@@ -1,12 +1,9 @@
-// Copyright (c) 2026 Lean FRO, LLC. All rights reserved.
-// Released under Apache 2.0 license as described in the file LICENSE.
-
 const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
-
+const rc = @import("rc.zig");
 pub const lean_once_cell_t = extern struct {
     state: std.atomic.Value(c_int),
     lock: std.atomic.Value(c_int),
@@ -45,9 +42,7 @@ pub fn onceCold(comptime T: type, loc: *T, tok: *lean_once_cell_t, init: *const 
 export fn lean_obj_once_cold(loc: *?*anyopaque, tok: *lean_once_cell_t, init: *const fn () callconv(.c) ?*anyopaque) callconv(.c) ?*anyopaque {
     const value = onceCold(?*anyopaque, loc, tok, init);
     if (value) |ptr| {
-        if (!object.lean_is_scalar(ptr)) {
-            @as(*lean.lean_object, @ptrCast(@alignCast(ptr))).m_rc = 0;
-        }
+        rc.lean_mark_persistent(ptr);
     }
     return value;
 }

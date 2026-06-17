@@ -23,12 +23,50 @@ const posix = std.posix;
 const c = std.c;
 const linux = std.os.linux;
 const gpa = std.heap.c_allocator;
-const NativeStat = switch (builtin.target.os.tag) {
-    .linux => linux.Statx,
-    else => c.Stat,
-};
-extern fn stat(path: [*:0]const u8, buf: *NativeStat) callconv(.c) c_int;
-extern fn lstat(path: [*:0]const u8, buf: *NativeStat) callconv(.c) c_int;
+
+/// POSIX stat helpers and metadata conversion. This struct is only populated on
+/// non-Linux POSIX targets; Linux uses linux.statx directly (see lean_io_metadata).
+const PosixStat = if (builtin.target.os.tag != .linux) struct {
+    const Stat = c.Stat;
+
+    extern fn stat(path: [*:0]const u8, buf: *Stat) callconv(.c) c_int;
+    extern fn lstat(path: [*:0]const u8, buf: *Stat) callconv(.c) c_int;
+
+    fn nativeStatSec(st: *const Stat, comptime base: []const u8) i64 {
+        const ts = if (std.mem.eql(u8, base, "st_at")) st.atime() else st.mtime();
+        return @intCast(ts.sec);
+    }
+
+    fn nativeStatNSec(st: *const Stat, comptime base: []const u8) u32 {
+        const ts = if (std.mem.eql(u8, base, "st_at")) st.atime() else st.mtime();
+        return @intCast(ts.nsec);
+    }
+
+    fn nativeStatMode(st: *const Stat) usize {
+        return @intCast(st.mode);
+    }
+
+    fn nativeStatSize(st: *const Stat) u64 {
+        return @intCast(st.size);
+    }
+
+    fn nativeStatNLink(st: *const Stat) u64 {
+        return @intCast(st.nlink);
+    }
+
+    fn metadataFromStat(st: *const Stat) *anyopaque {
+        return metadataFromFields(
+            nativeStatSec(st, "st_at"),
+            nativeStatNSec(st, "st_at"),
+            nativeStatSec(st, "st_mt"),
+            nativeStatNSec(st, "st_mt"),
+            nativeStatMode(st),
+            nativeStatSize(st),
+            nativeStatNLink(st),
+        );
+    }
+} else struct {};
+
 extern fn mkstemp(template: [*:0]u8) callconv(.c) c_int;
 extern fn mkdtemp(template: [*:0]u8) callconv(.c) ?[*:0]u8;
 extern fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque;
@@ -154,41 +192,6 @@ fn systemTimeObj(sec: i64, nsec: u32) *anyopaque {
     return result;
 }
 
-fn nativeStatSec(st: *const NativeStat, comptime base: []const u8) i64 {
-    return switch (builtin.target.os.tag) {
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.sec) else @intCast(st.mtimespec.sec),
-        else => @panic("nativeStatSec unsupported on this platform"),
-    };
-}
-
-fn nativeStatNSec(st: *const NativeStat, comptime base: []const u8) u32 {
-    return switch (builtin.target.os.tag) {
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => if (std.mem.eql(u8, base, "st_at")) @intCast(st.atimespec.nsec) else @intCast(st.mtimespec.nsec),
-        else => @panic("nativeStatNSec unsupported on this platform"),
-    };
-}
-
-fn nativeStatMode(st: *const NativeStat) usize {
-    return switch (builtin.target.os.tag) {
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.mode),
-        else => @panic("nativeStatMode unsupported on this platform"),
-    };
-}
-
-fn nativeStatSize(st: *const NativeStat) u64 {
-    return switch (builtin.target.os.tag) {
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.size),
-        else => @panic("nativeStatSize unsupported on this platform"),
-    };
-}
-
-fn nativeStatNLink(st: *const NativeStat) u64 {
-    return switch (builtin.target.os.tag) {
-        .macos, .maccatalyst, .ios, .tvos, .watchos, .visionos, .driverkit => @intCast(st.nlink),
-        else => @panic("nativeStatNLink unsupported on this platform"),
-    };
-}
-
 fn waitCode(status: c_int) u32 {
     const s: u32 = @bitCast(status);
     if (c.W.IFEXITED(s)) return c.W.EXITSTATUS(s);
@@ -208,18 +211,6 @@ fn metadataFromFields(at_sec: i64, at_nsec: u32, mt_sec: i64, mt_nsec: u32, mode
     ctor.lean_ctor_set_uint64(result, 2 * @sizeOf(*anyopaque) + @sizeOf(u64), nlink);
     ctor.lean_ctor_set_uint8(result, 2 * @sizeOf(*anyopaque) + 2 * @sizeOf(u64), ty);
     return result;
-}
-
-fn metadataFromNativeStat(st: *const NativeStat) *anyopaque {
-    return metadataFromFields(
-        nativeStatSec(st, "st_at"),
-        nativeStatNSec(st, "st_at"),
-        nativeStatSec(st, "st_mt"),
-        nativeStatNSec(st, "st_mt"),
-        nativeStatMode(st),
-        nativeStatSize(st),
-        nativeStatNLink(st),
-    );
 }
 
 fn metadataFromStatx(st: *const linux.Statx) *anyopaque {
@@ -464,9 +455,9 @@ pub export fn lean_io_metadata(filename: *anyopaque) callconv(.c) *anyopaque {
         if (err != .SUCCESS) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(err), filename));
         return io_result.lean_io_result_mk_ok(metadataFromStatx(&st));
     }
-    var st: NativeStat = undefined;
-    if (stat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
-    return io_result.lean_io_result_mk_ok(metadataFromNativeStat(&st));
+    var st: PosixStat.Stat = undefined;
+    if (PosixStat.stat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
+    return io_result.lean_io_result_mk_ok(PosixStat.metadataFromStat(&st));
 }
 
 pub export fn lean_io_symlink_metadata(filename: *anyopaque) callconv(.c) *anyopaque {
@@ -478,9 +469,9 @@ pub export fn lean_io_symlink_metadata(filename: *anyopaque) callconv(.c) *anyop
         if (err != .SUCCESS) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(err), filename));
         return io_result.lean_io_result_mk_ok(metadataFromStatx(&st));
     }
-    var st: NativeStat = undefined;
-    if (lstat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
-    return io_result.lean_io_result_mk_ok(metadataFromNativeStat(&st));
+    var st: PosixStat.Stat = undefined;
+    if (PosixStat.lstat(path, &st) != 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, filename));
+    return io_result.lean_io_result_mk_ok(PosixStat.metadataFromStat(&st));
 }
 
 pub export fn lean_io_create_dir(path_obj: *anyopaque) callconv(.c) *anyopaque {

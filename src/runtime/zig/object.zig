@@ -281,3 +281,21 @@ test "lean_register_external_class stores callbacks" {
     try testing.expectEqual(&noopFinalize, cls.*.m_finalize);
     try testing.expectEqual(&noopForeach, cls.*.m_foreach);
 }
+
+test "lean_alloc_external round-trips class and data" {
+    const cls = lean_register_external_class(@ptrCast(&noopFinalize), @ptrCast(&noopForeach));
+    const data: *anyopaque = @ptrFromInt(0x1234);
+    const obj = lean_alloc_external(cls, data);
+    defer lean_dec_ref(obj);
+    try testing.expectEqual(cls, lean_get_external_class(obj));
+    try testing.expectEqual(data, lean_get_external_data(obj).?);
+}
+
+test "lean_set_external_data updates exclusive external object" {
+    const cls = lean_register_external_class(@ptrCast(&noopFinalize), @ptrCast(&noopForeach));
+    const obj = lean_alloc_external(cls, @ptrFromInt(0x1));
+    defer lean_dec_ref(obj);
+    const updated = lean_set_external_data(obj, @ptrFromInt(0x2));
+    try testing.expectEqual(updated, obj);
+    try testing.expectEqual(@as(?*anyopaque, @ptrFromInt(0x2)), lean_get_external_data(obj));
+}

@@ -18,9 +18,40 @@ fi
 INPUT="$1"
 OUTPUT="${2:-$(basename "$INPUT" .zig)}"
 
+EXTRA_FLAGS=()
+
+# Discover library search paths for gmp and libuv. Environment variables
+# GMP_LIB_DIR / LIBUV_LIB_DIR take precedence; otherwise fall back to
+# pkg-config and then platform-specific defaults.
+add_lib_dir() {
+  local dir="$1"
+  if [[ -d "$dir" ]]; then
+    EXTRA_FLAGS+=("-L$dir")
+  fi
+}
+
+if [[ -n "${GMP_LIB_DIR:-}" ]]; then
+  add_lib_dir "$GMP_LIB_DIR"
+elif command -v pkg-config &>/dev/null && pkg-config --exists gmp 2>/dev/null; then
+  add_lib_dir "$(pkg-config --variable=libdir gmp)"
+fi
+
+if [[ -n "${LIBUV_LIB_DIR:-}" ]]; then
+  add_lib_dir "$LIBUV_LIB_DIR"
+elif command -v pkg-config &>/dev/null && pkg-config --exists libuv 2>/dev/null; then
+  add_lib_dir "$(pkg-config --variable=libdir libuv)"
+fi
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # Homebrew on Apple Silicon vs Intel uses different prefixes.
+  add_lib_dir /opt/homebrew/lib
+  add_lib_dir /usr/local/lib
+  EXTRA_FLAGS+=(-framework CoreFoundation)
+fi
+
 zig build-exe "$INPUT" -O Debug \
   -I "$ROOT/build/release/stage1/include" \
   -L "$ROOT/build/release/stage1/lib/lean" \
   -lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread \
-  -L/opt/homebrew/lib -framework CoreFoundation \
+  "${EXTRA_FLAGS[@]}" \
   -femit-bin="$OUTPUT"

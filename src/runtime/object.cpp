@@ -2650,6 +2650,52 @@ extern "C" LEAN_EXPORT obj_res lean_float_array_push(obj_arg a, double d) {
     return r;
 }
 
+extern "C" LEAN_EXPORT obj_res lean_float_array_size(b_obj_arg a) {
+    return lean_box(lean_sarray_size(a));
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_uget(b_obj_arg a, size_t i) {
+    return lean_float_array_cptr(a)[i];
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_fget(b_obj_arg a, b_obj_arg i) {
+    return lean_float_array_uget(a, lean_unbox(i));
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_get(b_obj_arg a, b_obj_arg i) {
+    if (lean_is_scalar(i)) {
+        size_t idx = lean_unbox(i);
+        return idx < lean_sarray_size(a) ? lean_float_array_uget(a, idx) : 0.0;
+    } else {
+        /* The index must be out of bounds. Otherwise we would be out of memory. */
+        return 0.0;
+    }
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_uset(obj_arg a, size_t i, double d) {
+    obj_res r = lean_is_exclusive(a) ? a : lean_copy_float_array(a);
+    double * it = lean_float_array_cptr(r) + i;
+    *it = d;
+    return r;
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_fset(obj_arg a, b_obj_arg i, double d) {
+    return lean_float_array_uset(a, lean_unbox(i), d);
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_set(obj_arg a, b_obj_arg i, double d) {
+    if (!lean_is_scalar(i)) {
+        return a;
+    } else {
+        size_t idx = lean_unbox(i);
+        if (idx >= lean_sarray_size(a)) {
+            return a;
+        } else {
+            return lean_float_array_uset(a, idx, d);
+        }
+    }
+}
+
 // =======================================
 // Array functions for generated code
 

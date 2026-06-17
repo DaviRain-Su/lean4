@@ -198,6 +198,23 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
 ]
 
 
+# Manual overrides for signatures the C-header parser cannot reconstruct correctly.
+OVERRIDE_SIGNATURES: dict[str, tuple[str, list[str]]] = {
+    "lean_float_once_cold": ("f64", ["*f64", "*lean_once_cell_t", "*const fn() callconv(.c) f64"]),
+    "lean_float32_once_cold": ("f32", ["*f32", "*lean_once_cell_t", "*const fn() callconv(.c) f32"]),
+    "lean_obj_once_cold": ("LeanObj", ["*LeanObj", "*lean_once_cell_t", "*const fn() callconv(.c) LeanObj"]),
+    "lean_uint8_once_cold": ("u8", ["*u8", "*lean_once_cell_t", "*const fn() callconv(.c) u8"]),
+    "lean_uint16_once_cold": ("u16", ["*u16", "*lean_once_cell_t", "*const fn() callconv(.c) u16"]),
+    "lean_uint32_once_cold": ("u32", ["*u32", "*lean_once_cell_t", "*const fn() callconv(.c) u32"]),
+    "lean_uint64_once_cold": ("u64", ["*u64", "*lean_once_cell_t", "*const fn() callconv(.c) u64"]),
+    "lean_usize_once_cold": ("usize", ["*usize", "*lean_once_cell_t", "*const fn() callconv(.c) usize"]),
+}
+
+
+
+
+
+
 def load_inline_helper_names() -> set[str]:
     text = INLINE_HELPERS.read_text()
     names = set(re.findall(r'\("([^"]+)"', text))
@@ -587,9 +604,12 @@ def scan_init_extern_decls() -> dict[str, tuple[str, list[str]]]:
             funcs.setdefault(name, (zret, zargs))
             pos = m.end()
     return funcs
-
-
 def format_zig_extern(name: str, ret: str, args: list[str]) -> str:
+    if name in OVERRIDE_SIGNATURES:
+        ret, args = OVERRIDE_SIGNATURES[name]
+        sig_ret = "noreturn" if ret in {"noreturn void", "noreturn"} else ret
+        arg_sig = ", ".join(f"_{i}: {t}" for i, t in enumerate(args))
+        return f"extern fn {name}({arg_sig}) callconv(.c) {sig_ret};"
     ret, args = simplify_complex_signature(name, ret, args)
     if ret in {"noreturn void", "noreturn"}:
         sig_ret = "noreturn"

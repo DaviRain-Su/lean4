@@ -313,6 +313,7 @@ if(LEAN_ZIG_RUNTIME)
     Closure.lean
     Exception.lean
     Float.lean
+    FloatArray.lean
     JoinPoint.lean
     List.lean
     Loop.lean

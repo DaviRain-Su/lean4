@@ -9,6 +9,7 @@ const ctor = @import("ctor.zig");
 
 const Obj = ?*anyopaque;
 extern fn lean_usize_of_nat(a: *anyopaque) callconv(.c) usize;
+extern fn lean_usize_to_nat(a: usize) callconv(.c) *anyopaque;
 
 fn asArray(o: *anyopaque) *lean.lean_array_object {
     return @ptrCast(@alignCast(o));
@@ -267,7 +268,7 @@ pub export fn lean_byte_array_copy_slice(src: *anyopaque, o_src_off: *anyopaque,
     return result;
 }
 
-pub fn lean_float_array_get(a: *anyopaque, i: Obj) f64 {
+fn lean_float_array_get_impl(a: *anyopaque, i: Obj) f64 {
     if (object.lean_is_scalar(i)) {
         const idx = object.lean_unbox(i);
         return if (idx < lean_sarray_size(a)) floatSlots(a)[idx] else 0.0;
@@ -275,23 +276,51 @@ pub fn lean_float_array_get(a: *anyopaque, i: Obj) f64 {
     return 0.0;
 }
 
-fn lean_float_array_uget(a: *anyopaque, i: usize) f64 {
+fn lean_float_array_uget_impl(a: *anyopaque, i: usize) f64 {
     std.debug.assert(i < lean_sarray_size(a));
     return floatSlots(a)[i];
 }
 
-pub fn lean_float_array_uset(a: *anyopaque, i: usize, d: f64) *anyopaque {
+fn lean_float_array_uset_impl(a: *anyopaque, i: usize, d: f64) *anyopaque {
     const result = ensureExclusiveSArray(a);
     std.debug.assert(i < lean_sarray_size(result));
     floatSlots(result)[i] = d;
     return result;
 }
 
-pub fn lean_float_array_set(a: *anyopaque, i: Obj, d: f64) *anyopaque {
+fn lean_float_array_set_impl(a: *anyopaque, i: Obj, d: f64) *anyopaque {
     if (!object.lean_is_scalar(i)) return a;
     const idx = object.lean_unbox(i);
     if (idx >= lean_sarray_size(a)) return a;
-    return lean_float_array_uset(a, idx, d);
+    return lean_float_array_uset_impl(a, idx, d);
+}
+
+export fn lean_float_array_size(a: *anyopaque) callconv(.c) *anyopaque {
+    return lean_usize_to_nat(lean_sarray_size(a));
+}
+
+export fn lean_float_array_uget(a: *anyopaque, i: usize) callconv(.c) f64 {
+    return lean_float_array_uget_impl(a, i);
+}
+
+export fn lean_float_array_get(a: *anyopaque, i: *anyopaque) callconv(.c) f64 {
+    return lean_float_array_get_impl(a, i);
+}
+
+export fn lean_float_array_fget(a: *anyopaque, i: *anyopaque) callconv(.c) f64 {
+    return lean_float_array_get_impl(a, i);
+}
+
+export fn lean_float_array_uset(a: *anyopaque, i: usize, d: f64) callconv(.c) *anyopaque {
+    return lean_float_array_uset_impl(a, i, d);
+}
+
+export fn lean_float_array_set(a: *anyopaque, i: *anyopaque, d: f64) callconv(.c) *anyopaque {
+    return lean_float_array_set_impl(a, i, d);
+}
+
+export fn lean_float_array_fset(a: *anyopaque, i: *anyopaque, d: f64) callconv(.c) *anyopaque {
+    return lean_float_array_set_impl(a, i, d);
 }
 export fn lean_array_mk(l: *anyopaque) callconv(.c) *anyopaque {
     var size: usize = 0;
@@ -519,31 +548,23 @@ test "lean_array_mk builds array from List constructor chain" {
 
 test "lean_array_to_list builds List constructor chain from array" {
     const array = allocObjectArray(3, 3);
-    defer freeIfHeap(array);
     fillArraySlot(array, 0, object.lean_box(1));
     fillArraySlot(array, 1, object.lean_box(2));
     fillArraySlot(array, 2, object.lean_box(3));
 
     const list = lean_array_to_list(array);
-    defer {
-        var it: ?*anyopaque = list;
-        while (it) |node| {
-            if (object.lean_is_scalar(node)) break;
-            const next = ctor.lean_ctor_get(node, 1);
-            rc.lean_dec(node);
-            it = next;
-        }
-    }
+    defer rc.lean_dec(list);
 
+    const expected = [_]usize{ 1, 2, 3 };
     var it: ?*anyopaque = list;
-    var expected: usize = 1;
+    var idx: usize = 0;
     while (it) |node| {
         if (object.lean_is_scalar(node)) break;
-        try testing.expectEqual(expected, object.lean_unbox(ctor.lean_ctor_get(node, 0)));
+        try testing.expectEqual(expected[idx], object.lean_unbox(ctor.lean_ctor_get(node, 0)));
         it = ctor.lean_ctor_get(node, 1);
-        expected += 1;
+        idx += 1;
     }
-    try testing.expectEqual(@as(usize, 4), expected);
+    try testing.expectEqual(expected.len, idx);
 }
 
 test "lean_array_set and lean_array_get round-trip boxed values" {
@@ -572,9 +593,9 @@ test "lean_float_array_set and get round-trip doubles" {
     defer freeIfHeap(array);
     floatSlots(array)[0] = 1.5;
 
-    const updated = lean_float_array_set(array, object.lean_box(0), 3.25);
+    const updated = lean_float_array_set_impl(array, object.lean_box(0), 3.25);
 
-    try testing.expectEqual(@as(f64, 3.25), lean_float_array_get(updated, object.lean_box(0)));
+    try testing.expectEqual(@as(f64, 3.25), lean_float_array_get_impl(updated, object.lean_box(0)));
 }
 
 test "non-exclusive object arrays copy before mutation" {

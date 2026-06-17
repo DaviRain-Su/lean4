@@ -564,6 +564,14 @@ def toClosureCallableZigName (fn : Name) (sig : Signature .impure) : EmitM Strin
   else
     toCallableZigName fn
 
+def shouldReadParamlessDeclFromGlobal (env : Environment) (decls : Array (Decl .impure)) (fn : Name) : Bool :=
+  if isSimpleGroundDecl env fn || hasInitAttr env fn then
+    false
+  else if let some decl := decls.find? (·.name == fn) then
+    decl.params.isEmpty
+  else
+    false
+
 def renderGlobalRefRhs (type : Expr) (fn : Name) : EmitM String := do
   let env ← getEnv
   let callable ← toCallableZigName fn
@@ -571,12 +579,17 @@ def renderGlobalRefRhs (type : Expr) (fn : Name) : EmitM String := do
     return groundObjectName callable
   else if hasInitAttr env fn then
     return callable
+  else if shouldReadParamlessDeclFromGlobal env (← getLocalDecls) fn && type.isObj then
+    let initName ← toZigInitName fn
+    let token := toOnceTokenName callable
+    let objName := groundObjectName callable
+    return s!"{closedTermReadOpName type}(&{objName}, &{token}, {initName})"
   else if isClosedTermName env fn then
     let initName ← toZigInitName fn
     let token := toOnceTokenName callable
     return s!"{closedTermReadOpName type}(&{callable}, &{token}, {initName})"
   else
-    return callable
+    return s!"{callable}()"
 
 abbrev GroundEmitM := StateT Nat EmitM
 
@@ -771,10 +784,8 @@ def renderFapLines (binder : Name) (type : Expr) (fn : Name) (args : Array (Arg 
         if hasInitAttr env fn then
           pure [assign (← renderGlobalRefRhs type fn)]
         else if let some localDecl := (← getLocalDecls).find? (·.name == fn) then
-          if isSimpleGroundDecl env fn then
+          if (runtimeParams localDecl.params).isEmpty && type.isObj then
             pure [assign (← renderGlobalRefRhs type fn)]
-          else if (runtimeParams localDecl.params).isEmpty then
-            pure [assign s!"{callable}()"]
           else
             pure [assign s!"{callable}()"]
         else if isSimpleGroundDecl env fn || isClosedTermName env fn then
@@ -1253,6 +1264,10 @@ def emitFileHeader : EmitM Unit := do
     "  m_other: u8,",
     "  m_tag: u8,",
     "};",
+    "const lean_once_cell_t = extern struct {",
+    "  state: i32,",
+    "  lock: i32,",
+    "};",
     "const LeanObj = ?*align(1) lean_object;",
     "const lean_ctor_object = extern struct {",
     "  m_header: lean_object,",
@@ -1330,6 +1345,21 @@ def emitFnDecls : EmitM Unit := do
     match decl.value with
     | .extern .. => pure ()
     | _ =>
+        if decl.params.isEmpty then
+          let baseName ← toZigSymbolName decl.name
+          let objName := groundObjectName baseName
+          let onceName := toOnceTokenName baseName
+          let initName ← toZigInitName decl.name
+          let zigType := decl.type.toZigType
+          let initDefault := if zigType == "LeanObj" then "lean_box(0)" else "0"
+          emitLn s!"var {objName}: {zigType} = {initDefault};"
+          emitLn ("comptime { @export(&" ++ objName ++ ", .{ .name = \"" ++ objName ++ "\" }); }")
+          emitLn ("var " ++ onceName ++ ": lean_once_cell_t = .{ .state = 0, .lock = 0 };")
+          emitLn ("comptime { @export(&" ++ onceName ++ ", .{ .name = \"" ++ onceName ++ "\" }); }")
+          emitLn (s!"fn {initName}() callconv(.c) {zigType} " ++ "{")
+          emitLn s!"  return {baseName}__def();"
+          emitLn "}"
+          emitLn ("comptime { @export(&" ++ initName ++ ", .{ .name = \"" ++ initName ++ "\" }); }")
         emitSignature (← toZigSymbolName decl.name) decl.toSignature
         emitClosureSignatureFor decl.toSignature
   emitLn ""
@@ -1479,11 +1509,10 @@ def emitInitFn : EmitM Unit := do
   emitLn "  lean_initialize_thread();"
   for fn in imported do
     emitLn s!"  lean_dec_ref({fn}(builtin));"
-  let initDecls := (← getLocalDecls).filter fun decl =>
-    isIOUnitInitFn env decl.name || (decl.params.isEmpty && (getInitFnNameFor? env decl.name).isSome)
-  if !initDecls.isEmpty then
+  let initAttrDecls := (← getLocalDecls).filter fun decl => hasInitAttr env decl.name
+  if !initAttrDecls.isEmpty then
     emitLn "  var res: LeanObj = lean_box(0);"
-  for decl in initDecls do
+  for decl in initAttrDecls do
     emitDeclInit decl
   emitLn "  return lean_io_result_mk_ok(lean_box(0));"
   emitLn "}"
