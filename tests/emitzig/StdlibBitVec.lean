@@ -28,3 +28,28 @@ def main : IO Unit := do
   IO.println low.clz.toNat
   IO.println low.ctz.toNat
   IO.println low.cpop.toNat
+  IO.println ((200 : BitVec 8) / (13 : BitVec 8)).toNat
+  IO.println ((200 : BitVec 8) % (13 : BitVec 8)).toNat
+  IO.println ((200 : BitVec 8) / (0 : BitVec 8)).toNat
+  let neg7 := BitVec.ofInt 8 (-7)
+  let pos2 : BitVec 8 := 2
+  IO.println (neg7.sdiv pos2).toInt
+  IO.println (neg7.srem pos2).toInt
+  IO.println (neg7.smod pos2).toInt
+  IO.println ((10 : BitVec 4) ++ (5 : BitVec 4)).toNat
+  IO.println (BitVec.replicate 3 (3 : BitVec 2)).toNat
+  IO.println (BitVec.fill 8 true).toNat
+  IO.println (BitVec.fill 8 false).toNat
+  IO.println a.msb
+  match a.getLsb? 2 with
+  | some bit => IO.println bit
+  | none => IO.println "none"
+  match a.getLsb? 8 with
+  | some bit => IO.println bit
+  | none => IO.println "none"
+  match a.getMsb? 7 with
+  | some bit => IO.println bit
+  | none => IO.println "none"
+  IO.println a.reverse.toNat
+  IO.println (BitVec.negOverflow (128 : BitVec 8))
+  IO.println (BitVec.sdivOverflow (128 : BitVec 8) (255 : BitVec 8))
