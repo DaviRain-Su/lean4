@@ -35,3 +35,30 @@ def main : IO Unit := do
   IO.println (showNatOption invalidNumeric.toNat?)
   IO.println (showSubstringOption (ss.dropPrefix? "alpha ".toRawSubstring))
   IO.println (showSubstringOption (ss.dropSuffix? " beta".toRawSubstring))
+  IO.println ss.front
+  IO.println (ss.get ⟨6⟩)
+  let afterFirst := ss.next 0
+  IO.println afterFirst.byteIdx
+  IO.println (ss.prev afterFirst).byteIdx
+  IO.println (ss.nextn 3 0).byteIdx
+  IO.println (ss.prevn 2 ⟨ss.bsize⟩).byteIdx
+  IO.println (ss.extract 0 (ss.nextn 5 0)).toString
+  IO.println (ss.extract (ss.nextn 5 0) (ss.nextn 5 0)).isEmpty
+  IO.println (ss.splitOn "").length
+  let csv := "a,,β,c".toRawSubstring
+  IO.println (csv.splitOn ",").length
+  match csv.splitOn "," with
+  | _ :: second :: third :: _ =>
+    IO.println second.toString.isEmpty
+    IO.println third.toString
+  | _ => IO.println "missing"
+  IO.println (ss.foldr (fun c acc => acc.push c) "")
+  IO.println (ss.any (fun c => c == 'b'))
+  IO.println (ss.all (fun c => c != '!'))
+  IO.println (ss.takeRightWhile Char.isAlpha).toString
+  IO.println ("[" ++ (ss.dropRightWhile Char.isAlpha).toString ++ "]")
+  IO.println ("[" ++ ("  x  ".toRawSubstring.trimLeft).toString ++ "]")
+  IO.println ("[" ++ ("  x  ".toRawSubstring.trimRight).toString ++ "]")
+  IO.println (("     ".toRawSubstring.trim).isEmpty)
+  IO.println (showSubstringOption (ss.dropPrefix? "gamma".toRawSubstring))
+  IO.println (showSubstringOption (ss.dropSuffix? "alpha".toRawSubstring))
