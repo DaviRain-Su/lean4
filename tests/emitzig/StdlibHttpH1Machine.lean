@@ -87,6 +87,24 @@ def printRoundTrip : IO Unit := do
   showStep "next" third
   IO.println s!"after-next:{machine.isWaitingMessage}:{machine.halted}:{machine.keepAlive}"
 
+def printHeadSuppression : IO Unit := do
+  let config : Config := {}
+  let machine : Machine .receiving := { config }
+  let request := "HEAD /meta HTTP/1.1\r\nHost: example.com\r\n\r\n"
+  let (machine, first) := (machine.feed request.toUTF8).step
+  IO.println s!"head-read:{showEvents first.events}:{machine.isWaitingMessage}:{machine.canPullBody}:{machine.keepAlive}"
+
+  let response : Response.Head := { status := .ok }
+  let machine :=
+    machine
+      |>.setKnownSize (.fixed 5)
+      |>.send response
+      |>.sendData #[chunk "hello"]
+      |>.userClosedBody
+  let (machine, second) := machine.step
+  showStep "head-write" second
+  IO.println s!"head-after-write:{machine.isWaitingMessage}:{machine.halted}:{machine.keepAlive}"
+
 def printBodyPulls : IO Unit := do
   let config : Config := {}
 
@@ -185,6 +203,7 @@ def printFailures : IO Unit := do
 
 def main : IO Unit := do
   printRoundTrip
+  printHeadSuppression
   printBodyPulls
   printClientRoundTrip
   printExpectContinue

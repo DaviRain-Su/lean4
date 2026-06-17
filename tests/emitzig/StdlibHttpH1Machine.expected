@@ -7,6 +7,10 @@ after-write:false:false:true
 next:events:need-more:none
 next:output:
 after-next:false:false:true
+head-read:end:HEAD:/meta:1,need-answer:true:true:true
+head-write:events:close-body,next
+head-write:output:HTTP/1.1 200 OK|Content-Length: 5||
+head-after-write:false:false:true
 fixed-step:end:POST:/upload:2,need-answer:true:true
 fixed-pull:chunk:hello:true:false:0:close-body:true:false
 chunk-step:end:POST:/chunk:2,need-answer:true
