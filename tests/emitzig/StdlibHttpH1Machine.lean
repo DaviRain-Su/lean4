@@ -109,6 +109,28 @@ def printBodyPulls : IO Unit := do
   let (chunkedMachine, chunkedEvents2) := chunkedMachine.takeEvents
   IO.println s!"chunk-pull2:{showPulledChunk? chunkedChunk2}:{showEvents chunkedEvents2}:{chunkedMachine.isReaderComplete}:{chunkedMachine.canPullBodyNow}"
 
+  let trailerReq := "POST /trail HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\nX-Trailer: yes\r\n\r\n"
+  let trailerMachine : Machine .receiving := { config }
+  let (trailerMachine, trailerStep) := (trailerMachine.feed trailerReq.toUTF8).step
+  IO.println s!"trailer-step:{showEvents trailerStep.events}:{trailerMachine.canPullBody}:{trailerMachine.failed}"
+  let (trailerMachine, trailerChunk1) := trailerMachine.pullBody
+  let (trailerMachine, trailerEvents1) := trailerMachine.takeEvents
+  IO.println s!"trailer-pull1:{showPulledChunk? trailerChunk1}:{showEvents trailerEvents1}:{trailerMachine.failed}:{trailerMachine.isReaderComplete}:{trailerMachine.canPullBodyNow}"
+  let (trailerMachine, trailerChunk2) := trailerMachine.pullBody
+  let (trailerMachine, trailerEvents2) := trailerMachine.takeEvents
+  IO.println s!"trailer-pull2:{showPulledChunk? trailerChunk2}:{showEvents trailerEvents2}:{trailerMachine.failed}:{trailerMachine.isReaderComplete}:{trailerMachine.canPullBodyNow}"
+
+  let badTrailerReq := "POST /trail HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\nContent-Length: 1\r\n\r\n"
+  let badTrailerMachine : Machine .receiving := { config }
+  let (badTrailerMachine, badTrailerStep) := (badTrailerMachine.feed badTrailerReq.toUTF8).step
+  IO.println s!"bad-trailer-step:{showEvents badTrailerStep.events}:{badTrailerMachine.canPullBody}:{badTrailerMachine.failed}"
+  let (badTrailerMachine, badTrailerChunk1) := badTrailerMachine.pullBody
+  let (badTrailerMachine, badTrailerEvents1) := badTrailerMachine.takeEvents
+  IO.println s!"bad-trailer-pull1:{showPulledChunk? badTrailerChunk1}:{showEvents badTrailerEvents1}:{badTrailerMachine.failed}:{badTrailerMachine.isReaderComplete}:{badTrailerMachine.canPullBodyNow}"
+  let (badTrailerMachine, badTrailerChunk2) := badTrailerMachine.pullBody
+  let (badTrailerMachine, badTrailerEvents2) := badTrailerMachine.takeEvents
+  IO.println s!"bad-trailer-pull2:{showPulledChunk? badTrailerChunk2}:{showEvents badTrailerEvents2}:{badTrailerMachine.failed}:{badTrailerMachine.isReaderComplete}:{badTrailerMachine.canPullBodyNow}"
+
 def printClientRoundTrip : IO Unit := do
   let config : Config := { agentName := some (Header.Value.ofString! "lean-client") }
   let machine : Machine .sending := { config }

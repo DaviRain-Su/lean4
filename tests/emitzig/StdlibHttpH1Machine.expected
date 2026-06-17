@@ -12,6 +12,12 @@ fixed-pull:chunk:hello:true:false:0:close-body:true:false
 chunk-step:end:POST:/chunk:2,need-answer:true
 chunk-pull1:chunk:lean:false:false:1::true
 chunk-pull2:chunk::true:false:0:close-body:true:false
+trailer-step:end:POST:/trail:2,need-answer:true:false
+trailer-pull1:chunk:abc:false:false:0::false:false:true
+trailer-pull2:chunk::true:false:0:close-body:false:true:false
+bad-trailer-step:end:POST:/trail:2,need-answer:true:false
+bad-trailer-pull1:chunk:abc:false:false:0::false:false:true
+bad-trailer-pull2:none:failed:Bad message:true:false:false
 client-initial:true:false:true
 client-write:events:need-more:none
 client-write:output:GET /client HTTP/1.1|User-Agent: lean-client|Content-Length: 0||
