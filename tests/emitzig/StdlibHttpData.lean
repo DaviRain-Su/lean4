@@ -49,32 +49,50 @@ def main : IO Unit := do
   match Header.ContentLength.parse (Header.Value.ofString! "42") with
   | some len => IO.println s!"length:{len.length}"
   | none => IO.println "length:error"
+  IO.println s!"length-empty:{(Header.ContentLength.parse (Header.Value.ofString! "")).isNone}"
+  IO.println s!"length-alpha:{(Header.ContentLength.parse (Header.Value.ofString! "4x")).isNone}"
   match Header.TransferEncoding.parse (Header.Value.ofString! "gzip, chunked") with
   | some te => IO.println s!"chunked:{te.isChunked}"
   | none => IO.println "chunked:error"
   IO.println (Header.TransferEncoding.parse (Header.Value.ofString! "chunked, gzip")).isNone
+  IO.println s!"te-duplicate:{(Header.TransferEncoding.parse (Header.Value.ofString! "chunked, chunked")).isNone}"
+  IO.println s!"te-empty-token:{(Header.TransferEncoding.parse (Header.Value.ofString! "gzip, ")).isNone}"
   match Header.Connection.parse (Header.Value.ofString! "keep-alive, Close") with
   | some connection => IO.println connection.shouldClose
   | none => IO.println "connection:error"
+  match Header.Connection.parse (Header.Value.ofString! "upgrade, keep-alive") with
+  | some connection =>
+      let (_, value) := Header.Connection.serialize connection
+      IO.println s!"connection:{connection.shouldClose}:{value.value}"
+  | none => IO.println "connection:error2"
   match Header.Host.parse (Header.Value.ofString! "[2001:db8::1]:8443") with
   | some host =>
       let (_, value) := Header.Host.serialize host
       IO.println value.value
   | none => IO.println "host:error"
+  match Header.Host.parse (Header.Value.ofString! "example.com:") with
+  | some host =>
+      let (_, value) := Header.Host.serialize host
+      IO.println s!"host-empty:{value.value}"
+  | none => IO.println "host-empty:error"
   match Header.Expect.parse (Header.Value.ofString! "100-continue") with
   | some expect =>
       let (_, value) := Header.Expect.serialize expect
       IO.println value.value
   | none => IO.println "expect:error"
+  IO.println s!"expect-invalid:{(Header.Expect.parse (Header.Value.ofString! "wait")).isNone}"
 
   IO.println (toString (Method.ofString! "MKCOL"))
   IO.println (Method.ofString? "CUSTOM").isNone
+  IO.println s!"method-lower:{(Method.ofString? "get").isNone}"
   match Status.ofCode none (404 : UInt16) with
   | some status => IO.println s!"{status.toCode} {status.reasonPhrase}"
   | none => IO.println "status:error"
   match Status.ofCode (some ⟨"Zig OK", by decide⟩) (209 : UInt16) with
   | some status => IO.println s!"{status.toCode} {status.reasonPhrase}"
   | none => IO.println "custom-status:error"
+  IO.println s!"status-099:{(Status.ofCode none (99 : UInt16)).isNone}"
+  IO.println s!"status-known-custom:{(CustomStatus.ofCodeAndPhrase? (200 : UInt16) "Still OK").isNone}"
 
   let target := RequestTarget.parse! "/submit?tag=lean&tag=zig"
   let request : Request String :=
