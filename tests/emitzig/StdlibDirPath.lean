@@ -8,7 +8,9 @@ import Init.System.IO
 def main : IO Unit := do
   IO.FS.withTempDir fun dir => do
     let nested := dir / "sub"
-    IO.FS.createDir nested
+    let deep := nested / "child" / "grand"
+    IO.FS.createDirAll deep
+    IO.FS.writeFile (deep / "note.txt") "dirpath"
     let entries ← dir.readDir
     IO.println entries.size
     match entries[0]? with
@@ -20,3 +22,10 @@ def main : IO Unit := do
     | none =>
       IO.println "none"
       IO.println "other"
+    IO.println (← nested.pathExists)
+    IO.println (← nested.isDir)
+    IO.println (← (deep / "note.txt").pathExists)
+    let walked ← dir.walkDir
+    IO.println walked.size
+    IO.FS.removeDirAll nested
+    IO.println (← nested.pathExists)
