@@ -503,6 +503,52 @@ pub const TaskManager = struct {
         return true;
     }
 
+    /// Deactivate a task whose reference count has dropped to zero, mirroring
+    /// `object.cpp` `deactivate_task`. If the task is already finished we free
+    /// it immediately; otherwise we mark it deleted/canceled, detach dependents,
+    /// and free the closure. The task object itself is freed only when the task
+    /// is not `keep_alive`; for `keep_alive` tasks the worker that completes the
+    /// task is responsible for freeing the object.
+    pub fn deactivateTask(self: *TaskManager, task: *lean.lean_task_object) void {
+        self.m_mutex.lock();
+
+        if (taskValue(task) != null) {
+            self.m_mutex.unlock();
+            freeTaskObject(task);
+            return;
+        }
+
+        const imp = task.m_imp orelse {
+            self.m_mutex.unlock();
+            return;
+        };
+
+        const keep_alive = imp.m_keep_alive != 0;
+        const closure = imp.m_closure;
+        var it = imp.m_head_dep;
+        imp.m_closure = null;
+        imp.m_head_dep = null;
+        imp.m_canceled = 1;
+        imp.m_deleted = 1;
+
+        self.m_mutex.unlock();
+
+        while (it) |dep| {
+            const dep_imp = dep.m_imp orelse @panic("deactivated dependent must remain pending");
+            const next = dep_imp.m_next_dep;
+            dep_imp.m_next_dep = null;
+            freeTaskObject(dep);
+            it = next;
+        }
+        if (closure) |value| {
+            rc.lean_dec(value);
+        }
+
+        if (!keep_alive) {
+            freeTaskObject(task);
+        }
+    }
+
     pub fn shuttingDown(self: *TaskManager) bool {
         self.m_mutex.lock();
         defer self.m_mutex.unlock();
@@ -627,18 +673,25 @@ pub const TaskManager = struct {
 
         g_task_mark_mt_state.noteDequeuedClosure(closure.?);
         imp.m_closure = null;
-        const value = blk: {
-            const prev_task = task_tls.swap(task);
-            self.m_mutex.unlock();
-            defer {
-                _ = task_tls.swap(prev_task);
-                self.m_mutex.lock();
-            }
-            break :blk apply.lean_apply_1(closure.?, object.lean_box(0).?);
-        };
+
+        // Run the closure without holding the task manager lock so that
+        // recursive task operations (including the keep_alive dec_ref below)
+        // can acquire it.
+        const prev_task = task_tls.swap(task);
+        self.m_mutex.unlock();
+        const value = apply.lean_apply_1(closure.?, object.lean_box(0).?);
+        _ = task_tls.swap(prev_task);
+
+        // Drop the implicit keep-alive reference now that execution has
+        // completed. This must be done without the lock to avoid deadlocking
+        // with deactivateTask, which acquires the lock when the RC reaches 0.
+        if (value != null and imp.m_keep_alive != 0) {
+            rc.lean_dec_ref(@ptrCast(task));
+        }
+
+        self.m_mutex.lock();
+
         if (imp.m_deleted != 0) {
-            self.m_mutex.unlock();
-            defer self.m_mutex.lock();
             if (value) |finished| {
                 rc.lean_dec(finished);
             }

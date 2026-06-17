@@ -21,6 +21,7 @@ else
     struct {
         extern fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void;
     };
+extern fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void;
 
 pub const LEAN_PAGE_SIZE: usize = 8192;
 pub const LEAN_SEGMENT_SIZE: usize = 8 * 1024 * 1024;
@@ -206,8 +207,10 @@ fn freeSmall(ptr: *anyopaque) void {
     const meta = metaFromPayload(ptr);
     if (meta.magic != allocation_magic) @panic("missing allocation record for small object");
     if (meta.kind != allocation_kind_small) @panic("lean_free_small on non-small allocation");
-    // Keep freed small slots mapped but do not reuse them. The current free-list
-    // path can be corrupted by stale references in broader stdlib executions.
+    const slot_idx: usize = meta.slot_idx;
+    const next = g_small_free_lists[slot_idx];
+    setFreeListNext(ptr, next);
+    g_small_free_lists[slot_idx] = ptr;
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
 }
 
@@ -232,53 +235,6 @@ fn freeDelegatedCppObject(ptr: *anyopaque) void {
     // owns those allocations end-to-end, route them through the same libc
     // free path used for legacy small objects.
     freeLegacySmall(ptr);
-}
-fn decObjectForTask(value: ?*anyopaque) void {
-    if (value) |ptr| {
-        if ((@intFromPtr(ptr) & 1) == 1) {
-            return;
-        }
-
-        const hdr = header(ptr);
-        if (hdr.m_rc > 1) {
-            hdr.m_rc -= 1;
-        } else if (hdr.m_rc == 1) {
-            lean_free_object(ptr);
-        } else if (hdr.m_rc < 0) {
-            const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
-            if (prev == -1) {
-                lean_free_object(ptr);
-            }
-        }
-    }
-}
-
-fn decTrackedClosureChildren(ptr: *anyopaque) void {
-    const closure: *lean.lean_closure_object = @ptrCast(@alignCast(ptr));
-    const slots: [*]?*anyopaque = @ptrCast(&closure.m_objs);
-    for (0..closure.m_num_fixed) |i| {
-        decObjectForTask(slots[i]);
-    }
-}
-
-fn decLegacyCtorChildren(ptr: *anyopaque) void {
-    const hdr = header(ptr);
-    const ctor_obj: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
-    const slots: [*]?*anyopaque = @ptrCast(&ctor_obj.m_objs);
-    for (0..hdr.m_other) |i| {
-        decObjectForTask(slots[i]);
-    }
-}
-
-fn decLegacyThunkChildren(ptr: *anyopaque) void {
-    const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(ptr));
-    decObjectForTask(thunk.m_closure);
-    decObjectForTask(thunk.m_value);
-}
-
-fn decLegacyRefValue(ptr: *anyopaque) void {
-    const ref_obj: *lean.lean_ref_object = @ptrCast(@alignCast(ptr));
-    decObjectForTask(ref_obj.m_value);
 }
 
 pub fn resetTestCounters() void {
@@ -459,23 +415,11 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
 
     if (header(o).m_tag == lean.LeanTask and allocationPayloadSize(o) != null) {
         const task: *lean.lean_task_object = @ptrCast(@alignCast(o));
-        if (task.m_imp != null) {
-            @panic("managed task deallocation not implemented");
-        }
-        decObjectForTask(task.m_value);
-        noteTaskObjectFree();
-        if (isLargeAllocation(o)) {
-            freeLarge(o);
-        } else {
-            freeSmall(o);
-        }
+        leanrt_task_deactivate_task_impl(task);
         return;
     }
 
     if (allocationPayloadSize(o)) |_| {
-        if (header(o).m_tag == lean.LeanClosure) {
-            decTrackedClosureChildren(o);
-        }
         if (isLargeAllocation(o)) {
             freeLarge(o);
         } else {
@@ -492,20 +436,8 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
     switch (header(o).m_tag) {
         lean.LeanArray, lean.LeanScalarArray, lean.LeanString, lean.LeanClosure => freeLegacyRaw(o),
         lean.LeanTask, lean.LeanPromise => freeDelegatedCppObject(o),
-        lean.LeanThunk => {
-            decLegacyThunkChildren(o);
-            freeLegacySmall(o);
-        },
-        lean.LeanRef => {
-            decLegacyRefValue(o);
-            freeLegacySmall(o);
-        },
-        else => {
-            if (header(o).m_tag <= lean.LeanMaxCtorTag) {
-                decLegacyCtorChildren(o);
-            }
-            freeLegacySmall(o);
-        },
+        lean.LeanThunk, lean.LeanRef => freeLegacySmall(o),
+        else => freeLegacySmall(o),
     }
 }
 

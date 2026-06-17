@@ -103,6 +103,11 @@ fn allocTask(closure: *anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_tas
     setTaskHeader(task);
     @atomicStore(?*anyopaque, &task.m_value, null, .seq_cst);
     task.m_imp = allocTaskImp(closure, prio, keep_alive);
+    // keep_alive tasks carry an implicit reference that is released by the
+    // worker after the task finishes executing, matching C++ alloc_task.
+    if (keep_alive) {
+        rc.lean_inc_ref(@ptrCast(task));
+    }
     return task;
 }
 
@@ -631,19 +636,17 @@ pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyo
 }
 
 pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
-    if (task_obj.m_imp) |imp| {
-        var it = imp.m_head_dep;
-        imp.m_head_dep = null;
-        imp.m_canceled = 1;
-        imp.m_deleted = 1;
-        while (it) |dep| {
-            const dep_imp = dep.m_imp;
-            const next = if (dep_imp) |value| value.m_next_dep else null;
-            freeTask(dep);
-            it = next;
-        }
+    if (task_manager.runtimeManager()) |manager| {
+        manager.deactivateTask(task_obj);
+        return;
     }
-    freeTask(task_obj);
+
+    // No task manager is active; the task must already be finished.
+    if (taskValue(task_obj) != null) {
+        freeTask(task_obj);
+    } else {
+        @panic("leanrt_task_deactivate_task_impl called on pending task without task manager");
+    }
 }
 
 pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
