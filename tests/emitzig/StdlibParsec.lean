@@ -48,6 +48,17 @@ def boundedByteParser : Std.Internal.Parsec.ByteArray.Parser (String × String �
   eof
   return (sliceString tag, sliceString payload, hex, oct, sliceString tail)
 
+def choiceParser : Std.Internal.Parsec.String.Parser (String × String × String) := do
+  let start := (← peek?).map (toString ·) |>.getD "none"
+  let keyword ←
+    attempt (Std.Internal.Parsec.String.pstring "let" <* notFollowedBy Std.Internal.Parsec.String.asciiLetter)
+      <|> Std.Internal.Parsec.String.pstring "lambda"
+  Std.Internal.Parsec.String.skipChar ' '
+  let ident ← many1Chars Std.Internal.Parsec.String.asciiLetter
+  let marks ← manyChars (Std.Internal.Parsec.String.pchar '!' <|> Std.Internal.Parsec.String.pchar '?')
+  eof
+  return (start, keyword, ident ++ marks)
+
 def printStringParse (input : String) : IO Unit :=
   match stringParser.run input with
   | .ok (label, count, suffix) => IO.println s!"string:{label}:{count}:{suffix}"
@@ -63,6 +74,11 @@ def printBoundedByteParse (input : String) : IO Unit :=
   | .ok (tag, payload, hex, oct, tail) => IO.println s!"bounded:{tag}:{payload}:{hex}:{oct}:{tail}"
   | .error err => IO.println s!"bounded-error:{err}"
 
+def printChoiceParse (input : String) : IO Unit :=
+  match choiceParser.run input with
+  | .ok (start, keyword, ident) => IO.println s!"choice:{start}:{keyword}:{ident}"
+  | .error err => IO.println s!"choice-error:{err}"
+
 def main : IO Unit := do
   printStringParse "lean: 123xy"
   printStringParse "lean: xy"
@@ -70,3 +86,6 @@ def main : IO Unit := do
   printByteParse "id=7;done"
   printBoundedByteParse " \tLean:abcde;F7xyz!"
   printBoundedByteParse "   :abc;F7!"
+  printChoiceParse "let alpha!?"
+  printChoiceParse "lambda beta??"
+  printChoiceParse "letter gamma"
