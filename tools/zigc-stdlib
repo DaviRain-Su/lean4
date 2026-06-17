@@ -435,7 +435,9 @@ def dependency_cache_meta(
     seeds: list[pathlib.Path],
     modules: list[str],
 ) -> dict | None:
+    export_modules = collect_export_modules(src_root)
     paths = seeds + [module_to_path(module, src_root) for module in modules]
+    paths += [module_to_path(module, src_root) for module in export_modules]
     unique_paths = sorted({str(path.resolve()): path for path in paths}.values(), key=lambda p: str(p.resolve()))
     try:
         stamps = [file_stamp(path) for path in unique_paths]
@@ -445,6 +447,7 @@ def dependency_cache_meta(
         "lean": lean_fingerprint(lean),
         "src_root": str(src_root.resolve()),
         "seeds": [str(seed.resolve()) for seed in seeds],
+        "export_modules": export_modules,
         "files": stamps,
     }
 
@@ -531,12 +534,50 @@ def emit_cached_module(
         tmp_zig.unlink(missing_ok=True)
 
 
+def collect_export_modules(src_root: pathlib.Path) -> list[str]:
+    """Return stdlib modules that define exported C symbols.
+
+    Functions marked with `@[export lean_name]` are compiled into the C runtime
+    and may be referenced by any stdlib module via `@[extern]` primitives. When
+    linking against the Zig runtime we must include the modules that provide
+    these symbols, even if no imported module directly depends on them.
+    """
+    export_re = re.compile(r"@\[export\s+([A-Za-z0-9_]+)\]")
+    seen: set[str] = set()
+    order: list[str] = []
+    for base in ("Init", "Std"):
+        base_dir = src_root / base
+        if not base_dir.is_dir():
+            continue
+        for path in sorted(base_dir.rglob("*.lean")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if not export_re.search(text):
+                continue
+            try:
+                module = path_to_module(path, src_root)
+            except ValueError:
+                continue
+            if module not in seen:
+                seen.add(module)
+                order.append(module)
+    return order
+
+
 def discover_dependencies(
     lean: pathlib.Path,
     src_root: pathlib.Path,
     seeds: list[pathlib.Path],
 ) -> list[str]:
-    """Return a topologically flat list of stdlib module names reachable from seeds."""
+    """Return a topologically flat list of stdlib module names reachable from seeds.
+
+    In addition to import reachability, include any stdlib module that exports a
+    C symbol. These exported symbols can be referenced by `@[extern]` primitives
+    in modules that do not import the defining module, so import discovery alone
+    is insufficient when linking against the Zig runtime.
+    """
     seen: set[str] = set()
     order: list[str] = []
     frontier = list(seeds)
@@ -549,6 +590,42 @@ def discover_dependencies(
             module = path_to_module(cur_path, src_root)
         except ValueError:
             # Not under src_root (e.g. the driver file); still recurse on its deps.
+            module = None
+
+        if module is not None and module in seen:
+            continue
+        if module is not None:
+            seen.add(module)
+            order.append(module)
+
+        out = subprocess.run(
+            [str(lean), "--src-deps", str(cur_path)],
+            cwd=src_root,
+            capture_output=True,
+            text=True,
+        )
+        for line in out.stdout.strip().splitlines():
+            dep_path = pathlib.Path(line).resolve()
+            if not dep_path.exists():
+                continue
+            try:
+                dep_module = path_to_module(dep_path, src_root)
+            except ValueError:
+                continue
+            if dep_module not in seen:
+                frontier.append(dep_path)
+
+    # Exported-symbol modules may themselves import other modules; keep
+    # discovering imports until the fixed point is reached.
+    export_modules = collect_export_modules(src_root)
+    frontier = [module_to_path(m, src_root) for m in export_modules]
+    while frontier:
+        cur_path = frontier.pop()
+        if not cur_path.exists():
+            continue
+        try:
+            module = path_to_module(cur_path, src_root)
+        except ValueError:
             module = None
 
         if module is not None and module in seen:
