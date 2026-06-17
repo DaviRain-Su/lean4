@@ -16,3 +16,13 @@ def main : IO Unit := do
   IO.println dec
   IO.println (dec / 97)
   IO.println (dec % 97)
+  let pow65 := (2 : Nat) ^ 65
+  let huge := (2 : Nat) ^ 130 + pow65 + 17
+  IO.println (huge / pow65)
+  IO.println (huge % pow65)
+  IO.println (huge / 0)
+  IO.println (huge % 0)
+  IO.println (n - m)
+  IO.println (decide (huge > m))
+  IO.println (huge == huge + 1)
+  IO.println (huge * huge)
