@@ -1,0 +1,9 @@
+initial:need-start-line:true:pending:true
+input:5:5:llo!!
+headers:2:true:false
+reading:read-body:fixed:5:17:2:true
+complete:complete:true:1:false
+reset:need-start-line:1:0:0:0:true
+failed:failed:Other error: boom:true:Other error: boom:false
+closed:closed:true:true:false
+chunked:read-body:chunked-size:false
