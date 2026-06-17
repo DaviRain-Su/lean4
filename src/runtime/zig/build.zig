@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
+    const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
 
     const mpz_mod = b.addModule("mpz_zig", .{
         .root_source_file = b.path("mpz_zig.zig"),
@@ -23,6 +24,58 @@ pub fn build(b: *std.Build) void {
     root_mod.addImport("mpz_zig", mpz_mod);
     root_mod.addImport("runtime_options", opts_mod);
     root_mod.linkSystemLibrary("gmp", .{});
+    root_mod.linkSystemLibrary("c++", .{});
+
+    // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
+    // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
+    // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
+    // test-only). A few small helpers (uv_error.cpp, uv_loop_thread.cpp,
+    // uv_version.cpp) live alongside the Zig sources.
+    const uv_cpp_sources = &.{
+        "../uv/dns.cpp",
+        "../uv/event_loop.cpp",
+        "../uv/net_addr.cpp",
+        "../uv/signal.cpp",
+        "../uv/system.cpp",
+        "../uv/tcp.cpp",
+        "../uv/timer.cpp",
+        "../uv/udp.cpp",
+        "uv_compat.cpp",
+        "uv_init.cpp",
+        "uv_loop_thread.cpp",
+        "uv_promise_bridge.cpp",
+        "uv_version.cpp",
+    };
+    const uv_cpp_flags = &.{
+        "-std=c++17",
+        "-O2",
+        "-include", "uv_compat.h",
+        "-DLEAN_SMALL_ALLOCATOR",
+        b.fmt("-I{s}", .{lean_include_dir}),
+        "-I../..",
+    };
+    root_mod.addCSourceFiles(.{
+        .files = uv_cpp_sources,
+        .flags = uv_cpp_flags,
+    });
+
+    // Weak exports that let C++ code call lean_mk_io_error_* while the real
+    // implementations live in the Zig runtime (io_error.zig).
+    const uv_c_sources = &.{
+        "io_error_weak_exports.c",
+    };
+    const uv_c_flags = &.{
+        "-std=c11",
+        "-O2",
+        b.fmt("-I{s}", .{lean_include_dir}),
+        "-I../..",
+    };
+    root_mod.addCSourceFiles(.{
+        .files = uv_c_sources,
+        .flags = uv_c_flags,
+    });
+
+    root_mod.linkSystemLibrary("uv", .{});
 
     const lib = b.addLibrary(.{
         .name = "leanrt_zig",

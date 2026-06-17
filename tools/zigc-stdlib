@@ -257,7 +257,7 @@ def link(
     ]
     for lib_dir in discover_lib_dirs():
         cmd.extend(["-L", lib_dir])
-    cmd.extend(["-lgmp", "-luv", "-lpthread"])
+    cmd.extend(["-lgmp", "-luv", "-lc++", "-lpthread"])
     if sys.platform == "darwin":
         cmd.extend(["-framework", "CoreFoundation"])
     cmd.append(f"-femit-bin={output}")
@@ -323,6 +323,7 @@ def build_helperless_zigrt(
     zig: pathlib.Path,
     work_dir: pathlib.Path,
     cache_dir: pathlib.Path,
+    build_dir: pathlib.Path,
     *,
     force: bool,
 ) -> pathlib.Path:
@@ -346,6 +347,7 @@ def build_helperless_zigrt(
         "--global-cache-dir",
         str(global_cache_dir),
         "-Dexport-lean-helpers=false",
+        f"-Dlean-include-dir={build_dir / 'include'}",
     ]
     result = subprocess.run(cmd, cwd=runtime_dir, capture_output=True, text=True)
     if result.returncode != 0:
@@ -847,7 +849,7 @@ def main() -> int:
 
     try:
         lock = acquire_cache_lock(cache_dir)
-        zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, force=args.force)
+        zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, build_dir, force=args.force)
 
         # Determine the set of stdlib modules to compile.
         if args.no_recursive:

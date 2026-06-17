@@ -306,6 +306,7 @@ if(LEAN_ZIG_RUNTIME)
       --prefix "${MANGLED_BINARY_DIR}/runtime/zig/zig-out"
       --cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-cache"
       --global-cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-global-cache"
+      -Dlean-include-dir=${MANGLED_BINARY_DIR}/include
   )
   set(EMITZIG_ZIGRT_TESTS
     Array.lean

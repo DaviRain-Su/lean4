@@ -31,6 +31,19 @@ const RunMainContext = struct {
 var g_runtime_initialized = false;
 var g_initializing = true;
 var g_task_manager_initialized = false;
+var g_libuv_initialized = false;
+
+extern fn lean_zig_uv_initialize() callconv(.c) void;
+extern fn lean_zig_uv_event_loop_run() callconv(.c) void;
+
+fn initializeLibuv() void {
+    if (g_libuv_initialized) return;
+    lean_zig_uv_initialize();
+    _ = std.Thread.spawn(.{}, lean_zig_uv_event_loop_run, .{}) catch |err| {
+        std.debug.panic("failed to spawn libuv event loop thread: {}", .{err});
+    };
+    g_libuv_initialized = true;
+}
 
 fn initializeRcSubsystem() void {}
 
@@ -66,6 +79,7 @@ pub fn initializeRuntimeSubsystems() void {
         initializeRcSubsystem();
         io_errno.initializeDecodeCache();
     }
+    initializeLibuv();
     g_runtime_initialized = true;
     g_initializing = true;
 }
@@ -79,7 +93,7 @@ pub fn finalizeThreadSubsystems() void {
     thread.finalizeThreadSubsystems();
 }
 
-pub fn lean_notify_assert(file_name: [*c]const u8, line: c_int, condition: [*c]const u8) callconv(.c) void {
+export fn lean_notify_assert(file_name: [*c]const u8, line: c_int, condition: [*c]const u8) callconv(.c) void {
     std.debug.print(
         "LEAN ASSERTION VIOLATION\nFile: {s}\nLine: {}\nCondition: {s}\n",
         .{ file_name, line, condition },

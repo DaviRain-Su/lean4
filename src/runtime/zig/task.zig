@@ -615,6 +615,15 @@ pub export fn lean_io_promise_resolve(value: *anyopaque, promise: *anyopaque) ca
     return object.lean_box(0).?;
 }
 
+// Internal promise bridge used by the C++ libuv implementation.
+pub export fn lean_promise_new() callconv(.c) *anyopaque {
+    return lean_io_promise_new();
+}
+
+pub export fn lean_promise_resolve(value: *anyopaque, promise: *anyopaque) callconv(.c) void {
+    _ = lean_io_promise_resolve(value, promise);
+}
+
 pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyopaque {
     const task = promisePtr(promise).m_result orelse @panic("promise missing backing task");
     rc.lean_inc_ref(@ptrCast(task));

@@ -52,6 +52,6 @@ fi
 zig build-exe "$INPUT" -O Debug \
   -I "$BUILD_DIR/include" \
   "$ZIGRT_LIB" \
-  -lgmp -luv -lpthread \
+  -lgmp -luv -lc++ -lpthread \
   "${EXTRA_FLAGS[@]}" \
   -femit-bin="$OUTPUT"
