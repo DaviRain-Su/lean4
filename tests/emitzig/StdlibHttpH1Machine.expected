@@ -25,3 +25,9 @@ expect-accept-output:HTTP/1.1 100 Continue||:false:true
 expect-body:chunk:ping:true:false:0:close-body:true:false
 reject-step:end:POST:/expect:3,continue,need-answer:true
 reject-output:close:HTTP/1.1 417 Expectation Failed|Connection: close|Content-Length: 0||:true:false
+missing-host-step1:failed:Bad message,close:HTTP/1.1 400 Bad Request|Connection: close|Content-Length: 0||:false:true:false
+missing-host-step2:::false:true:false
+too-many-headers-step1:failed:Too many headers::true:false:true
+too-many-headers-step2:close:HTTP/1.1 431 Request Header Fields Too Large|Connection: close|Content-Length: 0||:false:true:false
+body-too-large-step1:failed:Entity too large,close:HTTP/1.1 413 Payload Too Large|Connection: close|Content-Length: 0||:false:true:false
+body-too-large-step2:::false:true:false

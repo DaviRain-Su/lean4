@@ -57,6 +57,13 @@ def showStep (label : String) (result : StepResult .receiving) : IO Unit := do
   IO.println s!"{label}:events:{showEvents result.events}"
   IO.println s!"{label}:output:{oneLine (text result.output.toByteArray)}"
 
+def printFailure (label : String) (request : String) (config : Config) : IO Unit := do
+  let machine : Machine .receiving := { config }
+  let (machine, first) := (machine.feed request.toUTF8).step
+  IO.println s!"{label}-step1:{showEvents first.events}:{oneLine (text first.output.toByteArray)}:{machine.failed}:{machine.isReaderClosed}:{machine.keepAlive}"
+  let (machine, second) := machine.step
+  IO.println s!"{label}-step2:{showEvents second.events}:{oneLine (text second.output.toByteArray)}:{machine.failed}:{machine.isReaderClosed}:{machine.keepAlive}"
+
 def printRoundTrip : IO Unit := do
   let config : Config := { agentName := some (Header.Value.ofString! "lean-zig") }
   let machine : Machine .receiving := { config }
@@ -149,8 +156,14 @@ def printExpectContinue : IO Unit := do
   let (rejectMachine, rejectOutput) := rejectMachine.step
   IO.println s!"reject-output:{showEvents rejectOutput.events}:{oneLine (text rejectOutput.output.toByteArray)}:{rejectMachine.isReaderClosed}:{rejectMachine.keepAlive}"
 
+def printFailures : IO Unit := do
+  printFailure "missing-host" "GET /bad HTTP/1.1\r\n\r\n" {}
+  printFailure "too-many-headers" "GET /bad HTTP/1.1\r\nHost: example.com\r\n\r\n" { maxHeaders := 0 }
+  printFailure "body-too-large" "POST /big HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\n" { maxBodySize := 3 }
+
 def main : IO Unit := do
   printRoundTrip
   printBodyPulls
   printClientRoundTrip
   printExpectContinue
+  printFailures
