@@ -2,7 +2,9 @@ const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const box = @import("box.zig");
+const io_min = @import("io_min.zig");
 const lean = @import("lean_object.zig");
+const mpz_object = @import("mpz_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const ctor = @import("ctor.zig");
@@ -417,13 +419,26 @@ export fn lean_array_push(a: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque 
 }
 
 export fn lean_mk_array(n: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque {
-    if (!object.lean_is_scalar(n)) {
+    const size: usize = if (object.lean_is_scalar(n))
+        object.lean_unbox(n)
+    else blk: {
+        const mpz = mpz_object.mpzValue(n);
+        if (!mpz.fitsSizeT()) {
+            rc.lean_dec(n);
+            rc.lean_dec(v);
+            io_min.lean_internal_panic_out_of_memory();
+            unreachable;
+        }
+        const sz = mpz.getSizeT() catch {
+            rc.lean_dec(n);
+            rc.lean_dec(v);
+            io_min.lean_internal_panic_out_of_memory();
+            unreachable;
+        };
         rc.lean_dec(n);
-        rc.lean_dec(v);
-        @panic("large natural array sizes are not implemented");
-    }
+        break :blk sz;
+    };
 
-    const size = object.lean_unbox(n);
     const result = allocObjectArray(size, size);
     for (0..size) |i| {
         arraySlots(result)[i] = v;
@@ -610,4 +625,16 @@ test "non-exclusive object arrays copy before mutation" {
     try testing.expect(updated != array);
     try testing.expectEqual(@as(usize, 5), object.lean_unbox(arraySlots(array)[0]));
     try testing.expectEqual(@as(usize, 9), object.lean_unbox(arraySlots(updated)[0]));
+}
+
+test "lean_mk_array accepts non-scalar natural sizes" {
+    const n = mpz_object.lean_alloc_mpz();
+    try mpz_object.mpzValue(n).set(@as(usize, 5));
+    const v = object.lean_box(123).?;
+    const array = lean_mk_array(n, v);
+    defer rc.lean_dec(array);
+
+    try testing.expectEqual(@as(usize, 5), lean_array_size(array));
+    try testing.expectEqual(@as(usize, 123), object.lean_unbox(arraySlots(array)[0]));
+    try testing.expectEqual(@as(usize, 123), object.lean_unbox(arraySlots(array)[4]));
 }
