@@ -128,7 +128,29 @@ def printClientRoundTrip : IO Unit := do
   let (machine, events) := machine.takeEvents
   IO.println s!"client-pull:{showPulledChunk? pulled}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}"
 
+def printExpectContinue : IO Unit := do
+  let config : Config := {}
+  let expectHead := "POST /expect HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\nContent-Length: 4\r\n\r\n"
+
+  let acceptMachine : Machine .receiving := { config }
+  let (acceptMachine, acceptStep) := (acceptMachine.feed expectHead.toUTF8).step
+  IO.println s!"expect-step:{showEvents acceptStep.events}:{acceptMachine.isReaderAwaitingContinue}:{acceptMachine.canPullBody}:{acceptMachine.keepAlive}"
+  let acceptMachine := acceptMachine.canContinue .«continue»
+  let (acceptMachine, acceptOutput) := acceptMachine.takeOutput
+  IO.println s!"expect-accept-output:{oneLine (text acceptOutput.toByteArray)}:{acceptMachine.isReaderAwaitingContinue}:{acceptMachine.canPullBody}"
+  let (acceptMachine, body) := (acceptMachine.feed "ping".toUTF8).pullBody
+  let (acceptMachine, events) := acceptMachine.takeEvents
+  IO.println s!"expect-body:{showPulledChunk? body}:{showEvents events}:{acceptMachine.isReaderComplete}:{acceptMachine.canPullBodyNow}"
+
+  let rejectMachine : Machine .receiving := { config }
+  let (rejectMachine, rejectStep) := (rejectMachine.feed expectHead.toUTF8).step
+  IO.println s!"reject-step:{showEvents rejectStep.events}:{rejectMachine.isReaderAwaitingContinue}"
+  let rejectMachine := rejectMachine.canContinue .expectationFailed
+  let (rejectMachine, rejectOutput) := rejectMachine.step
+  IO.println s!"reject-output:{showEvents rejectOutput.events}:{oneLine (text rejectOutput.output.toByteArray)}:{rejectMachine.isReaderClosed}:{rejectMachine.keepAlive}"
+
 def main : IO Unit := do
   printRoundTrip
   printBodyPulls
   printClientRoundTrip
+  printExpectContinue
