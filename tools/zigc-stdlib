@@ -27,6 +27,11 @@ import subprocess
 import sys
 import tempfile
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -53,6 +58,32 @@ def run(cmd: list[str], *, cwd: pathlib.Path | None = None, check: bool = True,
     if capture:
         return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
     return subprocess.run(cmd, cwd=cwd, check=check)
+
+
+def acquire_cache_lock(cache_dir: pathlib.Path):
+    """Serialize writers that share a zigc-stdlib cache directory."""
+    if fcntl is None:
+        return None
+    lock_path = cache_dir / ".lock"
+    lock = lock_path.open("a+")
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"waiting for zigc-stdlib cache lock: {lock_path}", file=sys.stderr)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        lock.close()
+        raise
+    return lock
+
+
+def release_cache_lock(lock) -> None:
+    if lock is None:
+        return
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock.close()
 
 
 def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
@@ -619,8 +650,10 @@ def main() -> int:
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="zigc-stdlib-"))
+    lock = None
 
     try:
+        lock = acquire_cache_lock(cache_dir)
         zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, force=args.force)
         objs: list[pathlib.Path] = []
         failed_modules: list[str] = []
@@ -745,6 +778,7 @@ def main() -> int:
             print(result.stderr, file=sys.stderr)
             return 1
     finally:
+        release_cache_lock(lock)
         shutil.rmtree(work, ignore_errors=True)
 
     return 0
