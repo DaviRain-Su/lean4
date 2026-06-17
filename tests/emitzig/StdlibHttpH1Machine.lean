@@ -36,6 +36,19 @@ def showReceivingEvent : Event .receiving → String
 def showEvents (events : Array (Event .receiving)) : String :=
   String.intercalate "," (events.map showReceivingEvent).toList
 
+def showSendingEvent : Event .sending → String
+  | .endHeaders head => s!"end:{head.status}:{head.version}:{head.headers.size}"
+  | .needMoreData n? => s!"need-more:{showNat? n?}"
+  | .failed err => s!"failed:{err}"
+  | .close => "close"
+  | .closeBody => "close-body"
+  | .needAnswer => "need-answer"
+  | .next => "next"
+  | .continue => "continue"
+
+def showSendingEvents (events : Array (Event .sending)) : String :=
+  String.intercalate "," (events.map showSendingEvent).toList
+
 def showPulledChunk? : Option PulledChunk → String
   | some pulled => s!"chunk:{text pulled.chunk.data}:{pulled.final}:{pulled.incomplete}:{pulled.chunk.extensions.size}"
   | none => "none"
@@ -89,6 +102,33 @@ def printBodyPulls : IO Unit := do
   let (chunkedMachine, chunkedEvents2) := chunkedMachine.takeEvents
   IO.println s!"chunk-pull2:{showPulledChunk? chunkedChunk2}:{showEvents chunkedEvents2}:{chunkedMachine.isReaderComplete}:{chunkedMachine.canPullBodyNow}"
 
+def printClientRoundTrip : IO Unit := do
+  let config : Config := { agentName := some (Header.Value.ofString! "lean-client") }
+  let machine : Machine .sending := { config }
+  IO.println s!"client-initial:{machine.isWaitingMessage}:{machine.canPullBody}:{machine.keepAlive}"
+
+  let request : Request.Head := { method := .get, version := .v11, uri := RequestTarget.parse! "/client" }
+  let machine :=
+    machine
+      |>.setKnownSize (.fixed 0)
+      |>.send request
+      |>.userClosedBody
+  let (machine, writeStep) := machine.step
+  IO.println s!"client-write:events:{showSendingEvents writeStep.events}"
+  IO.println s!"client-write:output:{oneLine (text writeStep.output.toByteArray)}"
+  IO.println s!"client-after-write:{machine.isWaitingMessage}:{machine.isReaderComplete}:{machine.keepAlive}"
+
+  let response := "HTTP/1.1 204 No Content\r\n\r\n"
+  let (machine, readStep) := (machine.feed response.toUTF8).step
+  IO.println s!"client-read:events:{showSendingEvents readStep.events}"
+  IO.println s!"client-read:output:{oneLine (text readStep.output.toByteArray)}"
+  IO.println s!"client-after-read:{machine.isReaderComplete}:{machine.canPullBody}:{machine.canPullBodyNow}:{machine.keepAlive}"
+
+  let (machine, pulled) := machine.pullBody
+  let (machine, events) := machine.takeEvents
+  IO.println s!"client-pull:{showPulledChunk? pulled}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}"
+
 def main : IO Unit := do
   printRoundTrip
   printBodyPulls
+  printClientRoundTrip

@@ -12,3 +12,11 @@ fixed-pull:chunk:hello:true:false:0:close-body:true:false
 chunk-step:end:POST:/chunk:2,need-answer:true
 chunk-pull1:chunk:lean:false:false:1::true
 chunk-pull2:chunk::true:false:0:close-body:true:false
+client-initial:true:false:true
+client-write:events:need-more:none
+client-write:output:GET /client HTTP/1.1|User-Agent: lean-client|Content-Length: 0||
+client-after-write:false:false:true
+client-read:events:end:No Content:HTTP/1.1:0
+client-read:output:
+client-after-read:false:true:true:true
+client-pull:chunk::true:false:0:close-body:true:false
