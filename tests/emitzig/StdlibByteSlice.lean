@@ -13,6 +13,9 @@ def sumBytes (s : ByteSlice) : Nat :=
 def sumBytesM (s : ByteSlice) : Option Nat :=
   s.foldrM (fun b acc => some (b.toNat + acc)) 0
 
+def sumUntilD (s : ByteSlice) : Option Nat :=
+  s.foldrM (fun b acc => if b == 68 then none else some (b.toNat + acc)) 0
+
 def main : IO Unit := do
   let bytes := ByteArray.mk #[65, 66, 67, 68, 69, 70, 71]
   let full := ByteSlice.ofByteArray bytes
@@ -46,3 +49,39 @@ def main : IO Unit := do
   let s4 := "lean!".toUTF8.toByteSlice 1 4
   IO.println s4.size
   IO.println (String.fromUTF8! s4.toByteArray)
+  IO.println ByteSlice.empty.size
+  IO.println (ByteSlice.empty == bytes.toByteSlice 2 2)
+  let clampedStop := bytes.toByteSlice 5 99
+  IO.println clampedStop.size
+  IO.println clampedStop.start
+  IO.println clampedStop.stop
+  IO.println (String.fromUTF8! clampedStop.toByteArray)
+  let clampedStart := bytes.toByteSlice 99 100
+  IO.println clampedStart.size
+  IO.println clampedStart.start
+  IO.println clampedStart.stop
+  let inverted := bytes.toByteSlice 5 3
+  IO.println inverted.size
+  IO.println inverted.start
+  IO.println inverted.stop
+  let nestedEmpty := s0.slice 2 2
+  IO.println nestedEmpty.size
+  IO.println nestedEmpty.start
+  IO.println nestedEmpty.stop
+  let nestedClamp := s0.slice 3 99
+  IO.println nestedClamp.size
+  IO.println (String.fromUTF8! nestedClamp.toByteArray)
+  match sumUntilD s1 with
+  | some n => IO.println n
+  | none => IO.println "none"
+  let closedRange : ByteSlice := bytes[2...=4]
+  IO.println closedRange.size
+  IO.println (String.fromUTF8! closedRange.toByteArray)
+  let halfOpenRange : ByteSlice := s0[1...<4]
+  IO.println halfOpenRange.size
+  IO.println (String.fromUTF8! halfOpenRange.toByteArray)
+  let tailRange : ByteSlice := s0[3...*]
+  IO.println tailRange.size
+  IO.println (String.fromUTF8! tailRange.toByteArray)
+  let fullRange : ByteSlice := s0[*...*]
+  IO.println (fullRange == s0)
