@@ -27,6 +27,22 @@ def showHeader (headers : Headers) (name : Header.Name) : String :=
   | some value => toString value
   | none => "missing"
 
+def printStreamBody : IO Unit := do
+  let stream ← Body.mkStream.block
+  stream.setKnownSize (some (.fixed 6)) |>.block
+  let producer ← IO.asTask do
+    stream.send (Chunk.ofByteArray "ab".toUTF8) (incomplete := true) |>.block
+    stream.send (Chunk.ofByteArray "cd".toUTF8) |>.block
+    stream.send (Chunk.ofByteArray "ef".toUTF8) |>.block
+    stream.close.block
+  IO.println (showLength (← stream.getKnownSize.block))
+  IO.println (showChunk? (← stream.recv.block))
+  IO.println (showLength (← stream.getKnownSize.block))
+  IO.println (showChunk? (← stream.recv.block))
+  discard <| IO.wait producer
+  IO.println (showTryChunk? (← stream.tryRecvBody.block))
+  IO.println (← stream.isClosed.block)
+
 def main : IO Unit := do
   IO.println Body.Length.chunked.isChunked
   IO.println (Body.Length.fixed 7).isFixed
@@ -57,3 +73,5 @@ def main : IO Unit := do
   IO.println response.line.status.reasonPhrase
   IO.println (showHeader response.line.headers Header.Name.contentType)
   IO.println (showChunk? (← (Body.Full.recv response.body).block))
+
+  printStreamBody

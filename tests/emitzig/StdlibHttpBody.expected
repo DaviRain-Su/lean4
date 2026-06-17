@@ -16,3 +16,9 @@ hello
 OK
 application/json
 {"ok":true}
+fixed:6
+abcd
+fixed:2
+ef
+eof
+true
