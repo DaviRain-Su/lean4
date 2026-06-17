@@ -30,6 +30,11 @@ client-read:events:end:No Content:HTTP/1.1:0
 client-read:output:
 client-after-read:false:true:true:true
 client-pull:chunk::true:false:0:close-body:true:false
+client-close-write:need-more:none:GET /stream HTTP/1.1|User-Agent: lean-client|Content-Length: 0||:false:true
+client-close-read:end:OK:HTTP/1.1:0,close:true:true:false:false
+client-close-pull1:chunk:hello:false:false:0::false:true
+client-close-pull2:none:need-more:none:false:false
+client-close-eof:chunk::true:false:0:close-body:true:false:false
 expect-step:end:POST:/expect:3,continue,need-answer:true:false:true
 expect-accept-output:HTTP/1.1 100 Continue||:false:true
 expect-body:chunk:ping:true:false:0:close-body:true:false

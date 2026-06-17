@@ -175,6 +175,31 @@ def printClientRoundTrip : IO Unit := do
   let (machine, events) := machine.takeEvents
   IO.println s!"client-pull:{showPulledChunk? pulled}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}"
 
+def printClientCloseDelimited : IO Unit := do
+  let config : Config := { agentName := some (Header.Value.ofString! "lean-client") }
+  let machine : Machine .sending := { config }
+  let request : Request.Head := { method := .get, version := .v11, uri := RequestTarget.parse! "/stream" }
+  let machine :=
+    machine
+      |>.setKnownSize (.fixed 0)
+      |>.send request
+      |>.userClosedBody
+  let (machine, writeStep) := machine.step
+  IO.println s!"client-close-write:{showSendingEvents writeStep.events}:{oneLine (text writeStep.output.toByteArray)}:{machine.isReaderComplete}:{machine.keepAlive}"
+
+  let response := "HTTP/1.1 200 OK\r\n\r\nhello"
+  let (machine, readStep) := (machine.feed response.toUTF8).step
+  IO.println s!"client-close-read:{showSendingEvents readStep.events}:{machine.canPullBody}:{machine.canPullBodyNow}:{machine.isReaderComplete}:{machine.keepAlive}"
+  let (machine, body) := machine.pullBody
+  let (machine, events) := machine.takeEvents
+  IO.println s!"client-close-pull1:{showPulledChunk? body}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}"
+  let (machine, stalled) := machine.pullBody
+  let (machine, events) := machine.takeEvents
+  IO.println s!"client-close-pull2:{showPulledChunk? stalled}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}"
+  let (machine, final) := machine.noMoreInput.pullBody
+  let (machine, events) := machine.takeEvents
+  IO.println s!"client-close-eof:{showPulledChunk? final}:{showSendingEvents events}:{machine.isReaderComplete}:{machine.canPullBodyNow}:{machine.keepAlive}"
+
 def printExpectContinue : IO Unit := do
   let config : Config := {}
   let expectHead := "POST /expect HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\nContent-Length: 4\r\n\r\n"
@@ -206,5 +231,6 @@ def main : IO Unit := do
   printHeadSuppression
   printBodyPulls
   printClientRoundTrip
+  printClientCloseDelimited
   printExpectContinue
   printFailures
