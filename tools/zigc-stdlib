@@ -123,20 +123,10 @@ def filter_conflicting_objs(
     work_dir: pathlib.Path,
 ) -> list[pathlib.Path]:
     """On Darwin rely on link-order + duplicate suppression; elsewhere strip overlaps."""
+    if sys.platform == "darwin":
+        return objs
     zigrt_syms = extract_defined_symbols(zigrt_lib)
     if not zigrt_syms:
-        return objs
-    if sys.platform == "darwin":
-        overlap_count = 0
-        for obj in objs:
-            obj_syms = extract_defined_symbols(obj)
-            overlap = obj_syms & zigrt_syms
-            if overlap:
-                overlap_count += 1
-                sample = sorted(overlap)[:3]
-                print(f"keep {obj.name}: defer overlapping symbols to Darwin linker ({', '.join(sample)})", file=sys.stderr)
-        if overlap_count:
-            print(f"kept {overlap_count} overlapping object file(s) for Darwin duplicate suppression", file=sys.stderr)
         return objs
     kept: list[pathlib.Path] = []
     stripped = 0
