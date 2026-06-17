@@ -1,0 +1,9 @@
+read:events:end:GET:/hello:1,need-answer
+read:output:
+state:false:true:true:true
+write:events:close-body,next
+write:output:HTTP/1.1 200 OK|Server: lean-zig|Content-Length: 2||OK
+after-write:false:false:true
+next:events:need-more:none
+next:output:
+after-next:false:false:true
