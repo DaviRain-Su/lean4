@@ -106,9 +106,40 @@ fn mkIPv6AddrFromIn6Addr(addr: *const c.struct_in6_addr) *anyopaque {
     return mkBoxedArray(u16, &segments);
 }
 
+fn isStrictIPv4DottedDecimal(bytes: []const u8) bool {
+    if (bytes.len == 0) return false;
+
+    var parts: usize = 0;
+    var start: usize = 0;
+    while (start <= bytes.len) {
+        if (parts == 4) return false;
+
+        var end = start;
+        while (end < bytes.len and bytes[end] != '.') : (end += 1) {}
+
+        const part = bytes[start..end];
+        if (part.len == 0) return false;
+        if (part.len > 1 and part[0] == '0') return false;
+
+        var value: u32 = 0;
+        for (part) |ch| {
+            if (ch < '0' or ch > '9') return false;
+            value = value * 10 + @as(u32, ch - '0');
+            if (value > 255) return false;
+        }
+
+        parts += 1;
+        if (end == bytes.len) break;
+        start = end + 1;
+    }
+
+    return parts == 4;
+}
+
 // Std.Net.IPv4Addr.ofString (s : @&String) : Option IPv4Addr
 pub export fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(str_obj)) return mkOptionNone();
+    if (!isStrictIPv4DottedDecimal(stringBytes(str_obj))) return mkOptionNone();
 
     var internal: c.struct_in_addr = undefined;
     if (c.inet_pton(c.AF_INET, stringCStr(str_obj), &internal) == 1) {
@@ -195,6 +226,16 @@ test "IPv6 parse and render round-trip" {
 
 test "invalid address parse returns none" {
     const input = lean_mk_string("not-an-ip-address");
+    defer rc.lean_dec(input);
+
+    const parsed = lean_uv_pton_v4(input);
+    defer rc.lean_dec(parsed);
+    try testing.expect(object.lean_is_scalar(parsed));
+    try testing.expectEqual(@as(usize, 0), object.lean_unbox(parsed));
+}
+
+test "IPv4 parser rejects leading zero octets" {
+    const input = lean_mk_string("192.168.001.1");
     defer rc.lean_dec(input);
 
     const parsed = lean_uv_pton_v4(input);
