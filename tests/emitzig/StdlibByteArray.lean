@@ -38,3 +38,25 @@ def main : IO Unit := do
   IO.println iter.hasPrev
   IO.println iter.toEnd.atEnd
   IO.println (String.fromUTF8! (patched.copySlice 1 patched 2 2))
+  IO.println ByteArray.empty.isEmpty
+  IO.println base.isEmpty
+  IO.println base.toList.length
+  IO.println (base.toList.foldl (fun acc byte => acc + byte.toNat) 0)
+  let safeSet := base.set 0 81
+  IO.println (String.fromUTF8! safeSet)
+  let exactCopy := base.copySlice 1 (ByteArray.mk #[120, 121, 122, 123]) 2 2 true
+  IO.println (String.fromUTF8! exactCopy)
+  IO.println (showNatOption (patched.findIdx? (· == 90) 3))
+  match patched.findFinIdx? (· == 68) 1 with
+  | some idx => IO.println idx.val
+  | none => IO.println "none"
+  IO.println (patched.foldl (fun acc byte => acc + byte.toNat) 0 1 3)
+  match patched.foldlM (fun acc byte => some (acc + byte.toNat)) 0 1 4 with
+  | some n => IO.println n
+  | none => IO.println "none"
+  let mid := patched.iter.next
+  IO.println mid.hasNext
+  IO.println mid.prev.curr
+  IO.println (mid.nextn 2).curr
+  IO.println (mid.nextn 3).atEnd
+  IO.println (mid.toEnd.prevn 2).curr
