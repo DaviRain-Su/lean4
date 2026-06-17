@@ -15546,7 +15546,7 @@ _start:
 lean_object* v___x_5093_; lean_object* v___x_5094_; lean_object* v___x_5095_; lean_object* v___x_5096_; lean_object* v___x_5097_; lean_object* v___x_5098_; 
 v___x_5093_ = ((lean_object*)(l_Lean_Meta_Simp_mkImpCongr___closed__2));
 v___x_5094_ = lean_unsigned_to_nat(24u);
-v___x_5095_ = lean_unsigned_to_nat(1913u);
+v___x_5095_ = lean_unsigned_to_nat(1924u);
 v___x_5096_ = ((lean_object*)(l_Lean_Meta_Simp_mkImpCongr___closed__1));
 v___x_5097_ = ((lean_object*)(l_Lean_Meta_Simp_mkImpCongr___closed__0));
 v___x_5098_ = l_mkPanicMessageWithDecl(v___x_5097_, v___x_5096_, v___x_5095_, v___x_5094_, v___x_5093_);
@@ -18086,7 +18086,7 @@ _start:
 lean_object* v___x_5849_; lean_object* v___x_5850_; lean_object* v___x_5851_; lean_object* v___x_5852_; lean_object* v___x_5853_; lean_object* v___x_5854_; 
 v___x_5849_ = ((lean_object*)(l___private_Lean_Meta_Tactic_Simp_Types_0__Lean_Meta_Simp_mkCongrFun_x27___closed__5));
 v___x_5850_ = lean_unsigned_to_nat(18u);
-v___x_5851_ = lean_unsigned_to_nat(1838u);
+v___x_5851_ = lean_unsigned_to_nat(1849u);
 v___x_5852_ = ((lean_object*)(l___private_Lean_Meta_Tactic_Simp_Types_0__Lean_Meta_Simp_mkCongrFun_x27___closed__4));
 v___x_5853_ = ((lean_object*)(l_Lean_Meta_Simp_mkImpCongr___closed__0));
 v___x_5854_ = l_mkPanicMessageWithDecl(v___x_5853_, v___x_5852_, v___x_5851_, v___x_5850_, v___x_5849_);

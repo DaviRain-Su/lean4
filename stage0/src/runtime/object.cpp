@@ -1201,6 +1201,12 @@ extern "C" LEAN_EXPORT b_obj_res lean_task_get(b_obj_arg t) {
     object * r = lean_to_task(t)->m_value;
     return r;
 }
+extern "C" LEAN_EXPORT obj_res lean_task_get_own(obj_arg t) {
+    object * r = lean_task_get(t);
+    lean_inc(r);
+    lean_dec(t);
+    return r;
+}
 
 static obj_res task_bind_fn2(obj_arg t, obj_arg) {
     lean_assert(lean_to_task(t)->m_value);
@@ -1890,20 +1896,20 @@ extern "C" LEAN_EXPORT obj_res lean_float_frexp(double a) {
 extern "C" LEAN_EXPORT double lean_float_of_bits(uint64_t u)
 {
     static_assert(sizeof(double) == sizeof(u), "`double` unexpected size.");
-    double ret;
-    std::memcpy(&ret, &u, sizeof(double));
-    if (isnan(ret))
-        ret = std::numeric_limits<double>::quiet_NaN();
+    double ret = std::bit_cast<double>(u);
+    if (isnan(ret)) return std::numeric_limits<double>::quiet_NaN();
     return ret;
 }
 
+// We use a specific bit pattern instead of `std::numeric_limits<double>::quiet_NaN()` because
+// the returned bit pattern needs to match exactly with what we return in the logical model and
+// the exact value of `quiet_NaN` is implementation-defined.
+constexpr uint64_t quietNaN64 = 0x7ff8000000000000;
+
 extern "C" LEAN_EXPORT uint64_t lean_float_to_bits(double d)
 {
-    uint64_t ret;
-    if (isnan(d))
-        d = std::numeric_limits<double>::quiet_NaN();
-    std::memcpy(&ret, &d, sizeof(double));
-    return ret;
+    if (isnan(d)) return quietNaN64;
+    return std::bit_cast<uint64_t>(d);
 }
 
 // =======================================
@@ -1942,20 +1948,20 @@ extern "C" LEAN_EXPORT obj_res lean_float32_frexp(float a) {
 extern "C" LEAN_EXPORT float lean_float32_of_bits(uint32_t u)
 {
     static_assert(sizeof(float) == sizeof(u), "`float` unexpected size.");
-    float ret;
-    std::memcpy(&ret, &u, sizeof(float));
-    if (isnan(ret))
-        ret = std::numeric_limits<float>::quiet_NaN();
+    float ret = std::bit_cast<float>(u);
+    if (isnan(ret)) ret = std::numeric_limits<float>::quiet_NaN();
     return ret;
 }
 
+// We use a specific bit pattern instead of `std::numeric_limits<float>::quiet_NaN()` because
+// the returned bit pattern needs to match exactly with what we return in the logical model and
+// the exact value of `quiet_NaN` is implementation-defined.
+constexpr uint32_t quietNaN32 = 0x7fc00000;
+
 extern "C" LEAN_EXPORT uint32_t lean_float32_to_bits(float d)
 {
-    uint32_t ret;
-    if (isnan(d))
-        d = std::numeric_limits<float>::quiet_NaN();
-    std::memcpy(&ret, &d, sizeof(float));
-    return ret;
+    if (isnan(d)) return quietNaN32;
+    return std::bit_cast<uint32_t>(d);
 }
 
 // =======================================
@@ -2642,6 +2648,52 @@ extern "C" LEAN_EXPORT obj_res lean_float_array_push(obj_arg a, double d) {
     *it = d;
     sz++;
     return r;
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_size(b_obj_arg a) {
+    return lean_box(lean_sarray_size(a));
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_uget(b_obj_arg a, size_t i) {
+    return lean_float_array_cptr(a)[i];
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_fget(b_obj_arg a, b_obj_arg i) {
+    return lean_float_array_uget(a, lean_unbox(i));
+}
+
+extern "C" LEAN_EXPORT double lean_float_array_get(b_obj_arg a, b_obj_arg i) {
+    if (lean_is_scalar(i)) {
+        size_t idx = lean_unbox(i);
+        return idx < lean_sarray_size(a) ? lean_float_array_uget(a, idx) : 0.0;
+    } else {
+        /* The index must be out of bounds. Otherwise we would be out of memory. */
+        return 0.0;
+    }
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_uset(obj_arg a, size_t i, double d) {
+    obj_res r = lean_is_exclusive(a) ? a : lean_copy_float_array(a);
+    double * it = lean_float_array_cptr(r) + i;
+    *it = d;
+    return r;
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_fset(obj_arg a, b_obj_arg i, double d) {
+    return lean_float_array_uset(a, lean_unbox(i), d);
+}
+
+extern "C" LEAN_EXPORT obj_res lean_float_array_set(obj_arg a, b_obj_arg i, double d) {
+    if (!lean_is_scalar(i)) {
+        return a;
+    } else {
+        size_t idx = lean_unbox(i);
+        if (idx >= lean_sarray_size(a)) {
+            return a;
+        } else {
+            return lean_float_array_uset(a, idx, d);
+        }
+    }
 }
 
 // =======================================

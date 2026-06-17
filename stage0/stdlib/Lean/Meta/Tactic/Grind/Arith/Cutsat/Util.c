@@ -8062,7 +8062,7 @@ goto v_resetjp_2950_;
 }
 v_resetjp_2950_:
 {
-lean_object* v_a_2954_; 
+lean_object* v_____do__lift_2954_; 
 if (lean_obj_tag(v_c_u2083_x3f_2945_) == 1)
 {
 lean_object* v_val_2963_; lean_object* v___x_2964_; 
@@ -8076,7 +8076,7 @@ lean_object* v_a_2965_;
 v_a_2965_ = lean_ctor_get(v___x_2964_, 0);
 lean_inc(v_a_2965_);
 lean_dec_ref_known(v___x_2964_, 1);
-v_a_2954_ = v_a_2965_;
+v_____do__lift_2954_ = v_a_2965_;
 goto v___jp_2953_;
 }
 else
@@ -8092,7 +8092,7 @@ else
 lean_object* v___x_2966_; 
 lean_dec(v_c_u2083_x3f_2945_);
 v___x_2966_ = lean_obj_once(&l_Lean_Meta_Grind_Arith_Cutsat_CooperSplitPred_pp___redArg___closed__4, &l_Lean_Meta_Grind_Arith_Cutsat_CooperSplitPred_pp___redArg___closed__4_once, _init_l_Lean_Meta_Grind_Arith_Cutsat_CooperSplitPred_pp___redArg___closed__4);
-v_a_2954_ = v___x_2966_;
+v_____do__lift_2954_ = v___x_2966_;
 goto v___jp_2953_;
 }
 v___jp_2953_:
@@ -8110,7 +8110,7 @@ lean_ctor_set(v___x_2958_, 0, v___x_2957_);
 lean_ctor_set(v___x_2958_, 1, v___x_2955_);
 v___x_2959_ = lean_alloc_ctor(7, 2, 0);
 lean_ctor_set(v___x_2959_, 0, v___x_2958_);
-lean_ctor_set(v___x_2959_, 1, v_a_2954_);
+lean_ctor_set(v___x_2959_, 1, v_____do__lift_2954_);
 if (v_isShared_2952_ == 0)
 {
 lean_ctor_set(v___x_2951_, 0, v___x_2959_);

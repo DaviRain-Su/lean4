@@ -5398,7 +5398,6 @@ v___x_1796_ = l_Lean_Syntax_getArg(v___x_1794_, v___x_1795_);
 lean_dec(v___x_1794_);
 v___x_1797_ = ((lean_object*)(l_Lean_Elab_Command_checkBinderPredicate___closed__0));
 v___x_1798_ = l_Lean_Linter_MissingDocs_lintNamed(v___x_1796_, v___x_1797_, v_a_1782_, v_a_1783_);
-lean_dec(v___x_1796_);
 return v___x_1798_;
 }
 else
@@ -5409,7 +5408,6 @@ v___x_1799_ = lean_unsigned_to_nat(3u);
 v___x_1800_ = l_Lean_Syntax_getArg(v_stx_1781_, v___x_1799_);
 v___x_1801_ = ((lean_object*)(l_Lean_Elab_Command_checkBinderPredicate___closed__0));
 v___x_1802_ = l_Lean_Linter_MissingDocs_lint(v___x_1800_, v___x_1801_, v_a_1782_, v_a_1783_);
-lean_dec(v___x_1800_);
 return v___x_1802_;
 }
 }
