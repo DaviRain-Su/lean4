@@ -2,3 +2,13 @@ alpha/beta.txt
 beta.txt
 txt
 alpha
+beta
+alpha/beta.json
+alpha/beta.txt.bak
+missing
+.profile
+alpha/gamma/delta.log
+alpha|gamma|delta.log
+/tmp/rooted
+true
+true
