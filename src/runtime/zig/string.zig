@@ -235,7 +235,7 @@ export fn lean_string_utf8_set(s: *anyopaque, idx_arg: *anyopaque, c: u32) callc
     const result = allocString(new_total + 1, new_total + 1, stringLength(s));
     const dest = stringDataMut(result);
     @memcpy(dest[0..i], bytes[0..i]);
-    @memcpy(dest[i..i + new_size], new_encoded[0..new_size]);
+    @memcpy(dest[i .. i + new_size], new_encoded[0..new_size]);
     @memcpy(dest[i + new_size .. new_total], bytes[i + old_size .. sz]);
     dest[new_total] = 0;
     rc.lean_dec(s);
@@ -280,6 +280,14 @@ export fn lean_string_eq_cold(s1: *anyopaque, s2: *anyopaque) callconv(.c) bool 
 
 export fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) bool {
     return std.mem.order(u8, stringData(s1)[0 .. stringSize(s1) - 1], stringData(s2)[0 .. stringSize(s2) - 1]) == .lt;
+}
+
+export fn lean_string_compare(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8 {
+    return switch (std.mem.order(u8, stringData(s1)[0 .. stringSize(s1) - 1], stringData(s2)[0 .. stringSize(s2) - 1])) {
+        .lt => 0,
+        .eq => 1,
+        .gt => 2,
+    };
 }
 
 export fn lean_string_hash(s: *anyopaque) callconv(.c) u64 {
@@ -496,14 +504,21 @@ test "string equality ordering and append follow byte semantics" {
     const suffix = lean_mk_string("llo");
     const smaller = lean_mk_string("abc");
     const larger = lean_mk_string("abd");
+    const prefix = lean_mk_string("ab");
     defer freeString(rhs);
     defer freeString(suffix);
     defer freeString(smaller);
     defer freeString(larger);
+    defer freeString(prefix);
 
     try testing.expect(stringEq(lhs, rhs));
     try testing.expectEqual(@as(u8, 1), stringDecEq(lhs, rhs));
     try testing.expect(lean_string_lt(smaller, larger));
+    try testing.expectEqual(@as(u8, 0), lean_string_compare(smaller, larger));
+    try testing.expectEqual(@as(u8, 1), lean_string_compare(smaller, smaller));
+    try testing.expectEqual(@as(u8, 2), lean_string_compare(larger, smaller));
+    try testing.expectEqual(@as(u8, 2), lean_string_compare(smaller, prefix));
+    try testing.expectEqual(@as(u8, 0), lean_string_compare(prefix, smaller));
 
     const appended = lean_string_append(lhs, suffix);
     defer freeString(appended);

@@ -133,13 +133,14 @@ fn murmurHash64A(bytes: []const u8, seed: u64) u64 {
     return h;
 }
 
-pub export fn lean_name_eq(n1: *anyopaque, n2: *anyopaque) callconv(.c) u8 {
+pub export fn lean_name_eq(n1: ?*anyopaque, n2: ?*anyopaque) callconv(.c) u8 {
     var lhs: ?*anyopaque = n1;
     var rhs: ?*anyopaque = n2;
 
     if (lhs == rhs) return 1;
-    if (object.lean_is_scalar(lhs) and object.lean_is_scalar(rhs)) return 0;
-    if (object.lean_is_scalar(lhs) != object.lean_is_scalar(rhs) or nameHashPtr(lhs) != nameHashPtr(rhs)) {
+    if (lhs == null or rhs == null) return 0;
+    if (object.lean_is_scalar(lhs) or object.lean_is_scalar(rhs)) return 0;
+    if (nameHashPtr(lhs) != nameHashPtr(rhs)) {
         return 0;
     }
 
@@ -166,7 +167,8 @@ pub export fn lean_name_eq(n1: *anyopaque, n2: *anyopaque) callconv(.c) u8 {
         lhs = ctor.lean_ctor_get(lhs.?, 0);
         rhs = ctor.lean_ctor_get(rhs.?, 0);
         if (lhs == rhs) return 1;
-        if (object.lean_is_scalar(lhs) != object.lean_is_scalar(rhs)) {
+        if (lhs == null or rhs == null) return 0;
+        if (object.lean_is_scalar(lhs) or object.lean_is_scalar(rhs)) {
             return 0;
         }
     }
@@ -240,6 +242,8 @@ test "lean_name_eq walks the Lean.Name ctor spine" {
 
     try testing.expectEqual(@as(u8, 1), lean_name_eq(lhs, rhs));
     try testing.expectEqual(@as(u8, 0), lean_name_eq(lhs, diff));
+    try testing.expectEqual(@as(u8, 0), lean_name_eq(anonymous, lhs));
+    try testing.expectEqual(@as(u8, 0), lean_name_eq(null, lhs));
 }
 
 test "lean_slice_hash uses slice bytes rather than the backing string" {

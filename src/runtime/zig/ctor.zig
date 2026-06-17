@@ -40,7 +40,19 @@ fn ctorObjectBytes(o: *anyopaque) usize {
 }
 
 fn ctorScalarBytes(o: *anyopaque) usize {
-    return header(o).m_cs_sz;
+    const hdr = header(o);
+    const object_bytes = ctorObjectBytes(o);
+    if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
+        return hdr.m_cs_sz;
+    }
+
+    const payload_size = alloc.allocationPayloadSize(o) orelse if (hdr.m_rc == 0 and hdr.m_cs_sz != 0)
+        @as(usize, hdr.m_cs_sz)
+    else
+        return 0;
+    const scalar_start = @sizeOf(lean.lean_ctor_object) + object_bytes;
+    std.debug.assert(payload_size >= scalar_start);
+    return payload_size - scalar_start;
 }
 
 fn scalarBaseAddr(o: *anyopaque) usize {
@@ -213,4 +225,25 @@ test "lean_ctor scalar accessors round-trip packed fields" {
     try testing.expectEqual(@as(u64, 0x0123_4567_89ab_cdef), lean_ctor_get_uint64(ctor, base + 8));
     try testing.expectEqual(@as(u64, 0x4009_21fb_5444_2d18), @as(u64, @bitCast(lean_ctor_get_float(ctor, base + 16))));
     try testing.expectEqual(@as(u32, 0x4049_0fdb), @as(u32, @bitCast(lean_ctor_get_float32(ctor, base + 24))));
+}
+
+test "lean_ctor scalar accessors handle emitted heap ctor headers" {
+    const object_count = 2;
+    const scalar_sz = @sizeOf(u64);
+    const total_size = @sizeOf(lean.lean_ctor_object) + @sizeOf(?*anyopaque) * object_count + scalar_sz;
+    const ctor = alloc.lean_alloc_object(total_size);
+    defer forceFree(ctor);
+
+    header(ctor).* = .{
+        .m_rc = 1,
+        .m_cs_sz = 0,
+        .m_other = object_count,
+        .m_tag = 1,
+    };
+    lean_ctor_set(ctor, 0, object.lean_box(0));
+    lean_ctor_set(ctor, 1, object.lean_box(7));
+
+    const offset = @sizeOf(?*anyopaque) * object_count;
+    lean_ctor_set_uint64(ctor, offset, 0xfeed_face_cafe_beef);
+    try testing.expectEqual(@as(u64, 0xfeed_face_cafe_beef), lean_ctor_get_uint64(ctor, offset));
 }

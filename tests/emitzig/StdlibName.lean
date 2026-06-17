@@ -3,6 +3,7 @@ prelude
 import Init.Data.String.Length
 import Init.Data.ToString.Name
 import Init.System.IO
+import Lean.Data.Name
 import Std.Data.HashMap
 import Std.Data.HashSet
 
@@ -33,3 +34,32 @@ def main : IO Unit := do
   IO.println (s1.contains n2)
   IO.println (s1.contains (Name.mkStr n1 "child"))
   IO.println (s1.fold (fun acc n => acc + n.toString.length) 0)
+
+  IO.println n3.getPrefix.toString
+  IO.println n3.getRoot.toString
+  IO.println n3.components.length
+  IO.println (String.intercalate "|" (n3.components.map (·.toString)))
+  IO.println (root.isPrefixOf n3)
+  IO.println ((Name.mkStr Name.anonymous "LCNF").isSuffixOf n3)
+  IO.println ((Name.mkNum Name.anonymous 42).isSuffixOf n3)
+  IO.println (n3.replacePrefix root (Name.mkStr2 "Std" "Compiler")).toString
+  IO.println (Name.appendCore root (Name.mkStr2 "Code" "Gen")).toString
+  IO.println (Name.appendAfter n1 "_aux").toString
+  IO.println (Name.appendIndexAfter n1 7).toString
+  IO.println (Name.appendBefore n1 "pre_").toString
+  IO.println (Name.mkSimple "a.b").toString
+  IO.println (Name.mkSimple "_private").isInternal
+  IO.println (Name.mkSimple "_private").isInternalOrNum
+  IO.println (Name.mkNum (Name.mkSimple "x") 1).isInternalOrNum
+  IO.println (Name.mkStr2 "__impl" "detail").isImplementationDetail
+  IO.println n1.isAtomic
+  IO.println (Name.mkSimple "atom").isAtomic
+  IO.println n3.isNum
+  IO.println n1.isStr
+  IO.println Name.anonymous.isAnonymous
+  IO.println n1.hasNum
+  IO.println n3.hasNum
+  IO.println (n1.cmp n3 == Ordering.lt)
+  IO.println (n1.quickCmp n1 == Ordering.eq)
+  IO.println (n1.anyS (fun s => s == "Compiler"))
+  IO.println (n1.anyS (fun s => s == "Parser"))
