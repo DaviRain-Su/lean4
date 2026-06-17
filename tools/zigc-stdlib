@@ -33,7 +33,9 @@ try:
 except ImportError:
     fcntl = None
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+TOOL = pathlib.Path(__file__).resolve()
+ROOT = TOOL.parent.parent
+DEPENDENCY_DISCOVERY_VERSION = 2
 
 
 
@@ -444,6 +446,8 @@ def dependency_cache_meta(
     except FileNotFoundError:
         return None
     return {
+        "dependency_discovery_version": DEPENDENCY_DISCOVERY_VERSION,
+        "tool": file_stamp(TOOL),
         "lean": lean_fingerprint(lean),
         "src_root": str(src_root.resolve()),
         "seeds": [str(seed.resolve()) for seed in seeds],
