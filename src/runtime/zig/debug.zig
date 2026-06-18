@@ -13,6 +13,7 @@ const testing = std.testing;
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const sync = @import("sync.zig");
+const exception = @import("exception.zig");
 
 const POSIX = builtin.os.tag != .windows;
 
@@ -84,7 +85,7 @@ pub fn enableDebugDialog(flag: bool) void {
 pub fn invokeDebugger() noreturn {
     g_has_violations = true;
     if (!g_debug_dialog) {
-        std.debug.panic("unreachable code was reached", .{});
+        exception.throwUnreachableException();
     }
     // Interactive debugger prompt is not implemented in the first pass.
     std.debug.panic("interactive debugger invocation is not implemented in the Zig first pass", .{});

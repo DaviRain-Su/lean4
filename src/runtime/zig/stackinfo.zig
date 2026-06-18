@@ -9,6 +9,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 
+const exception = @import("exception.zig");
+
 const c = @cImport({
     @cInclude("pthread.h");
     @cInclude("sys/resource.h");
@@ -82,7 +84,7 @@ pub fn getAvailableStackSize() usize {
 }
 
 fn throwStackSpaceException(component_name: [*:0]const u8) noreturn {
-    std.debug.panic("deep recursion was detected at '{s}' (potential solution: increase elaboration stack size using the `lean --tstack` flag).", .{component_name});
+    exception.throwStackSpaceException(component_name);
 }
 
 pub fn checkStack(component_name: [*:0]const u8) void {

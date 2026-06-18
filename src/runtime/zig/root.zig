@@ -11,6 +11,7 @@ pub const ctor = @import("ctor.zig");
 pub const compat = @import("compat.zig");
 pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
+pub const exception = @import("exception.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
 pub const init = @import("init.zig");
@@ -62,6 +63,7 @@ comptime {
     _ = compat.force_link;
     _ = debug;
     _ = dbg;
+    _ = exception;
     _ = stack_overflow;
     _ = float;
     _ = init;

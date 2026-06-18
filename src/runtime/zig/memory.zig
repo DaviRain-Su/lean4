@@ -9,6 +9,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 
+const exception = @import("exception.zig");
 const object = @import("object.zig");
 
 const c = @cImport({
@@ -66,7 +67,7 @@ pub fn setMaxMemoryMegabyte(max: c_uint) void {
 }
 
 fn throwMemoryException(component_name: [*:0]const u8) noreturn {
-    std.debug.panic("excessive memory consumption detected at '{s}' (potential solution: increase memory consumption threshold using `set_option maxMemory=...`).", .{component_name});
+    exception.throwMemoryException(component_name);
 }
 
 pub fn checkMemory(component_name: [*:0]const u8) void {

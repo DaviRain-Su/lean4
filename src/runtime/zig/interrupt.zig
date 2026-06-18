@@ -11,6 +11,7 @@ const testing = std.testing;
 
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+const exception = @import("exception.zig");
 const stackinfo = @import("stackinfo.zig");
 const memory = @import("memory.zig");
 
@@ -50,7 +51,7 @@ pub fn setMaxHeartbeatThousands(max: c_uint) void {
 }
 
 fn throwHeartbeatException() noreturn {
-    std.debug.panic("excessive memory consumption detected at 'heartbeat' (potential solution: increase heartbeat threshold using `set_option maxHeartbeats=...`).", .{});
+    exception.throwHeartbeatException();
 }
 
 pub fn checkHeartbeat() void {
@@ -79,7 +80,7 @@ fn cancelTokenIsSet(tk: ?*anyopaque) bool {
 pub fn checkInterrupted() void {
     if (g_cancel_tk) |tk| {
         if (cancelTokenIsSet(tk)) {
-            std.debug.panic("interrupted", .{});
+            exception.throwInterruptedException();
         }
     }
 }
