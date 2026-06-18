@@ -68,11 +68,11 @@ def run(cmd: list[str], *, cwd: pathlib.Path | None = None, check: bool = True,
     return subprocess.run(cmd, cwd=cwd, check=check)
 
 
-def acquire_cache_lock(cache_dir: pathlib.Path):
+def acquire_cache_lock(cache_dir: pathlib.Path, lock_name: str = ".lock"):
     """Serialize writers that share a zigc-stdlib cache directory."""
     if fcntl is None:
         return None
-    lock_path = cache_dir / ".lock"
+    lock_path = cache_dir / lock_name
     lock = lock_path.open("a+")
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -100,6 +100,7 @@ def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: path
 
 
 def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path) -> None:
+    tmp_obj = out_obj.with_suffix(f".tmp{os.getpid()}.o")
     result = subprocess.run(
         [
             str(zig), "build-obj",
@@ -107,16 +108,17 @@ def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path
             f"-Mroot={zig_file}",
             f"-Mlean_rt={LEAN_RT_ZIG}",
             "-O", "Debug",
-            "-fstrip", f"-femit-bin={out_obj}",
+            "-fstrip", f"-femit-bin={tmp_obj}",
         ],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
+        tmp_obj.unlink(missing_ok=True)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
         raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
-
+    tmp_obj.replace(out_obj)
 
 def normalize_symbol(sym: str) -> str:
     return sym[1:] if sym.startswith("_") else sym
@@ -138,6 +140,22 @@ def extract_defined_symbols(path: pathlib.Path) -> set[str]:
         if len(parts) >= 2 and parts[-2] in {"T", "D", "B", "S"}:
             symbols.add(normalize_symbol(parts[-1]))
     return symbols
+
+def get_defined_symbols(path: pathlib.Path) -> set[str]:
+    """Like `extract_defined_symbols`, but cache the result next to the object."""
+    syms_path = path.with_suffix(f"{path.suffix}.syms")
+    if syms_path.exists() and syms_path.stat().st_mtime >= path.stat().st_mtime:
+        try:
+            return set(json.loads(syms_path.read_text()))
+        except Exception:
+            pass
+    syms = extract_defined_symbols(path)
+    try:
+        atomic_write_text(syms_path, json.dumps(sorted(syms)))
+    except Exception:
+        pass
+    return syms
+
 
 
 def strip_symbols_from_obj(obj: pathlib.Path, symbols: set[str], work_dir: pathlib.Path) -> pathlib.Path | None:
@@ -169,14 +187,14 @@ def filter_conflicting_objs(
     """On Darwin rely on link-order + duplicate suppression; elsewhere strip overlaps."""
     if sys.platform == "darwin":
         return objs
-    zigrt_syms = extract_defined_symbols(zigrt_lib)
+    zigrt_syms = get_defined_symbols(zigrt_lib)
     if not zigrt_syms:
         return objs
     kept: list[pathlib.Path] = []
     stripped = 0
     dropped = 0
     for obj in objs:
-        obj_syms = extract_defined_symbols(obj)
+        obj_syms = get_defined_symbols(obj)
         overlap = obj_syms & zigrt_syms
         if not overlap:
             kept.append(obj)
@@ -322,8 +340,10 @@ def helperless_zigrt_cache_valid(cache_dir: pathlib.Path, expected_meta: dict) -
 def save_helperless_zigrt_cache(cache_dir: pathlib.Path, lib: pathlib.Path, meta: dict) -> pathlib.Path:
     cached_lib = helperless_zigrt_lib_path(cache_dir)
     cached_lib.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(lib, cached_lib)
-    helperless_zigrt_meta_path(cache_dir).write_text(json.dumps(meta, indent=2))
+    tmp_lib = cached_lib.with_suffix(f"{cached_lib.suffix}.tmp{os.getpid()}")
+    shutil.copy2(lib, tmp_lib)
+    tmp_lib.replace(cached_lib)
+    atomic_write_text(helperless_zigrt_meta_path(cache_dir), json.dumps(meta, indent=2))
     return cached_lib
 
 
@@ -359,6 +379,8 @@ def build_helperless_zigrt(
     ]
     result = subprocess.run(cmd, cwd=runtime_dir, capture_output=True, text=True)
     if result.returncode != 0:
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
         raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
     lib = prefix / "lib" / "libleanrt_zig.a"
     if not lib.exists():
@@ -405,10 +427,21 @@ def load_cache_meta(cache_dir: pathlib.Path, module: str) -> dict | None:
     except Exception:
         return None
 
-
 def save_cache_meta(cache_dir: pathlib.Path, module: str, meta: dict) -> None:
     meta_path = cache_dir / f"{module}.meta"
-    meta_path.write_text(json.dumps(meta, indent=2))
+    atomic_write_text(meta_path, json.dumps(meta, indent=2))
+
+def atomic_write_text(path: pathlib.Path, content: str) -> None:
+    tmp = path.with_suffix(f"{path.suffix}.tmp{os.getpid()}")
+    tmp.write_text(content)
+    tmp.replace(path)
+
+
+def atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
+    tmp = path.with_suffix(f"{path.suffix}.tmp{os.getpid()}")
+    tmp.write_bytes(content)
+    tmp.replace(path)
+
 
 
 def expected_cache_meta(src: pathlib.Path, lean: pathlib.Path) -> dict:
@@ -541,7 +574,7 @@ def save_dependency_cache(
     if meta is None:
         return
     path = dependency_cache_path(cache_dir, lean, src_root, seeds)
-    path.write_text(json.dumps({"meta": meta, "modules": modules}, indent=2))
+    atomic_write_text(path, json.dumps({"meta": meta, "modules": modules}, indent=2))
 
 
 def files_equal(a: pathlib.Path, b: pathlib.Path) -> bool:
@@ -853,11 +886,13 @@ def main() -> int:
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="zigc-stdlib-"))
-    lock = None
 
     try:
-        lock = acquire_cache_lock(cache_dir)
-        zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, build_dir, force=args.force)
+        zigrt_lock = acquire_cache_lock(cache_dir, ".zigrt-lock")
+        try:
+            zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, build_dir, force=args.force)
+        finally:
+            release_cache_lock(zigrt_lock)
 
         # Determine the set of stdlib modules to compile.
         if args.no_recursive:
@@ -943,7 +978,6 @@ def main() -> int:
             print(result.stderr, file=sys.stderr)
             return 1
     finally:
-        release_cache_lock(lock)
         shutil.rmtree(work, ignore_errors=True)
 
     return 0
