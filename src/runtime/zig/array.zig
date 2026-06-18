@@ -402,7 +402,7 @@ export fn lean_array_set_panic(a: *anyopaque, v: *anyopaque) callconv(.c) *anyop
     @panic("array index out of bounds");
 }
 
-export fn lean_array_push(a: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque {
+pub export fn lean_array_push(a: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque {
     const result = if (rc.lean_is_exclusive(a))
         if (lean_array_capacity(a) > lean_array_size(a))
             a

@@ -4,7 +4,9 @@
 const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
+const array = @import("array.zig");
 const ctor = @import("ctor.zig");
+const io_error = @import("io_error.zig");
 const io_result = @import("io_result.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
@@ -13,6 +15,7 @@ const rc = @import("rc.zig");
 const c = @cImport({
     @cInclude("arpa/inet.h");
     @cInclude("netinet/in.h");
+    @cInclude("uv.h");
 });
 
 extern fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque;
@@ -106,6 +109,20 @@ fn mkIPv6AddrFromIn6Addr(addr: *const c.struct_in6_addr) *anyopaque {
     return mkBoxedArray(u16, &segments);
 }
 
+fn mkCtor1(tag: u16, obj: *anyopaque) *anyopaque {
+    const result = alloc.lean_alloc_ctor(tag, 1, 0);
+    ctor.lean_ctor_set(result, 0, obj);
+    return result;
+}
+
+fn mkIpAddrFromInAddrStorage(family: c_int, addr: *anyopaque) *anyopaque {
+    if (family == c.AF_INET) {
+        return mkCtor1(0, mkIPv4AddrFromInAddr(@ptrCast(@alignCast(addr))));
+    } else {
+        return mkCtor1(1, mkIPv6AddrFromIn6Addr(@ptrCast(@alignCast(addr))));
+    }
+}
+
 fn isStrictIPv4DottedDecimal(bytes: []const u8) bool {
     if (bytes.len == 0) return false;
 
@@ -137,7 +154,7 @@ fn isStrictIPv4DottedDecimal(bytes: []const u8) bool {
 }
 
 // Std.Net.IPv4Addr.ofString (s : @&String) : Option IPv4Addr
-fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
+pub export fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(str_obj)) return mkOptionNone();
     if (!isStrictIPv4DottedDecimal(stringBytes(str_obj))) return mkOptionNone();
 
@@ -149,7 +166,7 @@ fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv4Addr.toString (addr : @&IPv4Addr) : String
-fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
+pub export fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
     var internal: c.struct_in_addr = undefined;
     ipv4AddrToBytes(ipv4_addr, byteSpan(&internal, 4)[0..4]);
 
@@ -161,7 +178,7 @@ fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv6Addr.ofString (s : @&String) : Option IPv6Addr
-fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
+pub export fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(str_obj)) return mkOptionNone();
 
     var internal: c.struct_in6_addr = undefined;
@@ -172,7 +189,7 @@ fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv6Addr.toString (addr : @&IPv6Addr) : String
-fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
+pub export fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
     var internal: c.struct_in6_addr = undefined;
     ipv6AddrToBytes(ipv6_addr, byteSpan(&internal, 16)[0..16]);
 
@@ -184,9 +201,46 @@ fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.interfaceAddresses : IO (Array InterfaceAddress)
-// Note: the runtime implementation used by Lean code is in src/runtime/uv/net_addr.cpp.
-fn lean_uv_interface_addresses() callconv(.c) *anyopaque {
-    return io_result.lean_io_result_mk_ok(alloc.lean_alloc_array(0, 0));
+pub export fn lean_uv_interface_addresses() callconv(.c) *anyopaque {
+    var info: [*c]c.uv_interface_address_t = undefined;
+    var count: c_int = 0;
+
+    if (c.uv_interface_addresses(&info, &count) != 0) {
+        return io_result.lean_io_result_mk_error(io_error.lean_mk_io_error_invalid_argument(0, lean_mk_string("failed to get interface addresses")));
+    }
+    defer c.uv_free_interface_addresses(info, count);
+
+    var arr = alloc.lean_alloc_array(0, @intCast(count));
+    for (0..@intCast(count)) |i| {
+        var iface = info[i];
+        const sin_family = iface.address.address4.sin_family;
+        if (sin_family != c.AF_INET and sin_family != c.AF_INET6) continue;
+
+        const socket_address: *anyopaque = if (sin_family == c.AF_INET)
+            @ptrCast(&iface.address.address4.sin_addr)
+        else
+            @ptrCast(&iface.address.address6.sin6_addr);
+
+        const netmask_address: *anyopaque = if (sin_family == c.AF_INET)
+            @ptrCast(&iface.netmask.netmask4.sin_addr)
+        else
+            @ptrCast(&iface.netmask.netmask6.sin6_addr);
+
+        const mac = mkBoxedArray(u8, iface.phys_addr[0..6]);
+        const ip1 = mkIpAddrFromInAddrStorage(sin_family, socket_address);
+        const ip2 = mkIpAddrFromInAddrStorage(sin_family, netmask_address);
+
+        const result = alloc.lean_alloc_ctor(0, 4, 1);
+        ctor.lean_ctor_set(result, 0, lean_mk_string(iface.name));
+        ctor.lean_ctor_set(result, 1, mac);
+        ctor.lean_ctor_set(result, 2, ip1);
+        ctor.lean_ctor_set(result, 3, ip2);
+        ctor.lean_ctor_set_uint8(result, @sizeOf(?*anyopaque) * 4, @intCast(iface.is_internal));
+
+        arr = array.lean_array_push(arr, result);
+    }
+
+    return io_result.lean_io_result_mk_ok(arr);
 }
 
 fn optionValue(opt: *anyopaque) !*anyopaque {

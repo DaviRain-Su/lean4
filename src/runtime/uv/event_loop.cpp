@@ -101,55 +101,34 @@ void event_loop_run_loop(event_loop_t * event_loop) {
     }
 }
 
-/* Std.Internal.UV.Loop.configure (options : Loop.Options) : BaseIO Unit */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_event_loop_configure(b_obj_arg options) {
-    bool accum = lean_ctor_get_uint8(options, 0);
-    bool block = lean_ctor_get_uint8(options, 1);
-
-    event_loop_lock(&global_ev);
-
-    if (accum) {
-        int result = uv_loop_configure(global_ev.loop, UV_METRICS_IDLE_TIME);
-        if (result != 0) return lean_io_result_mk_error(lean_decode_uv_error(result, NULL));
-    }
-
-    #if!defined(WIN32) && !defined(_WIN32)
-    if (block) {
-        int result = uv_loop_configure(global_ev.loop, UV_LOOP_BLOCK_SIGNAL, SIGPROF);
-        if (result != 0) return lean_io_result_mk_error(lean_decode_uv_error(result, NULL));
-    }
-    #endif
-
-    event_loop_unlock(&global_ev);
-
-    return lean_box(0);
-}
-
-/* Std.Internal.UV.Loop.alive : BaseIO Bool */
-extern "C" LEAN_EXPORT uint8_t lean_uv_event_loop_alive() {
-    event_loop_lock(&global_ev);
-    int is_alive = uv_loop_alive(global_ev.loop);
-    event_loop_unlock(&global_ev);
-
-    return is_alive;
-}
-
 void initialize_libuv_loop() {
     event_loop_init(&global_ev);
-}
-
-#else
-
-/* Std.Internal.UV.Loop.configure (options : Loop.Options) : BaseIO Unit */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_event_loop_configure(b_obj_arg options) {
-    return io_result_mk_error("lean_uv_event_loop_configure is not supported");
-}
-
-/* Std.Internal.UV.Loop.alive : BaseIO UInt64 */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_event_loop_alive() {
-    return io_result_mk_error("lean_uv_event_loop_alive is not supported");
 }
 
 #endif
 
 }
+
+#ifndef LEAN_EMSCRIPTEN
+extern "C" {
+void lean_event_loop_lock() { lean::event_loop_lock(&lean::global_ev); }
+void lean_event_loop_unlock() { lean::event_loop_unlock(&lean::global_ev); }
+int lean_event_loop_is_alive() {
+    lean::event_loop_lock(&lean::global_ev);
+    int is_alive = uv_loop_alive(lean::global_ev.loop);
+    lean::event_loop_unlock(&lean::global_ev);
+    return is_alive;
+}
+uv_loop_t* lean_event_loop_loop() { return lean::global_ev.loop; }
+int lean_uv_loop_configure_idle(uv_loop_t* loop) {
+    return uv_loop_configure(loop, UV_METRICS_IDLE_TIME);
+}
+int lean_uv_loop_configure_block_signal(uv_loop_t* loop) {
+#if !defined(WIN32) && !defined(_WIN32)
+    return uv_loop_configure(loop, UV_LOOP_BLOCK_SIGNAL, SIGPROF);
+#else
+    return 0;
+#endif
+}
+}
+#endif
