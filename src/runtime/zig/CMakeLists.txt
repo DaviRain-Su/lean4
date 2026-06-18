@@ -18,23 +18,74 @@ if(ZIG)
 
   # The C++ uv subsystem needs the generated lean/config.h, which lives in the
   # stage include directory (e.g. build/release/stage1/include).
-  set(LEAN_ZIG_RUNTIME_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/../../include")
+  get_filename_component(LEAN_ZIG_RUNTIME_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/../../include" ABSOLUTE)
+  set(LEAN_ZIG_RUNTIME_INCLUDE_ARG "-Dlean-include-dir=${LEAN_ZIG_RUNTIME_INCLUDE_DIR}")
+
+  file(
+    GLOB LEAN_ZIG_RUNTIME_LOCAL_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.zig"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.h"
+  )
+  set(LEAN_ZIG_RUNTIME_UV_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/dns.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/dns.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/event_loop.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/event_loop.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/net_addr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/net_addr.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/signal.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/signal.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/system.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/system.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/tcp.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/tcp.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/timer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/timer.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/udp.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/udp.h"
+  )
+  set(LEAN_ZIG_RUNTIME_SOURCES
+    ${LEAN_ZIG_RUNTIME_LOCAL_SOURCES}
+    ${LEAN_ZIG_RUNTIME_UV_SOURCES}
+  )
+  set(LEAN_ZIG_RUNTIME_BUILD_OPTIONS
+    --prefix "${LEAN_ZIG_RUNTIME_PREFIX}"
+    --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
+    --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
+    "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
+  )
+
+  add_custom_command(
+    OUTPUT "${LEAN_ZIG_RUNTIME_LIB}"
+    COMMAND "${ZIG}" build ${LEAN_ZIG_RUNTIME_BUILD_OPTIONS}
+    COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_LIB}"
+    DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building Lean Zig runtime library"
+    VERBATIM
+  )
 
   add_custom_target(
     leanrt_zig ${LEAN_ZIG_RUNTIME_ALL}
-    COMMAND "${ZIG}" build --prefix "${LEAN_ZIG_RUNTIME_PREFIX}" --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}" --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}" -Dlean-include-dir="${LEAN_ZIG_RUNTIME_INCLUDE_DIR}"
-    BYPRODUCTS "${LEAN_ZIG_RUNTIME_LIB}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "Building Lean Zig runtime library"
+    DEPENDS "${LEAN_ZIG_RUNTIME_LIB}"
   )
 
   if(LEAN_ZIG_RUNTIME)
+    set(LEAN_ZIG_RUNTIME_TEST_ARGS
+      build
+      test
+      --test-timeout 60s
+      ${LEAN_ZIG_RUNTIME_BUILD_OPTIONS}
+    )
     add_custom_target(
       leanrt_zig_test
-      COMMAND "${ZIG}" build test --test-timeout 60s --prefix "${LEAN_ZIG_RUNTIME_PREFIX}" --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}" --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}" -Dlean-include-dir="${LEAN_ZIG_RUNTIME_INCLUDE_DIR}"
+      COMMAND "${ZIG}" ${LEAN_ZIG_RUNTIME_TEST_ARGS}
       DEPENDS leanrt_zig
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       COMMENT "Testing Lean Zig runtime library"
+      VERBATIM
     )
   endif()
 endif()
