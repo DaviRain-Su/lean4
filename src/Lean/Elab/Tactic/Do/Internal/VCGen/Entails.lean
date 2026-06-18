@@ -85,6 +85,61 @@ public def splitLatticeOp? (goal : MVarId) (rhs : Expr) :
     | .goals goals => return some goals
     | .failed => return none
 
+/--
+Reduce a precondition that is the bare top applied to the state arguments introduced by
+`le_of_forall_le`, `(⊤ : σ₁ → … → σₙ → Prop) s₁ … sₙ`, to the bare `(⊤ : Prop)`, rewriting `goal`'s
+target `pre ⊑ rhs` to `⊤ ⊑ rhs`. The equation `pre = ⊤` is built on demand by folding
+`Lean.Order.top_apply` over the excess arguments (mirroring `replaceEPostHeadBot?`'s `bot_apply`
+fold) and applied with `replaceTargetEq`.
+
+The proof term is built directly with `mkApp`/`mkConst` and instances extracted from `pre`, avoiding
+`mkAppM`/instance synthesis (both expensive and unable to unify `max`-of-universe-variable instance
+levels in the abstract-monad setting). Returns `none` if `pre` is not the bare top applied to ≥ 1
+argument, or its lattice instances are not in the expected `instCompleteLatticePi` shape (the caller
+then falls through).
+-/
+public def reduceTopAppliedPre? (goal : MVarId) (target pre : Expr) : SymM (Option MVarId) := do
+  unless pre.isAppOf ``Lean.Order.top && pre.getAppNumArgs > 2 do return none
+  let args := pre.getAppArgs
+  let some carrier := args[0]? | return none
+  let some instTop := args[1]? | return none
+  -- `base = @top carrier instTop`, the unapplied lifted top; `pre = base s₁ … sₙ`.
+  let base := mkApp2 pre.getAppFn carrier instTop
+  -- Fold `top_apply` over the excess arguments: `acc : base s₁ … sᵢ = (⊤ : …)`.
+  let mut acc := mkApp2 (mkConst ``Eq.refl [← Sym.getLevel carrier]) carrier base
+  let mut curTop := base   -- `base s₁ … sᵢ`, the LHS of `acc`
+  let mut curBare := base  -- `(⊤ : …)`, the RHS of `acc`
+  let mut curTy := carrier
+  let mut curCL := instTop
+  for x in args.extract 2 args.size do
+    let .forallE _ σ τ _ := curTy | return none
+    if τ.hasLooseBVars then return none
+    unless curCL.isAppOf ``Lean.Order.instCompleteLatticePi do return none
+    let .lam _ _ τCL _ := curCL.appArg! | return none
+    let uσ ← Sym.getLevel σ
+    let uτ ← Sym.getLevel τ
+    -- `tfa : (⊤ : σ → τ) x = (⊤ : τ)`
+    let tfa := mkApp4 (mkConst ``Lean.Order.top_apply [← decLevel uσ, ← decLevel uτ]) σ τ τCL x
+    let some (_, _, newBare) := (← Sym.inferType tfa).eq? | return none
+    -- `cf : curTop x = curBare x` (congrFun acc x), then `acc : curTop x = newBare`.
+    let cf := mkApp6 (mkConst ``congrFun [uσ, uτ]) σ (.lam `x σ τ .default) curTop curBare acc x
+    acc := mkApp6 (mkConst ``Eq.trans [uτ]) τ (mkApp curTop x) (mkApp curBare x) newBare cf tfa
+    curTop := mkApp curTop x
+    curBare := newBare
+    curTy := τ
+    curCL := τCL
+  -- `acc : pre = (⊤ : Prop)`; lift through `· ⊑ rhs` and replace the target.
+  let relArgs := target.getAppArgs
+  let some α := relArgs[0]? | return none
+  let some inst := relArgs[1]? | return none
+  let some rhs := relArgs[3]? | return none
+  let uα ← Sym.getLevel α
+  -- `f := (· ⊑ rhs) : α → Prop`
+  let f := Expr.lam `p α (mkApp4 target.getAppFn α inst (.bvar 0) rhs) .default
+  let eqProof := mkApp6 (mkConst ``congrArg [uα, .succ .zero]) α (mkSort .zero) pre curBare f acc
+  let newTarget := mkApp4 target.getAppFn α inst curBare rhs
+  return some (← goal.replaceTargetEq newTarget eqProof)
+
 /-- Reduce a `Prop`-lattice goal `(⊤ : Prop) ⊑ φ` to the bare proposition `φ` via `top_le_prop`,
 returning any other goal unchanged. The match on `Sort 0` keeps it to the `Prop` base lattice,
 where the reduction is sound; entailments at an abstract lattice carrier pass through. -/

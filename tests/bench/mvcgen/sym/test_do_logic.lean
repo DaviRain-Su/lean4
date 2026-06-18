@@ -669,3 +669,63 @@ def liftProg : StateT Nat Id Nat := do
 example : ⦃ fun _ => ⌜True⌝ ⦄ liftProg ⦃ fun r _ => ⌜r = 5⌝ ⦄ := by mvcgen' [liftProg] <;> grind
 
 end RawMonadLiftRegression
+
+namespace InvalidSpecRejection
+
+/-! A `@[spec]` annotation whose conclusion is neither a Hoare triple nor an equation is rejected. -/
+
+/-- error: Invalid 'spec': target was neither a Hoare triple specification nor a 'simp' lemma -/
+#guard_msgs in
+@[spec] theorem trivialSpec : True := trivial
+
+end InvalidSpecRejection
+
+namespace TopBetaReduction
+
+variable {m : Type → Type u} {Pred EPred} [Monad m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred]
+
+def incr (n : Nat) : StateT Nat m PUnit := modify (· + n)
+
+@[spec]
+theorem Spec.incr
+    (post : PUnit → Nat → Pred) (epost : EPred) (n : Nat) :
+    Triple (fun s => post ⟨⟩ (s + n))
+      (incr n : StateT Nat m PUnit) post epost := by
+  mvcgen' [TopBetaReduction.incr]; rfl
+
+/--
+error: unsolved goals
+case vc1
+amounts : List Nat
+s✝ : Nat
+⊢ ⊥
+-/
+#guard_msgs in
+theorem incr_id (amounts : List Nat) :
+  ⦃ ⊤ ⦄
+    incr (m := Id) 1
+  ⦃ fun _ _ => ⊥ ⦄ := by
+  mvcgen' [incr]
+
+/--
+error: unsolved goals
+case vc1
+m : Type → Type u
+Pred EPred : Type
+inst✝³ : Monad m
+inst✝² : Assertion Pred
+inst✝¹ : Assertion EPred
+inst✝ : WPMonad m Pred EPred
+amounts : List Nat
+s✝ : Nat
+⊢ ⊤ ⊑ ⊥
+-/
+#guard_msgs in
+theorem incr_poly (amounts : List Nat) :
+  ⦃ ⊤ ⦄
+    incr (m := m) 1
+  ⦃ fun _ _ => ⊥ ⦄ := by
+  mvcgen' [incr]
+
+
+end TopBetaReduction

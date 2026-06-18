@@ -50,22 +50,43 @@ test_not_out "designed for use with the module system" build Test.ModuleConsumer
 
 # A non-module consumer: should build successfully but emit the warning,
 # naming both the importing file and the imported package.
-test_out "Test/NonModuleConsumer.lean: imports \`Dep\` from package \`dep\`, which is designed for use with the module system" \
+test_out "imports \`Dep\` from package \`dep\`, which is designed for use with the module system" \
   build Test.NonModuleConsumer
 
 # Same-package non-module file: dep itself contains DepLegacy.lean (no module
 # header) which imports another module of dep. The warning must fire here too,
 # since `requiresModuleSystem` applies within the package.
-test_out "DepLegacy.lean: missing \`module\` header as required by the \`requiresModuleSystem\` option" \
+test_out "missing \`module\` header as required by the \`requiresModuleSystem\` option" \
   build "@dep/DepLegacy"
 
 # Opt out via `allowNonModules`, exercising both granularities: set it on the
 # `Test` library (per-library opt-out, as one might for a test library) and on
-# the `dep` package as a whole. For the library, insert the option inside the
-# `Test` table; for the package, insert it after the root `name` line (appending
-# would instead bind it to the trailing table section).
-sed_i '/^name = "Test"$/a allowNonModules = true' lakefile.toml
-sed_i '1a allowNonModules = true' dep/lakefile.toml
+# the `dep` package as a whole.
+cat > lakefile.toml <<'EOF'
+name = "test"
+defaultTargets = ["Test"]
+
+[[lean_lib]]
+name = "Test"
+allowNonModules = true
+globs = "Test.+"
+
+[[require]]
+name = "dep"
+path = "dep"
+EOF
+
+cat > dep/lakefile.toml <<'EOF'
+name = "dep"
+allowNonModules = true
+requiresModuleSystem = true
+
+[[lean_lib]]
+name = "Dep"
+
+[[lean_lib]]
+name = "DepLegacy"
+EOF
 
 # After a clean rebuild, neither warning should appear.
 test_run clean

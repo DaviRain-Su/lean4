@@ -173,13 +173,19 @@ private def barePreIntro? (goal : MVarId) (α pre : Expr) : VCGenM (Option (MVar
   if pre.isAppOf ``Lean.Order.top then return none
   return some (← introPre (← read).backwardRules.propPreIntro goal)
 
-/-- Strategy 7: replace a `True` precondition by `⊤` via `true_le_of_top_le`, so the goal
-follows the `⊤` path instead of lifting `True` into the local context. -/
-private def truePre? (goal : MVarId) (pre target : Expr) : VCGenM (Option (List MVarId)) := do
-  unless pre.isTrue do return none
-  let .goals [g] ← (← read).backwardRules.truePreIntro.applyChecked goal
-    | throwError "Failed to apply {.ofConstName ``Lean.Order.true_le_of_top_le} to{indentExpr target}"
-  return some [g]
+/-- Strategy 7: replace a `True` precondition by `⊤` via `true_le_of_top_le`, or reduce a lifted
+`⊤ s₁ … sₙ` precondition (the bare top applied to the state arguments introduced by
+`le_of_forall_le`) to the bare `⊤` via a `top_apply` rewrite. Either way the goal follows the `⊤`
+path instead of lifting into the local context, and a `⊤`-precondition VC reaches `elimTopPre` in the
+bare form that `top_le_prop` can strip. -/
+private def normalizePreToTop? (goal : MVarId) (pre target : Expr) : VCGenM (Option (List MVarId)) := do
+  if pre.isTrue then
+    let .goals [g] ← (← read).backwardRules.truePreIntro.applyChecked goal
+      | throwError "Failed to apply {.ofConstName ``Lean.Order.true_le_of_top_le} to{indentExpr target}"
+    return some [g]
+  if let some g ← reduceTopAppliedPre? goal target pre then
+    return some [g]
+  return none
 
 /-- Phase 2: drive the precondition of `pre ⊑ rhs` toward `⊤`, lifting any pure content into the
 local context so a later spec application sees a `⊤` precondition. In order: cancel a redundant
@@ -193,9 +199,8 @@ private def normalizePre? (scope : VCGen.Scope) (goal : MVarId) (α pre target :
     return some (scope, [g])
   if let some (g, h) ← ofPropPreIntro? goal pre then
     return some ({ scope with lastLiftedPre? := some h }, [g])
-  if α.isForall then
-    return some (scope, [← introsExcessArgs goal])
-  if let some gs ← truePre? goal pre target then
+  if let some goal' ← introsExcessArgs goal then return some (scope, [goal'])
+  if let some gs ← normalizePreToTop? goal pre target then
     return some (scope, gs)
   if let some (g, h) ← barePreIntro? goal α pre then
     return some ({ scope with lastLiftedPre? := some h }, [g])
