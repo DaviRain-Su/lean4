@@ -264,6 +264,27 @@ pub export fn lean_system_platform_target(_: ?*anyopaque) callconv(.c) *anyopaqu
     return string.mkAsciiStringBytes("");
 }
 
+pub export fn lean_internal_has_address_sanitizer(_: ?*anyopaque) callconv(.c) u8 {
+    return 0;
+}
+
+pub export fn lean_internal_is_multi_thread(_: ?*anyopaque) callconv(.c) u8 {
+    return 1;
+}
+
+pub export fn lean_internal_is_debug(_: ?*anyopaque) callconv(.c) u8 {
+    return @intFromBool(builtin.mode == .Debug);
+}
+
+pub export fn lean_internal_get_build_type(_: ?*anyopaque) callconv(.c) *anyopaque {
+    return string.mkAsciiStringBytes(switch (builtin.mode) {
+        .Debug => "Debug",
+        .ReleaseSafe => "RelWithDebInfo",
+        .ReleaseSmall => "MinSizeRel",
+        .ReleaseFast => "Release",
+    });
+}
+
 pub export fn lean_version_get_major(_: ?*anyopaque) callconv(.c) *anyopaque {
     return object.lean_box(4).?;
 }

@@ -33,7 +33,7 @@ bool is_safe_ascii_str(const char *s, size_t len) {
 }
 
 // Std.Internal.IO.Async.DNS.getAddrInfo (host service : @& String) (family : UInt8) : IO (IO.Promise (Except IO.Error (Array IPAddr)))
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_info(b_obj_arg name, b_obj_arg service, uint8_t family) {
+extern "C" lean_obj_res lean_uv_dns_get_info_helper(b_obj_arg name, b_obj_arg service, uint8_t family) {
     char const * name_cstr = lean_string_cstr(name);
     char const * service_cstr = lean_string_cstr(service);
 
@@ -125,7 +125,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_info(b_obj_arg name, b_obj_a
 }
 
 // Std.Internal.IO.Async.DNS.getNameInfo (host : @& SocketAddress) : IO (IO.Promise (Except IO.Error (String × String)))
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_name(b_obj_arg addr) {
+extern "C" lean_obj_res lean_uv_dns_get_name_helper(b_obj_arg addr) {
     uv_getnameinfo_t* req = (uv_getnameinfo_t*)malloc(sizeof(uv_getnameinfo_t));
     if (req == nullptr) {
         return lean_io_result_mk_error(decode_io_error(ENOMEM, nullptr));
@@ -174,22 +174,6 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_name(b_obj_arg addr) {
 
     event_loop_unlock(&global_ev);
     return lean_io_result_mk_ok(promise);
-}
-
-#else
-
-// Std.Internal.IO.Async.DNS.getAddrInfo (host service : @& String) (family : UInt8) : IO (IO.Promise (Except IO.Error (Array IPAddr)))
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_info(b_obj_arg name, b_obj_arg service, uint8_t family) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
-}
-
-// Std.Internal.IO.Async.DNS.getNameInfo (host : @& SocketAddress) : IO (IO.Promise (Except IO.Error (String × String)))
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_name(b_obj_arg ip_addr) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
 }
 
 #endif

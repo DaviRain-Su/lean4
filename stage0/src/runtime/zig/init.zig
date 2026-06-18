@@ -12,6 +12,9 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const task_manager = @import("task_manager.zig");
 const thread = @import("thread.zig");
+const stack_overflow = @import("stack_overflow.zig");
+const stackinfo = @import("stackinfo.zig");
+const openssl = @import("openssl.zig");
 const runtime_options = @import("runtime_options");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
@@ -80,6 +83,9 @@ pub fn initializeRuntimeSubsystems() void {
         io_errno.initializeDecodeCache();
     }
     initializeLibuv();
+    stack_overflow.lean_initialize_stack_overflow();
+    stackinfo.saveStackInfo(true);
+    openssl.lean_initialize_openssl();
     g_runtime_initialized = true;
     g_initializing = true;
 }
@@ -91,14 +97,6 @@ pub fn initializeThreadSubsystems() void {
 
 pub fn finalizeThreadSubsystems() void {
     thread.finalizeThreadSubsystems();
-}
-
-export fn lean_notify_assert(file_name: [*c]const u8, line: c_int, condition: [*c]const u8) callconv(.c) void {
-    std.debug.print(
-        "LEAN ASSERTION VIOLATION\nFile: {s}\nLine: {}\nCondition: {s}\n",
-        .{ file_name, line, condition },
-    );
-    std.process.abort();
 }
 
 fn panicTaskManagerAlreadyInitialized() noreturn {

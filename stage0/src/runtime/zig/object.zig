@@ -4,6 +4,8 @@ const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_object = @import("mpz_object.zig");
 
+extern fn lean_mk_string_from_bytes(s: [*:0]const u8, sz: usize) callconv(.c) *anyopaque;
+
 fn ptrBits(o: ?*anyopaque) usize {
     return if (o) |ptr| @intFromPtr(ptr) else 0;
 }
@@ -168,6 +170,13 @@ pub export fn lean_obj_tag(o: ?*anyopaque) callconv(.c) c_uint {
 
 pub export fn lean_ptr_tag(o: *anyopaque) callconv(.c) u8 {
     return ptrTag(o);
+}
+
+export fn lean_decode_lossy_utf8(a: *anyopaque) callconv(.c) *anyopaque {
+    const sa: *lean.lean_sarray_object = @ptrCast(@alignCast(a));
+    const sz = sa.m_size;
+    const bytes: [*]const u8 = @ptrCast(&sa.m_data);
+    return lean_mk_string_from_bytes(@ptrCast(bytes), sz);
 }
 
 test "lean object layouts match lean.h" {

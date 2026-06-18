@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
+const object = @import("object.zig");
 const sync = @import("sync.zig");
 const c = @cImport({
     @cInclude("pthread.h");
@@ -18,6 +19,7 @@ const libc = struct {
 
 threadlocal var g_thread_initialized = false;
 var g_live_spawn_contexts = std.atomic.Value(usize).init(0);
+var g_thread_stack_size: usize = 0;
 
 pub const default_stack_size_kb: usize = 8192;
 const min_stack_size_kb: usize = 64;
@@ -63,7 +65,12 @@ pub fn stackSizeBytesFromEnv() ?usize {
 }
 
 fn effectiveStackSize(requested: usize) usize {
-    const base = if (requested != 0) requested else (stackSizeBytesFromEnv() orelse defaultStackSizeBytes());
+    const base = if (requested != 0)
+        requested
+    else if (g_thread_stack_size != 0)
+        g_thread_stack_size
+    else
+        (stackSizeBytesFromEnv() orelse defaultStackSizeBytes());
     if (builtin.os.tag == .linux) {
         return std.mem.alignForward(usize, base + stack_buffer_space_bytes, std.heap.pageSize());
     }
@@ -98,6 +105,11 @@ pub export fn lean_initialize_thread() callconv(.c) void {
 
 pub export fn lean_finalize_thread() callconv(.c) void {
     finalizeThreadSubsystems();
+}
+
+export fn lean_internal_set_thread_stack_size(sz: usize) callconv(.c) ?*anyopaque {
+    g_thread_stack_size = sz + stack_buffer_space_bytes;
+    return object.lean_box(0);
 }
 
 fn setCurrentThreadName(name: [:0]const u8) void {

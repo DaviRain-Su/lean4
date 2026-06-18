@@ -11854,14 +11854,14 @@ return v_r_4349_;
 LEAN_EXPORT lean_object* l_panic___at___00__private_Lean_Elab_PreDefinition_FixedParams_0__Lean_Elab_FixedParamPerm_forallTelescopeImpl_go_spec__0___redArg(lean_object* v_msg_4350_, lean_object* v___y_4351_, lean_object* v___y_4352_, lean_object* v___y_4353_, lean_object* v___y_4354_){
 _start:
 {
-lean_object* v___f_4356_; lean_object* v___x_1076__overap_4357_; lean_object* v___x_4358_; 
+lean_object* v___f_4356_; lean_object* v___x_1072__overap_4357_; lean_object* v___x_4358_; 
 v___f_4356_ = ((lean_object*)(l_panic___at___00Lean_Elab_getFixedParamsInfo_spec__7___closed__0));
-v___x_1076__overap_4357_ = lean_panic_fn_borrowed(v___f_4356_, v_msg_4350_);
+v___x_1072__overap_4357_ = lean_panic_fn_borrowed(v___f_4356_, v_msg_4350_);
 lean_inc(v___y_4354_);
 lean_inc_ref(v___y_4353_);
 lean_inc(v___y_4352_);
 lean_inc_ref(v___y_4351_);
-v___x_4358_ = lean_apply_5(v___x_1076__overap_4357_, v___y_4351_, v___y_4352_, v___y_4353_, v___y_4354_, lean_box(0));
+v___x_4358_ = lean_apply_5(v___x_1072__overap_4357_, v___y_4351_, v___y_4352_, v___y_4353_, v___y_4354_, lean_box(0));
 return v___x_4358_;
 }
 }

@@ -75,7 +75,7 @@ void handle_timer_event(uv_timer_t* handle) {
 }
 
 /* Std.Internal.UV.Timer.mk (timeout : UInt64) (repeating : Bool) : IO Timer */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_mk(uint64_t timeout, uint8_t repeating) {
+extern "C" lean_obj_res lean_uv_timer_mk_helper(uint64_t timeout, uint8_t repeating) {
     lean_uv_timer_object * timer = (lean_uv_timer_object*)malloc(sizeof(lean_uv_timer_object));
     if (timer == nullptr) {
         return lean_io_result_mk_error(decode_io_error(ENOMEM, nullptr));
@@ -111,7 +111,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_mk(uint64_t timeout, uint8_t r
 }
 
 /* Std.Internal.UV.Timer.next (timer : @& Timer) : IO (IO.Promise Unit) */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_next(b_obj_arg obj) {
+extern "C" lean_obj_res lean_uv_timer_next_helper(lean_object* obj) {
     lean_uv_timer_object * timer = lean_to_uv_timer(obj);
 
     auto create_promise = []() {
@@ -203,7 +203,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_next(b_obj_arg obj) {
 }
 
 /* Std.Internal.UV.Timer.reset (timer : @& Timer) : IO Unit */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_reset(b_obj_arg obj) {
+extern "C" lean_obj_res lean_uv_timer_reset_helper(lean_object* obj) {
     lean_uv_timer_object * timer = lean_to_uv_timer(obj);
 
     // Locking to access the state in order to avoid data-race
@@ -234,7 +234,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_reset(b_obj_arg obj) {
 }
 
 /* Std.Internal.UV.Timer.stop (timer : @& Timer) : IO Unit */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_stop(b_obj_arg obj) {
+extern "C" lean_obj_res lean_uv_timer_stop_helper(lean_object* obj) {
     lean_uv_timer_object * timer = lean_to_uv_timer(obj);
 
     // Locking to access the state in order to avoid data-race
@@ -262,7 +262,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_stop(b_obj_arg obj) {
 }
 
 /* Std.Internal.UV.Timer.cancel (timer : @& Timer) : IO Unit */
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_cancel(b_obj_arg obj) {
+extern "C" lean_obj_res lean_uv_timer_cancel_helper(lean_object* obj) {
     lean_uv_timer_object * timer = lean_to_uv_timer(obj);
 
     // It's locking here to avoid changing the state during other operations.
@@ -287,40 +287,6 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_cancel(b_obj_arg obj) {
     event_loop_unlock(&global_ev);
 
     return lean_io_result_mk_ok(lean_box(0));
-}
-
-#else
-
-void lean_uv_timer_finalizer(void* ptr);
-
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_mk(uint64_t timeout, uint8_t repeating) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
-}
-
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_next(b_obj_arg timer) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
-}
-
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_reset(b_obj_arg timer) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
-}
-
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_stop(b_obj_arg timer) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
-}
-
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_timer_cancel(b_obj_arg obj) {
-    lean_always_assert(
-        false && ("Please build a version of Lean4 with libuv to invoke this.")
-    );
 }
 
 #endif

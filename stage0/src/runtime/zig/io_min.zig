@@ -53,6 +53,11 @@ pub export fn lean_set_exit_on_panic(flag: bool) callconv(.c) void {
     g_exit_on_panic = flag;
 }
 
+export fn lean_internal_set_exit_on_panic(exit: u8) callconv(.c) ?*anyopaque {
+    g_exit_on_panic = exit != 0;
+    return object.lean_box(0);
+}
+
 pub export fn lean_set_panic_messages(flag: bool) callconv(.c) void {
     g_panic_messages = flag;
 }

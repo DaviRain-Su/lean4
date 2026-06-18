@@ -2429,9 +2429,9 @@ return v_a_564_;
 LEAN_EXPORT lean_object* l___private_Init_Data_Array_Basic_0__Array_forIn_x27Unsafe_loop___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__0___lam__0___boxed(lean_object* v_a_572_, lean_object* v_snd_573_, lean_object* v_a_574_, lean_object* v___y_575_){
 _start:
 {
-uint8_t v_a_11570__boxed_576_; uint8_t v_res_577_; lean_object* v_r_578_; 
-v_a_11570__boxed_576_ = lean_unbox(v_a_574_);
-v_res_577_ = l___private_Init_Data_Array_Basic_0__Array_forIn_x27Unsafe_loop___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__0___lam__0(v_a_572_, v_snd_573_, v_a_11570__boxed_576_, v___y_575_);
+uint8_t v_a_11568__boxed_576_; uint8_t v_res_577_; lean_object* v_r_578_; 
+v_a_11568__boxed_576_ = lean_unbox(v_a_574_);
+v_res_577_ = l___private_Init_Data_Array_Basic_0__Array_forIn_x27Unsafe_loop___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__0___lam__0(v_a_572_, v_snd_573_, v_a_11568__boxed_576_, v___y_575_);
 v_r_578_ = lean_box(v_res_577_);
 return v_r_578_;
 }
@@ -4110,13 +4110,13 @@ goto _start;
 LEAN_EXPORT lean_object* l___private_Init_Data_Array_Basic_0__Array_foldlMUnsafe_fold___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__2___boxed(lean_object* v___x_1031_, lean_object* v_as_1032_, lean_object* v_i_1033_, lean_object* v_stop_1034_, lean_object* v_b_1035_){
 _start:
 {
-uint8_t v___x_12445__boxed_1036_; size_t v_i_boxed_1037_; size_t v_stop_boxed_1038_; lean_object* v_res_1039_; 
-v___x_12445__boxed_1036_ = lean_unbox(v___x_1031_);
+uint8_t v___x_12443__boxed_1036_; size_t v_i_boxed_1037_; size_t v_stop_boxed_1038_; lean_object* v_res_1039_; 
+v___x_12443__boxed_1036_ = lean_unbox(v___x_1031_);
 v_i_boxed_1037_ = lean_unbox_usize(v_i_1033_);
 lean_dec(v_i_1033_);
 v_stop_boxed_1038_ = lean_unbox_usize(v_stop_1034_);
 lean_dec(v_stop_1034_);
-v_res_1039_ = l___private_Init_Data_Array_Basic_0__Array_foldlMUnsafe_fold___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__2(v___x_12445__boxed_1036_, v_as_1032_, v_i_boxed_1037_, v_stop_boxed_1038_, v_b_1035_);
+v_res_1039_ = l___private_Init_Data_Array_Basic_0__Array_foldlMUnsafe_fold___at___00Lean_Elab_Tactic_GuardMsgs_parseGuardMsgsSpec_spec__2(v___x_12443__boxed_1036_, v_as_1032_, v_i_boxed_1037_, v_stop_boxed_1038_, v_b_1035_);
 lean_dec_ref(v_as_1032_);
 return v_res_1039_;
 }
