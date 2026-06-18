@@ -33,6 +33,7 @@ pub const once = @import("once.zig");
 pub const openssl = @import("openssl.zig");
 pub const rc = @import("rc.zig");
 pub const sharecommon = @import("sharecommon.zig");
+pub const stackinfo = @import("stackinfo.zig");
 pub const st_ref = @import("st_ref.zig");
 pub const string = @import("string.zig");
 pub const sync = @import("sync.zig");
@@ -80,6 +81,7 @@ comptime {
     _ = openssl;
     _ = rc;
     _ = sharecommon;
+    _ = stackinfo;
     _ = st_ref;
     _ = string;
     _ = sync;

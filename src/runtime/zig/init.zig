@@ -13,6 +13,7 @@ const object = @import("object.zig");
 const task_manager = @import("task_manager.zig");
 const thread = @import("thread.zig");
 const stack_overflow = @import("stack_overflow.zig");
+const stackinfo = @import("stackinfo.zig");
 const openssl = @import("openssl.zig");
 const runtime_options = @import("runtime_options");
 
@@ -83,6 +84,7 @@ pub fn initializeRuntimeSubsystems() void {
     }
     initializeLibuv();
     stack_overflow.lean_initialize_stack_overflow();
+    stackinfo.saveStackInfo(true);
     openssl.lean_initialize_openssl();
     g_runtime_initialized = true;
     g_initializing = true;
