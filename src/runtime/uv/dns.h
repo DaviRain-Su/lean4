@@ -18,8 +18,8 @@ using namespace std;
 #endif
 
 // =======================================
-// DNS functions
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_info(b_obj_arg name, b_obj_arg service, uint8_t family);
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_dns_get_name(b_obj_arg ip_addr);
+// DNS functions (C++ helpers used by the Zig-side exports).
+extern "C" lean_obj_res lean_uv_dns_get_info_helper(b_obj_arg name, b_obj_arg service, uint8_t family);
+extern "C" lean_obj_res lean_uv_dns_get_name_helper(b_obj_arg ip_addr);
 
 }
