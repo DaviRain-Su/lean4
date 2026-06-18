@@ -52,6 +52,7 @@ pub const uint_conv = @import("uint.zig");
 pub const utf8 = @import("utf8.zig");
 pub const uv_dns = @import("uv_dns.zig");
 pub const uv_event_loop = @import("uv_event_loop.zig");
+pub const uv_exports = @import("uv_exports.zig");
 pub const uv_stubs = @import("uv_stubs.zig");
 pub const uv_system = @import("uv_system.zig");
 pub const uv_tcp = @import("uv_tcp.zig");
@@ -112,6 +113,7 @@ comptime {
     _ = utf8;
     _ = uv_dns.force_link;
     _ = uv_event_loop.force_link;
+    _ = uv_exports;
     _ = uv_stubs.force_link;
     _ = uv_system.force_link;
     _ = uv_tcp.force_link;

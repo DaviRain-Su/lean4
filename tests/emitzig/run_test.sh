@@ -59,6 +59,9 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
           [[ -n "$MODULE" ]] && STDLIB_ARGS+=(--module "$MODULE")
         done
       fi
+      if [[ -n "${LEAN_ZIG_STDLIB_JOBS:-}" ]]; then
+        STDLIB_ARGS+=(--jobs "$LEAN_ZIG_STDLIB_JOBS")
+      fi
       if [[ ${#STDLIB_ARGS[@]} -gt 0 ]]; then
         BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR" "${STDLIB_ARGS[@]}"
       else

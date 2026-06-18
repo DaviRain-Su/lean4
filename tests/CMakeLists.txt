@@ -425,8 +425,10 @@ if(LEAN_ZIG_RUNTIME)
         LEANC=${MANGLED_BINARY_DIR}/bin/leanc
         LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
         LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
+        LEAN_ZIG_STDLIB_JOBS=2
         bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
+    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES PROCESSORS 4 TIMEOUT 1200)
   endforeach()
   add_test(
     NAME emitzig/zig-symbols
