@@ -15,6 +15,7 @@ pub const exception = @import("exception.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
 pub const hash = @import("hash.zig");
+pub const allocprof = @import("allocprof.zig");
 pub const init = @import("init.zig");
 pub const int = @import("int.zig");
 pub const int_conv = @import("int_conv.zig");
@@ -68,6 +69,7 @@ comptime {
     _ = stack_overflow;
     _ = float;
     _ = hash;
+    _ = allocprof;
     _ = init;
     _ = int;
     _ = int_conv;
