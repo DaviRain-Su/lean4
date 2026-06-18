@@ -172,7 +172,12 @@ pub const Compactor = struct {
     }
 
     pub fn compactRoot(self: *Compactor, o: *anyopaque) usize {
-        return self.compact(o);
+        const root_slot = self.allocBytes(@sizeOf(usize));
+        const root_offset = self.toOffset(root_slot);
+        const root = self.compact(o);
+        const slot: *usize = @ptrCast(@alignCast(root_slot));
+        slot.* = root;
+        return self.toBasePtr(root_offset);
     }
 
     fn insertConstructor(self: *Compactor, o: *anyopaque) usize {
@@ -403,7 +408,9 @@ pub const Reader = struct {
 
     pub fn read(self: *Reader) ?*anyopaque {
         if (@intFromPtr(self.next) >= @intFromPtr(self.end)) return null;
-        const root: *anyopaque = @ptrCast(@alignCast(self.next));
+        const root_slot: *align(1) Obj = @ptrCast(self.next);
+        const root = self.fixObjectPtr(root_slot.*);
+        self.move(@sizeOf(Obj));
         while (@intFromPtr(self.next) < @intFromPtr(self.end)) {
             const curr = self.next;
             const tag = ptrTag(@ptrCast(curr));
@@ -494,4 +501,17 @@ test "compact round-trip simple constructor with string" {
     const len = str_obj.m_size - 1;
     const bytes = @as([*]const u8, @ptrCast(&str_obj.m_data))[0..len];
     try testing.expectEqualStrings("hello", bytes);
+}
+
+test "compact round-trip scalar root" {
+    const base_addr: usize = 0x10000000;
+    var comp = Compactor.init(base_addr, &.{}, false);
+    defer comp.deinit();
+    _ = comp.compactRoot(object.lean_box(37).?);
+
+    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{});
+    const root = reader.read() orelse return error.ReadFailed;
+
+    try testing.expect(object.lean_is_scalar(root));
+    try testing.expectEqual(@as(usize, 37), object.lean_unbox(root));
 }
