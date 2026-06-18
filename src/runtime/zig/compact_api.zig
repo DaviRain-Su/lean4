@@ -6,12 +6,14 @@
 //! First pass: v2 format, no closures, no mmap, POSIX file I/O.
 
 const std = @import("std");
+const testing = std.testing;
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const alloc = @import("alloc.zig");
 const rc = @import("rc.zig");
 const ctor = @import("ctor.zig");
 const string = @import("string.zig");
+const array = @import("array.zig");
 const io_result = @import("io_result.zig");
 const compact = @import("compact.zig");
 
@@ -79,6 +81,26 @@ fn toCompactor(o: *anyopaque) *compact.Compactor {
     return @ptrCast(@alignCast(object.lean_get_external_data(o).?));
 }
 
+fn regionRoot(region: *anyopaque) *anyopaque {
+    return ctor.lean_ctor_get(region, 1).?;
+}
+
+fn regionSize(region: *anyopaque) usize {
+    return ctor.lean_ctor_get_usize(region, 2);
+}
+
+fn regionBaseAddr(region: *anyopaque) usize {
+    return ctor.lean_ctor_get_usize(region, 3);
+}
+
+fn regionBufferOffset(region: *anyopaque) usize {
+    return ctor.lean_ctor_get_usize(region, 4);
+}
+
+fn regionBuffer(region: *anyopaque) [*]u8 {
+    return @ptrFromInt(@intFromPtr(regionRoot(region)) -% regionBufferOffset(region));
+}
+
 fn nameHash(mod: *anyopaque) usize {
     _ = mod;
     return 0x123456789000;
@@ -127,7 +149,7 @@ pub export fn lean_compacted_region_save(
     header_buf[6] = 1; // flags: GMP
     const file_base_addr = comp.base_addr + file_offset;
     const base_addr_bytes = std.mem.asBytes(&file_base_addr);
-    @memcpy(header_buf[7 + 33 + 40..7 + 33 + 40 + base_addr_bytes.len], base_addr_bytes);
+    @memcpy(header_buf[7 + 33 + 40 .. 7 + 33 + 40 + base_addr_bytes.len], base_addr_bytes);
 
     if (c.write(fd, &header_buf, OLEAN_HEADER_SIZE) != OLEAN_HEADER_SIZE) {
         return mkError("failed to write header");
@@ -168,26 +190,29 @@ pub export fn lean_compacted_region_read(
     const size = @as(usize, @intCast(st.st_size));
 
     const buffer = std.heap.c_allocator.alloc(u8, size) catch return mkError("out of memory");
-    defer std.heap.c_allocator.free(buffer);
 
     var total: usize = 0;
     while (total < size) {
         const n = c.read(fd, buffer.ptr + total, size - total);
         if (n < 0) {
+            std.heap.c_allocator.free(buffer);
             return mkError("failed to read input file");
         }
         if (n == 0) break;
         total += @as(usize, @intCast(n));
     }
     if (total < OLEAN_HEADER_SIZE) {
+        std.heap.c_allocator.free(buffer);
         return mkError("file too short");
     }
 
     const header: *align(1) OleanHeader = @ptrCast(buffer.ptr);
     if (!std.mem.eql(u8, &header.marker, "olean")) {
+        std.heap.c_allocator.free(buffer);
         return mkError("invalid olean magic");
     }
     if (header.version != 2) {
+        std.heap.c_allocator.free(buffer);
         return mkError("unsupported olean version");
     }
     const base_addr = header.base_addr;
@@ -195,18 +220,20 @@ pub export fn lean_compacted_region_read(
     const data_size = size - OLEAN_HEADER_SIZE;
 
     compact.sortRegionsByBaseAddr(dep_regions.items);
-    var reader = compact.Reader.init(buffer.ptr + data_off, data_size, base_addr, dep_regions.items);
-    const root = reader.read() orelse return mkError("failed to read region");
+    var reader = compact.Reader.init(buffer.ptr + data_off, data_size, base_addr + data_off, dep_regions.items);
+    const root = reader.read() orelse {
+        std.heap.c_allocator.free(buffer);
+        return mkError("failed to read region");
+    };
 
     const region = alloc.lean_alloc_ctor(0, 2, @sizeOf(usize) * 3 + 1);
     rc.lean_inc(ofname);
     ctor.lean_ctor_set(region, 0, ofname);
     ctor.lean_ctor_set(region, 1, root);
-    ctor.lean_ctor_set_usize(region, 2, @intCast(data_size));
+    ctor.lean_ctor_set_usize(region, 2, @intCast(size));
     ctor.lean_ctor_set_usize(region, 3, @intCast(base_addr));
-    ctor.lean_ctor_set_usize(region, 4, @intCast(@intFromPtr(root) - @intFromPtr(buffer.ptr)));
-    const is_mmap_ptr: *u8 = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region)) + @sizeOf(usize) * 5));
-    is_mmap_ptr.* = 0;
+    ctor.lean_ctor_set_usize(region, 4, @intCast(@intFromPtr(root) -% @intFromPtr(buffer.ptr)));
+    ctor.lean_ctor_set_uint8(region, @sizeOf(usize) * 5, 0);
 
     const pair = alloc.lean_alloc_ctor(0, 2, 0);
     ctor.lean_ctor_set(pair, 0, root);
@@ -218,8 +245,54 @@ pub export fn lean_compacted_region_free(
     region: *anyopaque,
     _: Obj,
 ) callconv(.c) *anyopaque {
-    const root_ptr_ptr: *usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region)) + @sizeOf(usize) * 1));
-    root_ptr_ptr.* = @intFromPtr(object.lean_box(0));
+    const buffer = regionBuffer(region);
+    const size = regionSize(region);
+    ctor.lean_ctor_set(region, 1, object.lean_box(0));
     rc.lean_dec(region);
+    std.heap.c_allocator.free(buffer[0..size]);
     return io_result.lean_io_result_mk_ok(object.lean_box(0));
+}
+
+fn testStringBytes(o: *anyopaque) []const u8 {
+    const str: *lean.lean_string_object = @ptrCast(@alignCast(o));
+    const size = if (str.m_size == 0) 0 else str.m_size - 1;
+    return @as([*]const u8, @ptrCast(&str.m_data))[0..size];
+}
+
+test "compacted region save/read owns malloc buffer until free" {
+    var path_buf: [128]u8 = undefined;
+    const path = std.fmt.bufPrintZ(
+        &path_buf,
+        "/tmp/leanrt_zig_compact_api_{d}_{x}.olean",
+        .{ c.getpid(), @intFromPtr(&path_buf) },
+    ) catch unreachable;
+    defer _ = c.unlink(path);
+
+    const fname = string.lean_mk_string(path);
+    defer rc.lean_dec(fname);
+    const deps = array.lean_mk_empty_array();
+    defer rc.lean_dec(deps);
+    const data = string.lean_mk_string("saved");
+    defer rc.lean_dec(data);
+
+    const save_result = lean_compacted_region_save(fname, object.lean_box(0).?, data, deps, object.lean_box(0).?, 0, object.lean_box(0));
+    defer rc.lean_dec(save_result);
+    try testing.expect(io_result.lean_io_result_is_ok(save_result));
+
+    const read_result = lean_compacted_region_read(fname, deps, object.lean_box(0));
+    try testing.expect(io_result.lean_io_result_is_ok(read_result));
+    const pair = io_result.lean_io_result_get_value(read_result).?;
+    const root = ctor.lean_ctor_get(pair, 0).?;
+    const region = ctor.lean_ctor_get(pair, 1).?;
+
+    try testing.expectEqualStrings("saved", testStringBytes(root));
+    var st: c.struct_stat = undefined;
+    try testing.expectEqual(@as(c_int, 0), c.stat(path, &st));
+    try testing.expectEqual(@as(usize, @intCast(st.st_size)), regionSize(region));
+    try testing.expectEqual(@as(usize, OLEAN_HEADER_SIZE + @sizeOf(usize)), regionBufferOffset(region));
+    try testing.expect(regionBufferOffset(region) < regionSize(region));
+
+    const free_result = lean_compacted_region_free(region, object.lean_box(0));
+    defer rc.lean_dec(free_result);
+    try testing.expect(io_result.lean_io_result_is_ok(free_result));
 }

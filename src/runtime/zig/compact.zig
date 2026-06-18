@@ -458,19 +458,11 @@ pub fn extractDepRegions(o: *anyopaque) std.ArrayList(RegionView) {
     const sz = array.lean_array_size(o);
     for (0..sz) |i| {
         const region = array.lean_array_fget_borrowed(o, object.lean_box(i)).?;
-        const region_ptr: *anyopaque = @ptrCast(@alignCast(region));
-        const root_ptr_ptr: *usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region_ptr)) + WORD_SIZE * 1));
-        const size_ptr: *usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region_ptr)) + WORD_SIZE * 2));
-        const base_addr_ptr: *usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region_ptr)) + WORD_SIZE * 3));
-        const buffer_offset_ptr: *usize = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region_ptr)) + WORD_SIZE * 4));
-        const is_mmap_ptr: *u8 = @ptrCast(@alignCast(@as([*]u8, @ptrCast(region_ptr)) + WORD_SIZE * 5));
-
-        const root = root_ptr_ptr.*;
-        const size = size_ptr.*;
-        const base_addr = base_addr_ptr.*;
-        const buffer_offset = buffer_offset_ptr.*;
-        _ = is_mmap_ptr.*;
-        const begin: [*]u8 = @ptrFromInt(root - buffer_offset);
+        const root = ctor.lean_ctor_get(region, 1).?;
+        const size = ctor.lean_ctor_get_usize(region, 2);
+        const base_addr = ctor.lean_ctor_get_usize(region, 3);
+        const buffer_offset = ctor.lean_ctor_get_usize(region, 4);
+        const begin: [*]u8 = @ptrFromInt(@intFromPtr(root) -% buffer_offset);
         result.append(std.heap.c_allocator, .{
             .begin = begin,
             .size = size,
