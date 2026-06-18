@@ -201,6 +201,7 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
 
 # Manual overrides for signatures the C-header parser cannot reconstruct correctly.
 OVERRIDE_SIGNATURES: dict[str, tuple[str, list[str]]] = {
+    "lean_big_int64_to_int": ("LeanObj", ["i64"]),
     "lean_float_once_cold": ("f64", ["*f64", "*lean_once_cell_t", "*const fn() callconv(.c) f64"]),
     "lean_float32_once_cold": ("f32", ["*f32", "*lean_once_cell_t", "*const fn() callconv(.c) f32"]),
     "lean_obj_once_cold": ("LeanObj", ["*LeanObj", "*lean_once_cell_t", "*const fn() callconv(.c) LeanObj"]),

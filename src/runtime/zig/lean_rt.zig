@@ -126,7 +126,7 @@ pub extern fn lean_array_sz(_0: LeanObj) callconv(.c) LeanObj;
 pub extern fn lean_array_to_list(_0: LeanObj) callconv(.c) LeanObj;
 pub extern fn lean_array_uset(_0: LeanObj, _1: usize, _2: LeanObj) callconv(.c) LeanObj;
 pub extern fn lean_array_uswap(_0: LeanObj, _1: usize, _2: usize) callconv(.c) LeanObj;
-pub extern fn lean_big_int64_to_int(_0: u64) callconv(.c) LeanObj;
+pub extern fn lean_big_int64_to_int(_0: i64) callconv(.c) LeanObj;
 pub extern fn lean_big_int_to_int(_0: c_int) callconv(.c) LeanObj;
 pub extern fn lean_big_int_to_nat(_0: LeanObj) callconv(.c) LeanObj;
 pub extern fn lean_big_size_t_to_int(_0: usize) callconv(.c) LeanObj;
