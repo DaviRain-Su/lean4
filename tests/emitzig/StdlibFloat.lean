@@ -1,7 +1,6 @@
 module
 prelude
 import Init.Data.Float
-import Init.Data.Float32
 import Init.Data.OfScientific
 import Init.Data.SInt.Float
 import Init.Data.SInt.Float32
