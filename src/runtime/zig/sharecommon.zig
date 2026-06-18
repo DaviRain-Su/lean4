@@ -16,6 +16,7 @@ const mpz_object = @import("mpz_object.zig");
 const rc = @import("rc.zig");
 const array = @import("array.zig");
 const ctor = @import("ctor.zig");
+const hash = @import("hash.zig");
 
 const Obj = ?*anyopaque;
 
@@ -37,47 +38,12 @@ fn objDataByteSize(o: *anyopaque) usize {
 
 // Matches `lean::hash` in `src/runtime/hash.h`.
 fn leanHash(h: u64, k: u64) u64 {
-    const m: u64 = 0xc6a4a7935bd1e995;
-    const r: u6 = 47;
-    var k2 = k;
-    k2 *%= m;
-    k2 ^= k2 >> r;
-    k2 ^= m;
-    return (h ^ k2) *% m;
+    return hash.hash(h, k);
 }
 
 // MurmurHash64A, matches `src/runtime/hash.cpp`.
 fn murmurHash64A(key: []const u8, seed: u64) u64 {
-    const m: u64 = 0xc6a4a7935bd1e995;
-    const r: u6 = 47;
-    var h: u64 = seed ^ (key.len *% m);
-    var i: usize = 0;
-    while (i + 8 <= key.len) : (i += 8) {
-        var k: u64 = 0;
-        for (0..8) |j| {
-            k |= @as(u64, key[i + j]) << @intCast(j * 8);
-        }
-        k *%= m;
-        k ^= k >> r;
-        k *%= m;
-        h ^= k;
-        h *%= m;
-    }
-    const remaining = key.len - i;
-    if (remaining >= 7) h ^= @as(u64, key[i + 6]) << 48;
-    if (remaining >= 6) h ^= @as(u64, key[i + 5]) << 40;
-    if (remaining >= 5) h ^= @as(u64, key[i + 4]) << 32;
-    if (remaining >= 4) h ^= @as(u64, key[i + 3]) << 24;
-    if (remaining >= 3) h ^= @as(u64, key[i + 2]) << 16;
-    if (remaining >= 2) h ^= @as(u64, key[i + 1]) << 8;
-    if (remaining >= 1) {
-        h ^= @as(u64, key[i]);
-        h *%= m;
-    }
-    h ^= h >> r;
-    h *%= m;
-    h ^= h >> r;
-    return h;
+    return hash.murmurHash64A(key, seed);
 }
 
 pub export fn lean_sharecommon_hash(o: *anyopaque) callconv(.c) u64 {

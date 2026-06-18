@@ -6,6 +6,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const utf8 = @import("utf8.zig");
 const ctor = @import("ctor.zig");
+const hash = @import("hash.zig");
 
 fn asString(o: *anyopaque) *lean.lean_string_object {
     return @ptrCast(@alignCast(o));
@@ -339,37 +340,7 @@ export fn lean_string_from_utf8_unchecked(a: *anyopaque) callconv(.c) *anyopaque
 }
 
 fn hashBytes(bytes: []const u8, seed: u64) u64 {
-    const m: u64 = 0xc6a4a7935bd1e995;
-    const r = 47;
-    var h: u64 = seed ^ (bytes.len *% m);
-
-    var i: usize = 0;
-    while (i + 8 <= bytes.len) : (i += 8) {
-        var k: u64 = 0;
-        @memcpy(std.mem.asBytes(&k), bytes[i..][0..8]);
-        k *%= m;
-        k ^= k >> r;
-        k *%= m;
-        h ^= k;
-        h *%= m;
-    }
-
-    const rem = bytes.len & 7;
-    if (rem >= 7) h ^= @as(u64, bytes[i + 6]) << 48;
-    if (rem >= 6) h ^= @as(u64, bytes[i + 5]) << 40;
-    if (rem >= 5) h ^= @as(u64, bytes[i + 4]) << 32;
-    if (rem >= 4) h ^= @as(u64, bytes[i + 3]) << 24;
-    if (rem >= 3) h ^= @as(u64, bytes[i + 2]) << 16;
-    if (rem >= 2) h ^= @as(u64, bytes[i + 1]) << 8;
-    if (rem >= 1) {
-        h ^= @as(u64, bytes[i]);
-        h *%= m;
-    }
-
-    h ^= h >> r;
-    h *%= m;
-    h ^= h >> r;
-    return h;
+    return hash.murmurHash64A(bytes, seed);
 }
 
 fn lean_string_memcmp(s1: *anyopaque, s2: *anyopaque, lstart: *anyopaque, rstart: *anyopaque, len: *anyopaque) callconv(.c) u8 {
