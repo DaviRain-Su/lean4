@@ -41,7 +41,10 @@ string(APPEND TEST_VARS " CXX='${CMAKE_CXX_COMPILER} ${LEANC_OPTS}'")
 if(APPLE)
   # Ensure the stage lean binary can resolve libleanshared.dylib under
   # concurrent subprocess loads, where @rpath resolution can be flaky.
-  string(APPEND TEST_VARS " DYLD_LIBRARY_PATH='${MANGLED_BINARY_DIR}/lib/lean':\"$DYLD_LIBRARY_PATH\"")
+  # Append the existing DYLD_LIBRARY_PATH only if it is non-empty to avoid
+  # a trailing colon that dyld treats as the root directory.
+  set(DYLD_LIBRARY_PATH_SUFFIX "\${DYLD_LIBRARY_PATH:+:\$DYLD_LIBRARY_PATH}")
+  string(APPEND TEST_VARS " DYLD_LIBRARY_PATH='${MANGLED_BINARY_DIR}/lib/lean'${DYLD_LIBRARY_PATH_SUFFIX}")
 endif()
 
 set(WITH_TEST_ENV "${CMAKE_CURRENT_SOURCE_DIR}/with_stage${STAGE}_test_env.sh")
