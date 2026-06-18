@@ -54,6 +54,7 @@ pub const uv_event_loop = @import("uv_event_loop.zig");
 pub const uv_stubs = @import("uv_stubs.zig");
 pub const uv_system = @import("uv_system.zig");
 pub const uv_timer = @import("uv_timer.zig");
+pub const uv_signal = @import("uv_signal.zig");
 
 comptime {
     _ = alloc;
@@ -110,4 +111,5 @@ comptime {
     _ = uv_stubs.force_link;
     _ = uv_system.force_link;
     _ = uv_timer.force_link;
+    _ = uv_signal.force_link;
 }

@@ -8,10 +8,6 @@ pub const force_link = true;
 
 extern fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_uv_event_loop_alive() callconv(.c) u8;
-extern fn lean_uv_signal_mk(signum: u32, repeating: u8) callconv(.c) *anyopaque;
-extern fn lean_uv_signal_next(signal: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_uv_signal_stop(signal: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_uv_signal_cancel(signal: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_uv_dns_get_info(host: *anyopaque, service: *anyopaque, family: u8) callconv(.c) *anyopaque;
 extern fn lean_uv_dns_get_name(addr: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_uv_get_process_title() callconv(.c) *anyopaque;
