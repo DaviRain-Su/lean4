@@ -38,6 +38,12 @@ string(APPEND TEST_VARS " LEANC_OPTS='${LEANC_OPTS}'")
 # LEANC_OPTS in CXX is necessary for macOS c++ to find its headers
 string(APPEND TEST_VARS " CXX='${CMAKE_CXX_COMPILER} ${LEANC_OPTS}'")
 
+if(APPLE)
+  # Ensure the stage lean binary can resolve libleanshared.dylib under
+  # concurrent subprocess loads, where @rpath resolution can be flaky.
+  string(APPEND TEST_VARS " DYLD_LIBRARY_PATH='${MANGLED_BINARY_DIR}/lib/lean':\"$DYLD_LIBRARY_PATH\"")
+endif()
+
 set(WITH_TEST_ENV "${CMAKE_CURRENT_SOURCE_DIR}/with_stage${STAGE}_test_env.sh")
 set(WITH_BENCH_ENV "${CMAKE_CURRENT_SOURCE_DIR}/with_stage${STAGE}_bench_env.sh")
 

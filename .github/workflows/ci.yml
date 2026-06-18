@@ -300,9 +300,8 @@ jobs:
               {
                 "name": "Linux Zig runtime",
                 "os": large ? "nscloud-ubuntu-24.04-amd64-8x16" : "ubuntu-latest",
-                "enabled": level >= 1,
+                "enabled": true,
                 "test": true,
-                "secondary": true,
                 "skip-test-binary": true,
                 "CMAKE_OPTIONS": "-DLEAN_ZIG_RUNTIME=ON",
                 "CTEST_OPTIONS": "-R 'runtime/zig|emitzig/zigrt|emitzig/stdlib|emitzig/zig-symbols'",

@@ -39,7 +39,7 @@ LEAN_RT_ZIG = ROOT / "src" / "runtime" / "zig" / "lean_rt.zig"
 
 # Bumped whenever the dependency-discovery heuristic changes so that stale
 # cached dependency graphs are invalidated.
-DEPENDENCY_DISCOVERY_VERSION = 1
+DEPENDENCY_DISCOVERY_VERSION = 2
 
 
 

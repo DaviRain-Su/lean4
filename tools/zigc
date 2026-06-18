@@ -48,8 +48,13 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   add_lib_dir /usr/local/lib
   EXTRA_FLAGS+=(-framework CoreFoundation)
 fi
+LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig"
+if [[ ! -f "$LEAN_RT_ZIG" ]]; then
+  echo "zigc: shared runtime module not found at $LEAN_RT_ZIG" >&2
+  exit 1
+fi
 
-zig build-exe "$INPUT" -O Debug \
+zig build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O Debug \
   -I "$ROOT/build/release/stage1/include" \
   -L "$ROOT/build/release/stage1/lib/lean" \
   -lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread \

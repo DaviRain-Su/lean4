@@ -71,6 +71,8 @@ nm "$LIB" | awk '$2 == "T" || $2 == "t" {print $3}' | sed 's/^_//' | sort -u > "
 
 # Symbols provided by the in-tree Zig runtime source files.
 grep -rhoE '(export|pub) fn lean_[A-Za-z0-9_]+' "$ROOT/src/runtime/zig" | sed 's/.* fn //' | sort -u > "$TMP_DIR/zig_provided.txt"
+# Shared EmitZig inline helpers are defined in lean_rt.zig.
+grep -hoE 'pub inline fn lean_[A-Za-z0-9_]+' "$ROOT/src/runtime/zig/lean_rt.zig" | sed 's/.* fn //' >> "$TMP_DIR/zig_provided.txt" || true
 
 sort -u "$TMP_DIR/inline.unsorted.txt" > "$TMP_DIR/inline_provided.txt"
 
