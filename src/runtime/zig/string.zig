@@ -107,7 +107,7 @@ export fn lean_mk_ascii_string_unchecked(s: [*:0]const u8) callconv(.c) *anyopaq
     return lean_mk_string_unchecked(s, sz, sz);
 }
 
-export fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque {
+pub export fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque {
     return lean_mk_string_from_bytes(s, std.mem.len(s));
 }
 

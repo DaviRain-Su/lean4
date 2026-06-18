@@ -5,6 +5,8 @@ pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
 pub const box = @import("box.zig");
 pub const byteslice = @import("byteslice.zig");
+pub const compact = @import("compact.zig");
+pub const compact_api = @import("compact_api.zig");
 pub const ctor = @import("ctor.zig");
 pub const compat = @import("compat.zig");
 pub const dbg = @import("dbg.zig");
@@ -48,6 +50,8 @@ comptime {
     _ = array;
     _ = box;
     _ = byteslice;
+    _ = compact;
+    _ = compact_api;
     _ = ctor;
     _ = compat.force_link;
     _ = dbg;
