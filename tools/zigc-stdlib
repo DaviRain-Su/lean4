@@ -35,7 +35,12 @@ except ImportError:
 
 TOOL = pathlib.Path(__file__).resolve()
 ROOT = TOOL.parent.parent
-DEPENDENCY_DISCOVERY_VERSION = 2
+LEAN_RT_ZIG = ROOT / "src" / "runtime" / "zig" / "lean_rt.zig"
+
+# Bumped whenever the dependency-discovery heuristic changes so that stale
+# cached dependency graphs are invalidated.
+DEPENDENCY_DISCOVERY_VERSION = 1
+
 
 
 
@@ -95,10 +100,13 @@ def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: path
 
 
 def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path) -> None:
-    out_obj.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
-            str(zig), "build-obj", "-O", "Debug", str(zig_file),
+            str(zig), "build-obj",
+            "--dep", "lean_rt",
+            f"-Mroot={zig_file}",
+            f"-Mlean_rt={LEAN_RT_ZIG}",
+            "-O", "Debug",
             "-fstrip", f"-femit-bin={out_obj}",
         ],
         capture_output=True,
