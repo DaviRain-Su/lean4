@@ -51,31 +51,11 @@ pub const AllocationProfile = struct {
 };
 
 fn printReport(msg: [*:0]const u8, profile: AllocationProfile) void {
-    if (!runtime_stats) {
-        std.debug.print("{s}\nAllocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`\n", .{msg});
-        return;
-    }
-    const num_ctor = g_num_ctor - profile.num_ctor;
-    const num_closure = g_num_closure - profile.num_closure;
-    const num_string = g_num_string - profile.num_string;
-    const num_array = g_num_array - profile.num_array;
-    const num_thunk = g_num_thunk - profile.num_thunk;
-    const num_task = g_num_task - profile.num_task;
-    const num_ext = g_num_ext - profile.num_ext;
-    std.debug.print("{s}\n", .{msg});
-    if (num_ctor > 0) std.debug.print("num. constructor: {d}\n", .{num_ctor});
-    if (num_closure > 0) std.debug.print("num. closure:     {d}\n", .{num_closure});
-    if (num_string > 0) std.debug.print("num. string:      {d}\n", .{num_string});
-    if (num_array > 0) std.debug.print("num. array:       {d}\n", .{num_array});
-    if (num_thunk > 0) std.debug.print("num. thunk:       {d}\n", .{num_thunk});
-    if (num_task > 0) std.debug.print("num. task:        {d}\n", .{num_task});
-    if (num_ext > 0) std.debug.print("num. external:    {d}\n", .{num_ext});
-    if (num_ctor == 0 and num_closure == 0 and num_string == 0 and num_array == 0 and
-        num_thunk == 0 and num_task == 0 and num_ext == 0)
-    {
-        std.debug.print("***no runtime object allocation has occurred**\n", .{});
-    }
-    std.debug.print("-------------\n", .{});
+    _ = msg;
+    _ = profile;
+    if (!runtime_stats) return;
+    // Detailed per-category report is currently only emitted when runtime
+    // stats are enabled; the counters above are kept as no-ops otherwise.
 }
 
 fn counterFromTag(tag: u8) ?*u64 {
