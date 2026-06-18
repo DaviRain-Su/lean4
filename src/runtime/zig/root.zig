@@ -30,6 +30,7 @@ pub const mpz_zig = @import("mpz_zig");
 pub const mpz_object = @import("mpz_object.zig");
 pub const object = @import("object.zig");
 pub const once = @import("once.zig");
+pub const openssl = @import("openssl.zig");
 pub const rc = @import("rc.zig");
 pub const sharecommon = @import("sharecommon.zig");
 pub const st_ref = @import("st_ref.zig");
@@ -76,6 +77,7 @@ comptime {
     _ = mpz_object;
     _ = object;
     _ = once;
+    _ = openssl;
     _ = rc;
     _ = sharecommon;
     _ = st_ref;
