@@ -62,7 +62,7 @@ sort -u "$TMP_DIR/needed.unsorted.txt" > "$TMP_DIR/needed.txt"
 
 # Defined symbols exported by the actual Zig runtime archive. This intentionally
 # avoids source grep so plain `pub fn` declarations do not mask missing exports.
-nm -g "$ZIGRT_LIB" | awk '$(NF - 1) == "T" || $(NF - 1) == "t" {print $NF}' | sed 's/^_//' | sort -u > "$TMP_DIR/zig_defined.txt"
+nm -g "$ZIGRT_LIB" | awk 'NF >= 2 && ($(NF - 1) == "T" || $(NF - 1) == "t") {print $NF}' | sed 's/^_//' | sort -u > "$TMP_DIR/zig_defined.txt"
 
 # Shared EmitZig inline helpers are defined in lean_rt.zig and are satisfied at
 # compile time rather than by archive symbols.

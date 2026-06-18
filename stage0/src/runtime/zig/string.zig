@@ -86,6 +86,10 @@ fn mkStringUncheckedBytes(bytes: [*]const u8, sz: usize, len: usize) *anyopaque 
     return ptr;
 }
 
+pub fn mkStringFromBytes(bytes: []const u8) *anyopaque {
+    return mkStringUncheckedBytes(bytes.ptr, bytes.len, utf8.lean_utf8_n_strlen(@ptrCast(bytes.ptr), bytes.len));
+}
+
 pub fn mkAsciiStringBytes(bytes: []const u8) *anyopaque {
     return mkStringUncheckedBytes(bytes.ptr, bytes.len, bytes.len);
 }
@@ -203,6 +207,15 @@ export fn lean_string_utf8_next(s: *anyopaque, i: *anyopaque) callconv(.c) *anyo
 
 export fn lean_string_utf8_next_fast_cold(i: usize, c: u8) callconv(.c) *anyopaque {
     return object.lean_box(utf8.nextIndex(i, c)).?;
+}
+
+pub export fn lean_string_is_valid_pos(s: *anyopaque, i: *anyopaque) callconv(.c) u8 {
+    if (!object.lean_is_scalar(i)) return 0;
+    const index = object.lean_unbox(i);
+    const size = stringSize(s) - 1;
+    if (index > size) return 0;
+    if (index == size) return 1;
+    return @intFromBool(utf8.isUtf8FirstByte(stringData(s)[index]));
 }
 
 export fn lean_string_utf8_prev(s: *anyopaque, i: *anyopaque) callconv(.c) *anyopaque {

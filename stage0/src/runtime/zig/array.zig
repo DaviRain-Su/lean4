@@ -213,6 +213,10 @@ fn copySArray(a: *anyopaque, cap: usize) *anyopaque {
     return result;
 }
 
+pub export fn lean_copy_sarray(a: *anyopaque, cap: usize) callconv(.c) *anyopaque {
+    return copySArray(a, cap);
+}
+
 fn ensureExclusiveSArray(a: *anyopaque) *anyopaque {
     if (rc.lean_is_exclusive(a)) return a;
     return copySArray(a, lean_sarray_capacity(a));
@@ -222,6 +226,10 @@ fn ensureCapacitySArray(a: *anyopaque, min_cap: usize, exact: bool) *anyopaque {
     const cap = lean_sarray_capacity(a);
     if (min_cap <= cap) return a;
     return copySArray(a, if (exact) min_cap else growCapacity(min_cap));
+}
+
+pub export fn lean_sarray_ensure_capacity(a: *anyopaque, min_cap: usize, exact: bool) callconv(.c) *anyopaque {
+    return ensureCapacitySArray(a, min_cap, exact);
 }
 
 pub export fn lean_byte_array_get(a: *anyopaque, i: Obj) callconv(.c) u8 {

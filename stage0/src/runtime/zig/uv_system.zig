@@ -22,6 +22,7 @@ const io_errno = @import("io_errno.zig");
 const io_error = @import("io_error.zig");
 const io_result = @import("io_result.zig");
 const lean = @import("lean_object.zig");
+const nat_constructors = @import("nat_constructors.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const string = @import("string.zig");
@@ -76,6 +77,10 @@ fn mkOptionSome(v: *anyopaque) *anyopaque {
 
 fn mkUnitOk() *anyopaque {
     return io_result.lean_io_result_mk_ok(object.lean_box(0).?);
+}
+
+pub fn lean_libuv_version(_: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_constructors.lean_big_usize_to_nat(@intCast(c.uv_version()));
 }
 
 fn boxU64(v: u64) *anyopaque {

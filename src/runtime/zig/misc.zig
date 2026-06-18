@@ -9,6 +9,7 @@ const ctor = @import("ctor.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
+const rt_hash = @import("hash.zig");
 const string = @import("string.zig");
 
 const pointer_bytes: c_uint = @sizeOf(?*anyopaque);
@@ -42,6 +43,12 @@ fn stringData(o: *anyopaque) [*]const u8 {
     return @ptrCast(&asString(o).m_data);
 }
 
+fn stringBytes(o: *anyopaque) []const u8 {
+    const size = stringSize(o);
+    if (size == 0) return "";
+    return stringData(o)[0 .. size - 1];
+}
+
 fn stringEq(s1: ?*anyopaque, s2: ?*anyopaque) bool {
     if (s1 == s2) return true;
     if (s1 == null or s2 == null) return false;
@@ -61,6 +68,85 @@ fn natEq(a1: ?*anyopaque, a2: ?*anyopaque) bool {
 fn nameHashPtr(n: ?*anyopaque) u64 {
     std.debug.assert(n != null and !object.lean_is_scalar(n));
     return ctor.lean_ctor_get_uint64(n.?, pointer_bytes * 2);
+}
+
+fn nameHash(n: ?*anyopaque) u64 {
+    return if (n == null or object.lean_is_scalar(n)) 1723 else nameHashPtr(n);
+}
+
+fn stringHashObj(s: *anyopaque) u64 {
+    return murmurHash64A(stringBytes(s), 11);
+}
+
+fn natHashObj(n: ?*anyopaque) u64 {
+    if (!object.lean_is_scalar(n)) return 17;
+    const value = object.lean_unbox(n);
+    return if (value < std.math.maxInt(u64)) @intCast(value) else 17;
+}
+
+fn mkNameNumObj(prefix: *anyopaque, nat_value: ?*anyopaque) *anyopaque {
+    const h = rt_hash.hash(nameHash(prefix), natHashObj(nat_value));
+    const result = alloc.lean_alloc_ctor(0, 2, @sizeOf(u64));
+    ctor.lean_ctor_set(result, 0, prefix);
+    ctor.lean_ctor_set(result, 1, nat_value);
+    ctor.lean_ctor_set_uint64(result, pointer_bytes * 2, h);
+    return result;
+}
+
+fn mkNameStrObj(prefix: *anyopaque, suffix: *anyopaque) *anyopaque {
+    const h = rt_hash.hash(nameHash(prefix), stringHashObj(suffix));
+    const result = alloc.lean_alloc_ctor(1, 2, @sizeOf(u64));
+    ctor.lean_ctor_set(result, 0, prefix);
+    ctor.lean_ctor_set(result, 1, suffix);
+    ctor.lean_ctor_set_uint64(result, pointer_bytes * 2, h);
+    return result;
+}
+
+fn mkStringConcat(a: []const u8, b: []const u8) *anyopaque {
+    const buf = std.heap.c_allocator.alloc(u8, a.len + b.len) catch @panic("out of memory");
+    defer std.heap.c_allocator.free(buf);
+    @memcpy(buf[0..a.len], a);
+    @memcpy(buf[a.len..], b);
+    return string.mkStringFromBytes(buf);
+}
+
+fn appendAfterBase(n: *anyopaque, suffix: *anyopaque) *anyopaque {
+    if (!object.lean_is_scalar(n) and object.lean_ptr_tag(n) == 1) {
+        const prefix = ctor.lean_ctor_get(n, 0).?;
+        const old = ctor.lean_ctor_get(n, 1).?;
+        return mkNameStrObj(prefix, mkStringConcat(stringBytes(old), stringBytes(suffix)));
+    }
+    return mkNameStrObj(n, suffix);
+}
+
+fn appendBeforeBase(n: *anyopaque, prefix_str: *anyopaque) *anyopaque {
+    if (object.lean_is_scalar(n)) {
+        return mkNameStrObj(n, prefix_str);
+    }
+    if (object.lean_ptr_tag(n) == 1) {
+        const prefix = ctor.lean_ctor_get(n, 0).?;
+        const old = ctor.lean_ctor_get(n, 1).?;
+        return mkNameStrObj(prefix, mkStringConcat(stringBytes(prefix_str), stringBytes(old)));
+    }
+    const prefix = ctor.lean_ctor_get(n, 0).?;
+    const idx = ctor.lean_ctor_get(n, 1);
+    return mkNameNumObj(mkNameStrObj(prefix, prefix_str), idx);
+}
+
+pub export fn lean_name_append_after(n: *anyopaque, suffix: *anyopaque) callconv(.c) *anyopaque {
+    return appendAfterBase(n, suffix);
+}
+
+pub export fn lean_name_append_before(n: *anyopaque, prefix_str: *anyopaque) callconv(.c) *anyopaque {
+    return appendBeforeBase(n, prefix_str);
+}
+
+pub export fn lean_name_append_index_after(n: *anyopaque, idx: ?*anyopaque) callconv(.c) *anyopaque {
+    if (!object.lean_is_scalar(idx)) @panic("lean_name_append_index_after: big Nat index not implemented");
+    const idx_bytes = std.fmt.allocPrint(std.heap.c_allocator, "_{}", .{object.lean_unbox(idx)}) catch @panic("out of memory");
+    defer std.heap.c_allocator.free(idx_bytes);
+    const suffix = string.mkStringFromBytes(idx_bytes);
+    return appendAfterBase(n, suffix);
 }
 
 fn sliceBounds(slice: *anyopaque) struct { start: usize, end: usize } {

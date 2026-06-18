@@ -440,6 +440,8 @@ if(LEAN_ZIG_RUNTIME)
       "${CMAKE_COMMAND}" -E env
       BUILD_DIR=${MANGLED_BINARY_DIR}
       LEAN=${MANGLED_BINARY_DIR}/bin/lean
+      DYLD_LIBRARY_PATH=${MANGLED_BINARY_DIR}/lib/lean
+      LD_LIBRARY_PATH=${MANGLED_BINARY_DIR}/lib/lean
       bash "${CMAKE_SOURCE_DIR}/../tools/check-zig-symbols.sh"
   )
 endif()

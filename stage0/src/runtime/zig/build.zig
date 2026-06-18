@@ -29,8 +29,7 @@ pub fn build(b: *std.Build) void {
     // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
     // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
     // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
-    // test-only). A few small helpers (uv_error.cpp, uv_loop_thread.cpp,
-    // uv_version.cpp) live alongside the Zig sources.
+    // test-only). A few small helpers live alongside the Zig sources.
     const uv_cpp_sources = &.{
         "../uv/dns.cpp",
         "../uv/event_loop.cpp",
@@ -44,7 +43,6 @@ pub fn build(b: *std.Build) void {
         "uv_init.cpp",
         "uv_loop_thread.cpp",
         "uv_promise_bridge.cpp",
-        "uv_version.cpp",
     };
     const uv_cpp_flags = &.{
         "-std=c++17",

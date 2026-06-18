@@ -4,6 +4,8 @@ const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_object = @import("mpz_object.zig");
 
+const max_small_nat: usize = std.math.maxInt(usize) >> 1;
+
 extern fn lean_mk_string_from_bytes(s: [*:0]const u8, sz: usize) callconv(.c) *anyopaque;
 
 fn ptrBits(o: ?*anyopaque) usize {
@@ -170,6 +172,14 @@ pub export fn lean_obj_tag(o: ?*anyopaque) callconv(.c) c_uint {
 
 pub export fn lean_ptr_tag(o: *anyopaque) callconv(.c) u8 {
     return ptrTag(o);
+}
+
+pub export fn lean_closure_max_args(_: *anyopaque) callconv(.c) ?*anyopaque {
+    return lean_box(16);
+}
+
+pub export fn lean_max_small_nat(_: *anyopaque) callconv(.c) ?*anyopaque {
+    return lean_box(max_small_nat);
 }
 
 export fn lean_decode_lossy_utf8(a: *anyopaque) callconv(.c) *anyopaque {

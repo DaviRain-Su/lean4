@@ -293,6 +293,16 @@ pub export fn lean_io_prim_handle_is_tty(h: *anyopaque) callconv(.c) u8 {
     return @intFromBool(c.isatty(handleFd(h)) != 0);
 }
 
+pub export fn lean_io_prim_handle_is_eof(h: *anyopaque) callconv(.c) u8 {
+    const fd = handleFd(h);
+    const pos = c.lseek(fd, 0, 1);
+    if (pos < 0) return 0;
+    const end = c.lseek(fd, 0, 2);
+    if (end < 0) return 0;
+    _ = c.lseek(fd, pos, 0);
+    return @intFromBool(pos >= end);
+}
+
 pub export fn lean_io_prim_handle_flush(_: *anyopaque) callconv(.c) *anyopaque {
     return mkUnitResult();
 }
