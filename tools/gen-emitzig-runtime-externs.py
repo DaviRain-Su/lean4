@@ -26,13 +26,13 @@ TYPE_REPLACEMENTS = [
     (r"\buint16_t\b", "u16"),
     (r"\buint32_t\b", "u32"),
     (r"\buint64_t\b", "u64"),
-    (r"\bptrdiff_t\b", "isize"),
-    (r"\bssize_t\b", "isize"),
+    (r"\bptrdiff_t\b", "usize"),
+    (r"\bssize_t\b", "usize"),
     (r"\bint\b", "c_int"),
-    (r"\bint8_t\b", "i8"),
-    (r"\bint16_t\b", "i16"),
-    (r"\bint32_t\b", "i32"),
-    (r"\bint64_t\b", "i64"),
+    (r"\bint8_t\b", "u8"),
+    (r"\bint16_t\b", "u16"),
+    (r"\bint32_t\b", "u32"),
+    (r"\bint64_t\b", "u64"),
     (r"\bsize_t\b", "usize"),
     (r"\bdouble\b", "f64"),
     (r"\bfloat\b", "f32"),
@@ -55,6 +55,7 @@ TYPE_REPLACEMENTS = [
     (r"\bchar\s*\*", "[*c]u8"),
     (r"\bconst\s+uint8_t\s*\*", "[*c]const u8"),
     (r"\buint8_t\s*\*", "[*c]u8"),
+    (r"\bObj\b", "LeanObj"),
 ]
 
 MATH_FUNCS = [
@@ -244,6 +245,7 @@ def zig_type_to_extern(zig_type: str) -> str:
         "void": "void",
         "c_int": "c_int",
         "c_uint": "c_uint",
+        "Obj": "LeanObj",
     }
     return mapping.get(t, t)
 
@@ -379,11 +381,11 @@ LEAN_SCALAR_TYPES: dict[str, str] = {
     "UInt32": "u32",
     "UInt64": "u64",
     "USize": "usize",
-    "Int8": "i8",
-    "Int16": "i16",
-    "Int32": "i32",
-    "Int64": "i64",
-    "ISize": "isize",
+    "Int8": "u8",
+    "Int16": "u16",
+    "Int32": "u32",
+    "Int64": "u64",
+    "ISize": "usize",
     "Float": "f64",
     "Float32": "f32",
     "FS.Mode": "u8",
@@ -515,7 +517,7 @@ def parse_extern_after_attr(rest: str) -> tuple[str, list[str], str] | None:
         s = s[m.end():].lstrip()
 
     # Match declaration keyword and name (allow "unsafe def").
-    m = re.match(r"(?:protected\s+|private\s+)?(?:unsafe\s+)?(?:opaque|def|axiom)\s+([\w\.\']+)\s*", s)
+    m = re.match(r"(?:protected\s+|private\s+)?(?:unsafe\s+)?(?:opaque|def|axiom)\s+([^\s:(]+)\s*", s)
     if not m:
         return None
     s = s[m.end():]
@@ -576,34 +578,37 @@ def parse_extern_after_attr(rest: str) -> tuple[str, list[str], str] | None:
     return m.group(1), arg_types, ret_type
 
 
-def scan_init_extern_decls() -> dict[str, tuple[str, list[str]]]:
-    """Collect `@[extern "lean_..."]` declarations from Init with inferred Zig signatures."""
+def scan_stdlib_extern_decls() -> dict[str, tuple[str, list[str]]]:
+    """Collect `@[extern "lean_..."]` declarations from Init and Std with inferred Zig signatures."""
     funcs: dict[str, tuple[str, list[str]]] = {}
     attr_pat = re.compile(r'@\[extern\s+"([^"]+)"[^\]]*\]')
-    init_root = ROOT / "src" / "Init"
-    for path in init_root.rglob("*.lean"):
-        text = path.read_text(errors="replace")
-        pos = 0
-        while True:
-            m = attr_pat.search(text, pos)
-            if not m:
-                break
-            name = m.group(1)
-            if not name.startswith("lean_"):
-                pos = m.end()
-                continue
+    for stdlib_root in (ROOT / "src" / "Init", ROOT / "src" / "Std"):
+        if not stdlib_root.is_dir():
+            continue
+        for path in stdlib_root.rglob("*.lean"):
+            text = path.read_text(errors="replace")
+            pos = 0
+            while True:
+                m = attr_pat.search(text, pos)
+                if not m:
+                    break
+                name = m.group(1)
+                if not name.startswith("lean_"):
+                    pos = m.end()
+                    continue
 
-            parsed = parse_extern_after_attr(text[m.end():])
-            if parsed is None:
-                pos = m.end()
-                continue
+                parsed = parse_extern_after_attr(text[m.end():])
+                if parsed is None:
+                    pos = m.end()
+                    continue
 
-            _, arg_types, ret_type = parsed
-            zret = lean_type_to_zig(ret_type)
-            zargs = [lean_type_to_zig(a) for a in arg_types]
-            funcs.setdefault(name, (zret, zargs))
-            pos = m.end()
+                _, arg_types, ret_type = parsed
+                zret = lean_type_to_zig(ret_type)
+                zargs = [lean_type_to_zig(a) for a in arg_types]
+                funcs.setdefault(name, (zret, zargs))
+                pos = m.end()
     return funcs
+
 def format_zig_extern(name: str, ret: str, args: list[str]) -> str:
     if name in OVERRIDE_SIGNATURES:
         ret, args = OVERRIDE_SIGNATURES[name]
@@ -638,7 +643,7 @@ def main() -> int:
         args = list(entry[2:])
         funcs[name] = (ret, args)
 
-    for name, sig in sorted(scan_init_extern_decls().items()):
+    for name, sig in sorted(scan_stdlib_extern_decls().items()):
         funcs.setdefault(name, sig)
 
     # Ensure zig-runtime-only exports are declared with signatures from the Zig sources.

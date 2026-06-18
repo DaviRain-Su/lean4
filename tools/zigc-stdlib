@@ -94,6 +94,11 @@ def release_cache_lock(lock) -> None:
         lock.close()
 
 
+def module_cache_lock_name(module: str) -> str:
+    digest = hashlib.sha256(module.encode()).hexdigest()[:16]
+    return f".module-{digest}.lock"
+
+
 def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     run([str(lean), "-z", str(out), str(src)], cwd=cwd)
@@ -722,7 +727,7 @@ def discover_dependencies(
     return order
 
 
-def build_stdlib_module(
+def build_stdlib_module_under_lock(
     module: str,
     lean: pathlib.Path,
     zig: pathlib.Path,
@@ -764,6 +769,25 @@ def build_stdlib_module(
 
     save_cache_meta(cache_dir, module, meta)
     return (module, obj_file, None)
+
+
+def build_stdlib_module(
+    module: str,
+    lean: pathlib.Path,
+    zig: pathlib.Path,
+    src_root: pathlib.Path,
+    cache_dir: pathlib.Path,
+    *,
+    force: bool,
+) -> tuple[str, pathlib.Path | None, str | None]:
+    # A second process can observe a freshly emitted `.zig` beside a stale `.o`
+    # while the first one is still compiling. Lock each module before deciding
+    # whether the object cache is valid.
+    lock = acquire_cache_lock(cache_dir, module_cache_lock_name(module))
+    try:
+        return build_stdlib_module_under_lock(module, lean, zig, src_root, cache_dir, force=force)
+    finally:
+        release_cache_lock(lock)
 
 
 def build_stdlib_modules(

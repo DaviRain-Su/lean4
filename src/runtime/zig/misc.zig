@@ -11,6 +11,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const rt_hash = @import("hash.zig");
 const string = @import("string.zig");
+const runtime_options = @import("runtime_options");
 
 const pointer_bytes: c_uint = @sizeOf(?*anyopaque);
 const murmur_hash_m: u64 = 0xc6a4a7935bd1e995;
@@ -133,20 +134,27 @@ fn appendBeforeBase(n: *anyopaque, prefix_str: *anyopaque) *anyopaque {
     return mkNameNumObj(mkNameStrObj(prefix, prefix_str), idx);
 }
 
-pub export fn lean_name_append_after(n: *anyopaque, suffix: *anyopaque) callconv(.c) *anyopaque {
+fn lean_name_append_after(n: *anyopaque, suffix: *anyopaque) callconv(.c) *anyopaque {
     return appendAfterBase(n, suffix);
 }
 
-pub export fn lean_name_append_before(n: *anyopaque, prefix_str: *anyopaque) callconv(.c) *anyopaque {
+fn lean_name_append_before(n: *anyopaque, prefix_str: *anyopaque) callconv(.c) *anyopaque {
     return appendBeforeBase(n, prefix_str);
 }
 
-pub export fn lean_name_append_index_after(n: *anyopaque, idx: ?*anyopaque) callconv(.c) *anyopaque {
+fn lean_name_append_index_after(n: *anyopaque, idx: ?*anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(idx)) @panic("lean_name_append_index_after: big Nat index not implemented");
     const idx_bytes = std.fmt.allocPrint(std.heap.c_allocator, "_{}", .{object.lean_unbox(idx)}) catch @panic("out of memory");
     defer std.heap.c_allocator.free(idx_bytes);
     const suffix = string.mkStringFromBytes(idx_bytes);
     return appendAfterBase(n, suffix);
+}
+comptime {
+    if (runtime_options.export_lean_helpers) {
+        @export(&lean_name_append_after, .{ .name = "lean_name_append_after" });
+        @export(&lean_name_append_before, .{ .name = "lean_name_append_before" });
+        @export(&lean_name_append_index_after, .{ .name = "lean_name_append_index_after" });
+    }
 }
 
 fn sliceBounds(slice: *anyopaque) struct { start: usize, end: usize } {

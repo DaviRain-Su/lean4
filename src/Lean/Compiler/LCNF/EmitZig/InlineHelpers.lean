@@ -156,6 +156,37 @@ private def supportInlineHelperEntries : List (String × String) := [
     "  return o;",
     "}"
   ]),
+  ("lean_alloc_sarray", joinLines [
+    "inline fn lean_alloc_sarray(elem_size: c_uint, size: usize, capacity: usize) LeanObj {",
+    "  const total = lean_usize_add_checked(",
+    "    @sizeOf(lean_sarray_object),",
+    "    lean_usize_mul_checked(@intCast(elem_size), capacity)",
+    "  );",
+    "  const o = lean_alloc_object(total);",
+    "  lean_set_st_header(o, 248, elem_size);",
+    "  const sa: *lean_sarray_object = @ptrCast(@alignCast(lean_heap_obj(o)));",
+    "  sa.m_size = size;",
+    "  sa.m_capacity = capacity;",
+    "  return o;",
+    "}"
+  ]),
+  ("lean_mk_empty_array", joinLines [
+    "inline fn lean_mk_empty_array() LeanObj {",
+    "  return lean_alloc_array(0, 0);",
+    "}"
+  ]),
+  ("lean_mk_empty_byte_array", joinLines [
+    "inline fn lean_mk_empty_byte_array(capacity: LeanObj) LeanObj {",
+    "  if (lean_is_scalar(capacity) == 0) lean_internal_panic_out_of_memory();",
+    "  return lean_alloc_sarray(1, 0, lean_unbox(capacity));",
+    "}"
+  ]),
+  ("lean_mk_empty_float_array", joinLines [
+    "inline fn lean_mk_empty_float_array(capacity: LeanObj) LeanObj {",
+    "  if (lean_is_scalar(capacity) == 0) lean_internal_panic_out_of_memory();",
+    "  return lean_alloc_sarray(@sizeOf(f64), 0, lean_unbox(capacity));",
+    "}"
+  ]),
   ("lean_nat_le", joinLines [
     "inline fn lean_nat_le(a1: LeanObj, a2: LeanObj) bool {",
     "  if (lean_is_scalar(a1) != 0 and lean_is_scalar(a2) != 0) {",

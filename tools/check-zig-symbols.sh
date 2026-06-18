@@ -37,7 +37,15 @@ for TEST in "${TESTS[@]}"; do
     TEST_PATH="$ROOT/tests/emitzig/$TEST"
   fi
   OUT="$TMP_DIR/$(basename "$TEST_PATH" .lean).zig"
-  "$LEAN" -Dbackward.do.legacy=false "$TEST_PATH" -z "$OUT"
+  LEAN_ERR="$TMP_DIR/$(basename "$TEST_PATH" .lean).lean.err"
+  if ! "$LEAN" -Dbackward.do.legacy=false "$TEST_PATH" -z "$OUT" 2> "$LEAN_ERR"; then
+    echo "check-zig-symbols: failed to emit Zig for $TEST_PATH" >&2
+    if grep -q "object file .* does not exist" "$LEAN_ERR"; then
+      echo "check-zig-symbols: stage1 stdlib artifacts appear incomplete; rebuild stage1 before running this check" >&2
+    fi
+    cat "$LEAN_ERR" >&2
+    exit 1
+  fi
 
   # Extract runtime symbols actually invoked by emitted Zig. Do not count
   # declarations or local definitions such as `_lean_main__def`.

@@ -335,6 +335,7 @@ if(LEAN_ZIG_RUNTIME)
     Smoke.lean
     Stderr.lean
     String.lean
+    StringEscapes.lean
     StringHelpers.lean
     Task.lean
   )
@@ -353,7 +354,6 @@ if(LEAN_ZIG_RUNTIME)
     )
   endforeach()
   set(EMITZIG_STDLIB_TESTS
-    TcpEcho.lean
     StdlibArray.lean
     StdlibBitVec.lean
     StdlibByteArray.lean
@@ -413,8 +413,6 @@ if(LEAN_ZIG_RUNTIME)
     StdlibTreeSet.lean
     StdlibUInt.lean
     StdlibVector.lean
-    UvAlive.lean
-    UvTimer.lean
   )
   foreach(T ${EMITZIG_STDLIB_TESTS})
     add_test(

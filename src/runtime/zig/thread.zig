@@ -6,6 +6,7 @@ const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const object = @import("object.zig");
+const stack_overflow = @import("stack_overflow.zig");
 const sync = @import("sync.zig");
 const c = @cImport({
     @cInclude("pthread.h");
@@ -156,6 +157,8 @@ pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) std
 
         fn entry(self: *@This()) void {
             defer self.deinit();
+            var stack_guard = stack_overflow.StackGuard.init();
+            defer stack_guard.deinit();
             initializeThreadSubsystems();
             defer finalizeThreadSubsystems();
             if (self.name) |name| setCurrentThreadName(name);

@@ -379,12 +379,18 @@ comptime {
     }
 }
 
-export fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
+fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
+
     _ = builtin;
     if (g_stdout == null) g_stdout = makeOutputStream(stdoutPutStr, stdoutWrite);
     if (g_stderr == null) g_stderr = makeOutputStream(stderrPutStr, stderrWrite);
     if (g_stdin == null) g_stdin = makeInputStream();
     return io_result.lean_io_result_mk_ok(object.lean_box(0).?);
+}
+comptime {
+    if (runtime_options.export_lean_helpers) {
+        @export(&initialize_Init, .{ .name = "initialize_Init" });
+    }
 }
 
 fn getStreamOrInit(current: *?*anyopaque, make: *const fn () callconv(.c) *anyopaque) *anyopaque {

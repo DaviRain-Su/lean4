@@ -15,3 +15,13 @@ public meta import Lean.Compiler.LCNF.EmitZig
     "    }",
     "  }"
   ]
+
+#guard
+  match EmitZig.renderCoreLetValueLines? `x Lean.Compiler.LCNF.ImpureType.object
+      (.lit (.str "a\x00b\x1fc\\\"?\n\t\r")) with
+  | some [line] =>
+      line.contains "\\x00" &&
+      line.contains "\\x1f" &&
+      !line.contains "\x00" &&
+      !line.contains "\x1f"
+  | _ => false

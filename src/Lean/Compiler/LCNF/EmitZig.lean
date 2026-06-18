@@ -317,17 +317,21 @@ def getLocalRuntimeSymbolNames : EmitM (Array String) := do
     | _ => pure ()
   return names
 
-def getModInitFn : EmitM String := do
+def getModInitFn (phases : IRPhases) : EmitM String := do
   let env ← getEnv
   let pkg? := env.getModulePackage?
-  return mkModuleInitializationFunctionName (← getModName) pkg? .all
+  return mkModuleInitializationFunctionName (phases := phases) (← getModName) pkg?
 
-def importedInitFnNames : EmitM (Array String) := do
+def importedInitFnNames (phases : IRPhases) : EmitM (Array String) := do
   let env ← getEnv
   let names ← env.imports.filterMapM fun imp => do
-    let some idx := env.getModuleIdx? imp.module | return none
+    if phases != .all && imp.isMeta != (phases == .comptime) then
+      return none
+    let some idx := env.getModuleIdx? imp.module
+      | throwError "(internal) import without module index"
     let pkg? := env.getModulePackageByIdx? idx
-    return some <| mkModuleInitializationFunctionName imp.module pkg? .all
+    let phases := if phases == .all then .all else if imp.isMeta then .runtime else phases
+    return some <| mkModuleInitializationFunctionName (phases := phases) imp.module pkg?
   return names.foldl (init := #[]) fun acc name =>
     if acc.contains name then acc else acc.push name
 
@@ -429,13 +433,22 @@ public def renderDecRefKnownLines (target : String) (n objs : Nat) : List String
       "  }"
     ]
 
+def toHexDigit (c : Nat) : String :=
+  String.singleton c.digitChar
+
 def quoteZigString (s : String) : String :=
-  let escaped := s.replace "\\" "\\\\"
-  let escaped := escaped.replace "\"" "\\\""
-  let escaped := escaped.replace "\n" "\\n"
-  let escaped := escaped.replace "\t" "\\t"
-  let escaped := escaped.replace "\r" "\\r"
-  "\"" ++ escaped ++ "\""
+  let q := s.foldl
+    (fun q c => q ++
+      if c == '\n' then "\\n"
+      else if c == '\r' then "\\r"
+      else if c == '\t' then "\\t"
+      else if c == '\\' then "\\\\"
+      else if c == '\"' then "\\\""
+      else if c.toNat <= 31 then
+        "\\x" ++ toHexDigit (c.toNat / 16) ++ toHexDigit (c.toNat % 16)
+      else String.singleton c)
+    "\""
+  q ++ "\""
 
 def renderImpureArg : Arg .impure → String
   | .fvar fvarId => zigIdent fvarId.name
@@ -1475,13 +1488,22 @@ def emitMarkPersistent (name : String) (type : Expr) : EmitM Unit := do
   if type.isObj then
     emitLn s!"  lean_mark_persistent({name});"
 
-def emitDeclInit (decl : Decl .impure) : EmitM Unit := do
+def declInitNeedsRes (env : Environment) (decl : Decl .impure) (isBuiltin : Bool) : Bool :=
+  (isBuiltin && isIOUnitBuiltinInitFn env decl.name) || isIOUnitInitFn env decl.name ||
+    (decl.params.isEmpty &&
+      (((if isBuiltin then getBuiltinInitFnNameFor? env decl.name else none) <|>
+        getInitFnNameFor? env decl.name).isSome))
+
+def emitDeclInit (decl : Decl .impure) (isBuiltin : Bool) : EmitM Unit := do
   let env ← getEnv
-  if isIOUnitInitFn env decl.name then
+  if (isBuiltin && isIOUnitBuiltinInitFn env decl.name) || isIOUnitInitFn env decl.name then
     emitErrRetCall s!"{← toCallableZigName decl.name}()"
     emitLn "  lean_dec_ref(res);"
   else if decl.params.isEmpty then
-    if let some initFn := getInitFnNameFor? env decl.name then
+    let initFn? :=
+      (if isBuiltin then getBuiltinInitFnNameFor? env decl.name else none) <|>
+        getInitFnNameFor? env decl.name
+    if let some initFn := initFn? then
       let name ← toCallableZigName decl.name
       emitErrRetCall s!"{← toCallableZigName initFn}()"
       if decl.type.isScalar then
@@ -1490,16 +1512,29 @@ def emitDeclInit (decl : Decl .impure) : EmitM Unit := do
         emitLn s!"  {name} = lean_io_result_get_value(res);"
         emitMarkPersistent name decl.type
       emitLn "  lean_dec_ref(res);"
+    else if !(isClosedTermName env decl.name || isSimpleGroundDecl env decl.name) then
+      let baseName ← toZigSymbolName decl.name
+      let objName := groundObjectName baseName
+      emitLn s!"  {objName} = {← toZigInitName decl.name}();"
+      emitMarkPersistent objName decl.type
 
-def emitInitFn : EmitM Unit := do
-  let env ← getEnv
-  let imported ← importedInitFnNames
-  imported.forM fun fn => emitLn s!"extern fn {fn}(builtin: u8) callconv(.c) LeanObj;"
-  if !imported.isEmpty then
+def emitImportedInitDecls (phasesList : List IRPhases) : EmitM Unit := do
+  let mut names := #[]
+  for phases in phasesList do
+    for fn in ← importedInitFnNames phases do
+      if !names.contains fn then
+        names := names.push fn
+  for fn in names do
+    emitLn s!"extern fn {fn}(builtin: u8) callconv(.c) LeanObj;"
+  if !names.isEmpty then
     emitLn ""
-  let initName ← getModInitFn
+
+def emitInitFn (phases : IRPhases) : EmitM Unit := do
+  let env ← getEnv
+  let imported ← importedInitFnNames phases
+  let initName ← getModInitFn phases
   let defName := s!"{initName}__def"
-  let initialized := s!"_G_{initName}_initialized"
+  let initialized := s!"_G_{mkModuleInitializationPrefix phases}initialized"
   emitLn s!"var {initialized}: bool = false;"
   let builtinParam := if imported.isEmpty then "_: u8" else "builtin: u8"
   emitLn (s!"fn {defName}({builtinParam}) callconv(.c) LeanObj " ++ "{")
@@ -1509,12 +1544,38 @@ def emitInitFn : EmitM Unit := do
   emitLn "  lean_initialize_thread();"
   for fn in imported do
     emitLn s!"  lean_dec_ref({fn}(builtin));"
-  let initAttrDecls := (← getLocalDecls).filter fun decl => hasInitAttr env decl.name
-  if !initAttrDecls.isEmpty then
+  let isBuiltin := phases != .comptime
+  let initDecls := (← getLocalDecls).filter fun decl =>
+    phases == .all || (phases == .comptime) == isMarkedMeta env decl.name
+  if initDecls.any (declInitNeedsRes env · isBuiltin) then
     emitLn "  var res: LeanObj = lean_box(0);"
-  for decl in initAttrDecls do
-    emitDeclInit decl
+  for decl in initDecls do
+    emitDeclInit decl isBuiltin
   emitLn "  return lean_io_result_mk_ok(lean_box(0));"
+  emitLn "}"
+  emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ initName ++ "\" }); }"
+  emitLn ""
+
+def emitLegacyInitFn : EmitM Unit := do
+  let imported ← importedInitFnNames .all
+  let initName ← getModInitFn .all
+  let defName := s!"{initName}__def"
+  let initialized := "_G_initialized"
+  emitLn s!"var {initialized}: bool = false;"
+  emitLn (s!"fn {defName}(builtin: u8) callconv(.c) LeanObj " ++ "{")
+  emitLn s!"  if ({initialized}) return lean_io_result_mk_ok(lean_box(0));"
+  emitLn s!"  {initialized} = true;"
+  emitLn "  lean_initialize_runtime_module();"
+  emitLn "  lean_initialize_thread();"
+  emitLn "  var res: LeanObj = lean_box(0);"
+  for fn in imported do
+    emitErrRetCall s!"{fn}(builtin)"
+    emitLn "  lean_dec_ref(res);"
+  emitErrRetCall s!"{← getModInitFn .runtime}__def(builtin)"
+  emitLn "  lean_dec_ref(res);"
+  emitErrRetCall s!"{← getModInitFn .comptime}__def(builtin)"
+  emitLn "  lean_dec_ref(res);"
+  emitLn s!"  return {defName}(builtin);"
   emitLn "}"
   emitLn <| "comptime { @export(&" ++ defName ++ ", .{ .name = \"" ++ initName ++ "\" }); }"
   emitLn ""
@@ -1522,9 +1583,10 @@ def emitInitFn : EmitM Unit := do
 def emitMainFnIfNeeded : EmitM Unit := do
   let some decl ← findMainDecl? | return ()
   let mainFn ← toZigSymbolName decl.name
-  let initFn ← getModInitFn
-  let initDefFn := s!"{initFn}__def"
   let env ← getEnv
+  let initPhases := if env.header.isModule then .runtime else .all
+  let initFn ← getModInitFn initPhases
+  let initDefFn := s!"{initFn}__def"
   if decl.params.size != 1 && decl.params.size != 2 then
     throwError "invalid main function, incorrect arity when generating code"
   let usesLeanAPI := usesModuleFrom env `Lean
@@ -1587,7 +1649,16 @@ def emitFile : EmitM Unit := do
   emitFileHeader
   emitFnDecls
   emitFns
-  emitInitFn
+  if (← getEnv).header.isModule then
+    emitImportedInitDecls [.runtime, .comptime, .all]
+  else
+    emitImportedInitDecls [.all]
+  if (← getEnv).header.isModule then
+    emitInitFn .runtime
+    emitInitFn .comptime
+    emitLegacyInitFn
+  else
+    emitInitFn .all
   emitMainFnIfNeeded
 
 def emitZigForDecls (modName : Name) (decls : Array Name) : CoreM String := do
