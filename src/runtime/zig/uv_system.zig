@@ -34,7 +34,7 @@ extern fn lean_event_loop_loop() callconv(.c) *anyopaque;
 
 // C++ helper for `lean_uv_random` (kept on the C++ side because of the libuv
 // C callback).
-extern fn lean_uv_random(size: u64) callconv(.c) *anyopaque;
+extern fn lean_uv_random_helper(size: u64) callconv(.c) *anyopaque;
 
 // ============================================================================
 // String helpers
@@ -87,7 +87,7 @@ fn boxU64(v: u64) *anyopaque {
 // ============================================================================
 
 // Std.Internal.UV.System.getProcessTitle : IO String
-pub export fn lean_uv_get_process_title() callconv(.c) *anyopaque {
+pub fn lean_uv_get_process_title() callconv(.c) *anyopaque {
     var title: [512]u8 = undefined;
     const result = c.uv_get_process_title(@ptrCast(&title), title.len);
 
@@ -99,7 +99,7 @@ pub export fn lean_uv_get_process_title() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.setProcessTitle : @& String -> IO Unit
-pub export fn lean_uv_set_process_title(title: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_set_process_title(title: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(title)) {
         return mkEmbeddedNulError(title);
     }
@@ -114,7 +114,7 @@ pub export fn lean_uv_set_process_title(title: *anyopaque) callconv(.c) *anyopaq
 }
 
 // Std.Internal.UV.System.uptime : IO UInt64
-pub export fn lean_uv_uptime() callconv(.c) *anyopaque {
+pub fn lean_uv_uptime() callconv(.c) *anyopaque {
     var uptime: f64 = undefined;
 
     const result = c.uv_uptime(&uptime);
@@ -127,17 +127,17 @@ pub export fn lean_uv_uptime() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetPid : IO UInt64
-pub export fn lean_uv_os_getpid() callconv(.c) *anyopaque {
+pub fn lean_uv_os_getpid() callconv(.c) *anyopaque {
     return io_result.lean_io_result_mk_ok(boxU64(@intCast(c.uv_os_getpid())));
 }
 
 // Std.Internal.UV.System.osGetPpid : IO UInt64
-pub export fn lean_uv_os_getppid() callconv(.c) *anyopaque {
+pub fn lean_uv_os_getppid() callconv(.c) *anyopaque {
     return io_result.lean_io_result_mk_ok(boxU64(@intCast(c.uv_os_getppid())));
 }
 
 // Std.Internal.UV.System.cpuInfo : IO (Array CPUInfo)
-pub export fn lean_uv_cpu_info() callconv(.c) *anyopaque {
+pub fn lean_uv_cpu_info() callconv(.c) *anyopaque {
     var cpu_infos: [*c]c.uv_cpu_info_t = undefined;
     var count: c_int = undefined;
 
@@ -176,7 +176,7 @@ pub export fn lean_uv_cpu_info() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.cwd : IO String
-pub export fn lean_uv_cwd() callconv(.c) *anyopaque {
+pub fn lean_uv_cwd() callconv(.c) *anyopaque {
     var buffer: [std.posix.PATH_MAX]u8 = undefined;
     var size: usize = buffer.len;
 
@@ -190,7 +190,7 @@ pub export fn lean_uv_cwd() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.chdir : @& String -> IO Unit
-pub export fn lean_uv_chdir(path: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_chdir(path: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(path)) {
         return mkEmbeddedNulError(path);
     }
@@ -206,7 +206,7 @@ pub export fn lean_uv_chdir(path: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osHomedir : IO String
-pub export fn lean_uv_os_homedir() callconv(.c) *anyopaque {
+pub fn lean_uv_os_homedir() callconv(.c) *anyopaque {
     var buffer: [std.posix.PATH_MAX]u8 = undefined;
     var size: usize = buffer.len;
 
@@ -220,7 +220,7 @@ pub export fn lean_uv_os_homedir() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osTmpdir : IO String
-pub export fn lean_uv_os_tmpdir() callconv(.c) *anyopaque {
+pub fn lean_uv_os_tmpdir() callconv(.c) *anyopaque {
     var buffer: [std.posix.PATH_MAX]u8 = undefined;
     var size: usize = buffer.len;
 
@@ -234,7 +234,7 @@ pub export fn lean_uv_os_tmpdir() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetPasswd : IO PasswdInfo
-pub export fn lean_uv_os_get_passwd() callconv(.c) *anyopaque {
+pub fn lean_uv_os_get_passwd() callconv(.c) *anyopaque {
     var passwd: c.uv_passwd_t = undefined;
 
     const result = c.uv_os_get_passwd(&passwd);
@@ -263,7 +263,7 @@ pub export fn lean_uv_os_get_passwd() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetGroup : IO (Option GroupInfo)
-pub export fn lean_uv_os_get_group(gid: u64) callconv(.c) *anyopaque {
+pub fn lean_uv_os_get_group(gid: u64) callconv(.c) *anyopaque {
     var group: c.uv_group_t = undefined;
     const result = c.uv_os_get_group(&group, @intCast(gid));
 
@@ -302,7 +302,7 @@ pub export fn lean_uv_os_get_group(gid: u64) callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osEnviron : IO (Array (String x String))
-pub export fn lean_uv_os_environ() callconv(.c) *anyopaque {
+pub fn lean_uv_os_environ() callconv(.c) *anyopaque {
     var env: [*c]c.uv_env_item_t = undefined;
     var count: c_int = undefined;
     const result = c.uv_os_environ(&env, &count);
@@ -331,7 +331,7 @@ pub export fn lean_uv_os_environ() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetenv : @& String -> IO (Option String)
-pub export fn lean_uv_os_getenv(name: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_os_getenv(name: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(name)) {
         return io_result.lean_io_result_mk_ok(mkOptionNone());
     }
@@ -372,7 +372,7 @@ pub export fn lean_uv_os_getenv(name: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osSetenv : @& String -> @& String -> IO Unit
-pub export fn lean_uv_os_setenv(name: *anyopaque, value: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_os_setenv(name: *anyopaque, value: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(name)) {
         return mkEmbeddedNulError(name);
     }
@@ -390,7 +390,7 @@ pub export fn lean_uv_os_setenv(name: *anyopaque, value: *anyopaque) callconv(.c
 }
 
 // Std.Internal.UV.System.osUnsetenv : @& String -> IO Unit
-pub export fn lean_uv_os_unsetenv(name: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_os_unsetenv(name: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(name)) {
         return mkEmbeddedNulError(name);
     }
@@ -405,7 +405,7 @@ pub export fn lean_uv_os_unsetenv(name: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetHostname : IO String
-pub export fn lean_uv_os_gethostname() callconv(.c) *anyopaque {
+pub fn lean_uv_os_gethostname() callconv(.c) *anyopaque {
     var hostname: [256]u8 = undefined;
     var size: usize = hostname.len;
 
@@ -419,7 +419,7 @@ pub export fn lean_uv_os_gethostname() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osGetPriority : UInt64 -> IO Int64
-pub export fn lean_uv_os_getpriority(pid: u64) callconv(.c) *anyopaque {
+pub fn lean_uv_os_getpriority(pid: u64) callconv(.c) *anyopaque {
     var priority: c_int = undefined;
 
     const result = c.uv_os_getpriority(@intCast(pid), &priority);
@@ -432,7 +432,7 @@ pub export fn lean_uv_os_getpriority(pid: u64) callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.osSetPriority : UInt64 -> Int -> IO Unit
-pub export fn lean_uv_os_setpriority(pid: u64, priority: i64) callconv(.c) *anyopaque {
+pub fn lean_uv_os_setpriority(pid: u64, priority: i64) callconv(.c) *anyopaque {
     const result = c.uv_os_setpriority(@intCast(pid), @intCast(priority));
 
     if (result < 0) {
@@ -443,7 +443,7 @@ pub export fn lean_uv_os_setpriority(pid: u64, priority: i64) callconv(.c) *anyo
 }
 
 // Std.Internal.UV.System.osUname : IO UnameInfo
-pub export fn lean_uv_os_uname() callconv(.c) *anyopaque {
+pub fn lean_uv_os_uname() callconv(.c) *anyopaque {
     var uname_info: c.uv_utsname_t = undefined;
 
     const result = c.uv_os_uname(&uname_info);
@@ -467,16 +467,19 @@ pub export fn lean_uv_os_uname() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.hrtime : IO UInt64
-pub export fn lean_uv_hrtime() callconv(.c) *anyopaque {
+pub fn lean_uv_hrtime() callconv(.c) *anyopaque {
     const time = c.uv_hrtime();
     return io_result.lean_io_result_mk_ok(boxU64(time));
 }
 
 // Std.Internal.UV.System.random : UInt64 -> IO (IO.Promise (Except IO.Error (Array UInt8)))
-// Kept as a C++ helper; just declare it as `extern` above.
+// Kept as a C++ helper.
+pub fn lean_uv_random(size: u64) callconv(.c) *anyopaque {
+    return lean_uv_random_helper(size);
+}
 
 // Std.Internal.UV.System.getrusage : IO RUsage
-pub export fn lean_uv_getrusage() callconv(.c) *anyopaque {
+pub fn lean_uv_getrusage() callconv(.c) *anyopaque {
     var usage: c.uv_rusage_t = undefined;
     const result = c.uv_getrusage(&usage);
 
@@ -512,7 +515,7 @@ pub export fn lean_uv_getrusage() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.exePath : IO String
-pub export fn lean_uv_exepath() callconv(.c) *anyopaque {
+pub fn lean_uv_exepath() callconv(.c) *anyopaque {
     var buffer: [std.posix.PATH_MAX]u8 = undefined;
     var size: usize = buffer.len;
 
@@ -526,25 +529,26 @@ pub export fn lean_uv_exepath() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.freeMemory : IO UInt64
-pub export fn lean_uv_get_free_memory() callconv(.c) *anyopaque {
+pub fn lean_uv_get_free_memory() callconv(.c) *anyopaque {
     const mem = c.uv_get_free_memory();
     return io_result.lean_io_result_mk_ok(boxU64(mem));
 }
 
 // Std.Internal.UV.System.totalMemory : IO UInt64
-pub export fn lean_uv_get_total_memory() callconv(.c) *anyopaque {
+pub fn lean_uv_get_total_memory() callconv(.c) *anyopaque {
     const mem = c.uv_get_total_memory();
     return io_result.lean_io_result_mk_ok(boxU64(mem));
 }
 
 // Std.Internal.UV.System.constrainedMemory : IO UInt64
-pub export fn lean_uv_get_constrained_memory() callconv(.c) *anyopaque {
+pub fn lean_uv_get_constrained_memory() callconv(.c) *anyopaque {
     const mem = c.uv_get_constrained_memory();
     return io_result.lean_io_result_mk_ok(boxU64(mem));
 }
 
 // Std.Internal.UV.System.availableMemory : IO UInt64
-pub export fn lean_uv_get_available_memory() callconv(.c) *anyopaque {
+pub fn lean_uv_get_available_memory() callconv(.c) *anyopaque {
     const mem = c.uv_get_available_memory();
     return io_result.lean_io_result_mk_ok(boxU64(mem));
 }
+

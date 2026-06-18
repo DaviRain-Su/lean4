@@ -21,7 +21,7 @@ typedef struct {
 // Std.Internal.UV.System.random : UInt64 -> IO (IO.Promise (Except IO.Error (Array UInt8)))
 // Kept in C++ because the libuv request needs a C callback; the Zig runtime declares this
 // helper as `extern` and links it from the compiled C++ object.
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_random(uint64_t size) {
+extern "C" lean_obj_res lean_uv_random_helper(uint64_t size) {
     random_req_t* req = (random_req_t*)malloc(sizeof(random_req_t));
     if (req == nullptr) {
         return lean_io_result_mk_error(decode_io_error(ENOMEM, nullptr));
@@ -79,7 +79,7 @@ extern "C" LEAN_EXPORT lean_obj_res lean_uv_random(uint64_t size) {
 #else
 
 // Std.Internal.UV.System.random : UInt64 -> IO (IO.Promise (Except IO.Error (Array UInt8)))
-extern "C" LEAN_EXPORT lean_obj_res lean_uv_random(uint64_t size) {
+extern "C" lean_obj_res lean_uv_random_helper(uint64_t size) {
     lean_always_assert(
         false && ("Please build a version of Lean4 with libuv to invoke this.")
     );

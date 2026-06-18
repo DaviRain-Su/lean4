@@ -120,10 +120,10 @@ int lean_event_loop_is_alive() {
     return is_alive;
 }
 uv_loop_t* lean_event_loop_loop() { return lean::global_ev.loop; }
-int lean_uv_loop_configure_idle(uv_loop_t* loop) {
+int lean_uv_loop_configure_idle_helper(uv_loop_t* loop) {
     return uv_loop_configure(loop, UV_METRICS_IDLE_TIME);
 }
-int lean_uv_loop_configure_block_signal(uv_loop_t* loop) {
+int lean_uv_loop_configure_block_signal_helper(uv_loop_t* loop) {
 #if !defined(WIN32) && !defined(_WIN32)
     return uv_loop_configure(loop, UV_LOOP_BLOCK_SIGNAL, SIGPROF);
 #else

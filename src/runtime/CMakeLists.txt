@@ -33,6 +33,7 @@ set(
   uv/dns.cpp
   uv/system.cpp
   uv/signal.cpp
+  uv/zig_link_compat.cpp
   openssl.cpp
 )
 if(USE_MIMALLOC)

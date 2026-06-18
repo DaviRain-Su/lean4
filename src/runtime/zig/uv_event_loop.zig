@@ -19,11 +19,11 @@ extern fn lean_event_loop_lock() callconv(.c) void;
 extern fn lean_event_loop_unlock() callconv(.c) void;
 extern fn lean_event_loop_is_alive() callconv(.c) i32;
 extern fn lean_event_loop_loop() callconv(.c) *anyopaque;
-extern fn lean_uv_loop_configure_idle(loop: *anyopaque) callconv(.c) i32;
-extern fn lean_uv_loop_configure_block_signal(loop: *anyopaque) callconv(.c) i32;
+extern fn lean_uv_loop_configure_idle_helper(loop: *anyopaque) callconv(.c) i32;
+extern fn lean_uv_loop_configure_block_signal_helper(loop: *anyopaque) callconv(.c) i32;
 
 // Std.Internal.UV.Loop.configure (options : Loop.Options) : BaseIO Unit
-pub export fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *anyopaque {
     const accum = ctor.lean_ctor_get_uint8(options, 0) != 0;
     const block = ctor.lean_ctor_get_uint8(options, 1) != 0;
 
@@ -33,14 +33,14 @@ pub export fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *an
     const loop = lean_event_loop_loop();
 
     if (accum) {
-        const result = lean_uv_loop_configure_idle(loop);
+        const result = lean_uv_loop_configure_idle_helper(loop);
         if (result != 0) {
             return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
         }
     }
 
     if (block) {
-        const result = lean_uv_loop_configure_block_signal(loop);
+        const result = lean_uv_loop_configure_block_signal_helper(loop);
         if (result != 0) {
             return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
         }
@@ -50,6 +50,7 @@ pub export fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *an
 }
 
 // Std.Internal.UV.Loop.alive : BaseIO Bool
-pub export fn lean_uv_event_loop_alive() callconv(.c) u8 {
+pub fn lean_uv_event_loop_alive() callconv(.c) u8 {
     return if (lean_event_loop_is_alive() != 0) 1 else 0;
 }
+

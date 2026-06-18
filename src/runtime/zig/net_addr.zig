@@ -154,7 +154,7 @@ fn isStrictIPv4DottedDecimal(bytes: []const u8) bool {
 }
 
 // Std.Net.IPv4Addr.ofString (s : @&String) : Option IPv4Addr
-pub export fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(str_obj)) return mkOptionNone();
     if (!isStrictIPv4DottedDecimal(stringBytes(str_obj))) return mkOptionNone();
 
@@ -166,7 +166,7 @@ pub export fn lean_uv_pton_v4(str_obj: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv4Addr.toString (addr : @&IPv4Addr) : String
-pub export fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
     var internal: c.struct_in_addr = undefined;
     ipv4AddrToBytes(ipv4_addr, byteSpan(&internal, 4)[0..4]);
 
@@ -178,7 +178,7 @@ pub export fn lean_uv_ntop_v4(ipv4_addr: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv6Addr.ofString (s : @&String) : Option IPv6Addr
-pub export fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
     if (hasEmbeddedNul(str_obj)) return mkOptionNone();
 
     var internal: c.struct_in6_addr = undefined;
@@ -189,7 +189,7 @@ pub export fn lean_uv_pton_v6(str_obj: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.IPv6Addr.toString (addr : @&IPv6Addr) : String
-pub export fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
     var internal: c.struct_in6_addr = undefined;
     ipv6AddrToBytes(ipv6_addr, byteSpan(&internal, 16)[0..16]);
 
@@ -201,7 +201,7 @@ pub export fn lean_uv_ntop_v6(ipv6_addr: *anyopaque) callconv(.c) *anyopaque {
 }
 
 // Std.Net.interfaceAddresses : IO (Array InterfaceAddress)
-pub export fn lean_uv_interface_addresses() callconv(.c) *anyopaque {
+pub fn lean_uv_interface_addresses() callconv(.c) *anyopaque {
     var info: [*c]c.uv_interface_address_t = undefined;
     var count: c_int = 0;
 

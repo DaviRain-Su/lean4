@@ -15,21 +15,22 @@ extern fn lean_uv_signal_stop_helper(signal: *anyopaque) callconv(.c) *anyopaque
 extern fn lean_uv_signal_cancel_helper(signal: *anyopaque) callconv(.c) *anyopaque;
 
 // Std.Internal.UV.Signal.mk (signum : Int32) (repeating : Bool) : IO Signal
-pub export fn lean_uv_signal_mk(signum: u32, repeating: u8) callconv(.c) *anyopaque {
+pub fn lean_uv_signal_mk(signum: u32, repeating: u8) callconv(.c) *anyopaque {
     return lean_uv_signal_mk_helper(signum, repeating);
 }
 
 // Std.Internal.UV.Signal.next (signal : @& Signal) : IO (IO.Promise Int)
-pub export fn lean_uv_signal_next(signal: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_signal_next(signal: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_signal_next_helper(signal);
 }
 
 // Std.Internal.UV.Signal.stop (signal : @& Signal) : IO Unit
-pub export fn lean_uv_signal_stop(signal: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_signal_stop(signal: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_signal_stop_helper(signal);
 }
 
 // Std.Internal.UV.Signal.cancel (signal : @& Signal) : IO Unit
-pub export fn lean_uv_signal_cancel(signal: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_uv_signal_cancel(signal: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_signal_cancel_helper(signal);
 }
+
