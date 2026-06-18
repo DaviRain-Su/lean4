@@ -1000,9 +1000,9 @@ pub extern fn tanf(_0: f32) callconv(.c) f32;
 pub extern fn tanh(_0: f64) callconv(.c) f64;
 pub extern fn tanhf(_0: f32) callconv(.c) f32;
 
-pub const LeanMaxCtorTag: c_uint = @as(c_uint, 243);
-pub const LeanMaxCtorFields: c_uint = @as(c_uint, 256);
-pub const LeanMaxCtorScalarsSize: usize = @as(usize, 1024);
+pub const LeanMaxCtorTag: c_uint = 243;
+pub const LeanMaxCtorFields: c_uint = 256;
+pub const LeanMaxCtorScalarsSize: usize = 1024;
 pub const LeanMaxSmallNat: usize = std.math.maxInt(usize) >> 1;
 pub inline fn lean_heap_obj(o: LeanObj) *lean_object {
     @setEvalBranchQuota(10000000);
@@ -1034,12 +1034,12 @@ pub inline fn lean_get_rc_mt_addr(o: LeanObj) *i32 {
 }
 pub inline fn lean_is_ctor(o: LeanObj) bool {
     @setEvalBranchQuota(10000000);
-    return @as(c_uint, lean_ptr_tag(o)) <= LeanMaxCtorTag;
+    return lean_ptr_tag(o) <= LeanMaxCtorTag;
 }
 pub inline fn lean_ctor_num_objs(o: LeanObj) c_uint {
     @setEvalBranchQuota(10000000);
     std.debug.assert(lean_is_ctor(o));
-    return @as(c_uint, lean_ptr_other(o));
+    return lean_ptr_other(o);
 }
 pub inline fn lean_ctor_obj_cptr(o: LeanObj) [*]LeanObj {
     @setEvalBranchQuota(10000000);
@@ -1051,8 +1051,8 @@ pub inline fn lean_set_st_header(o: LeanObj, tag: c_uint, other: c_uint) void {
     @setEvalBranchQuota(10000000);
     const obj = lean_heap_obj(o);
     obj.m_rc = 1;
-    obj.m_tag = @as(u8, @intCast(tag));
-    obj.m_other = @as(u8, @intCast(other));
+    obj.m_tag = @intCast(tag);
+    obj.m_other = @intCast(other);
     obj.m_cs_sz = 0;
 }
 pub inline fn lean_usize_mul_checked(a: usize, b: usize) usize {
@@ -1094,7 +1094,7 @@ pub inline fn lean_alloc_array(size: usize, capacity: usize) LeanObj {
     @setEvalBranchQuota(10000000);
     const total = lean_usize_add_checked(@sizeOf(lean_object) + 2 * @sizeOf(usize), lean_usize_mul_checked(@sizeOf(usize), capacity));
     const o = lean_alloc_object(total);
-    lean_set_st_header(o, @as(c_uint, 246), @as(c_uint, 0));
+    lean_set_st_header(o, 246, 0);
     const fields = lean_array_fields(o);
     fields[0] = size;
     fields[1] = capacity;
@@ -1121,9 +1121,9 @@ pub inline fn lean_inc_ref_n(o: LeanObj, n: usize) void {
     if (lean_is_scalar(o) != 0) return;
     const obj = lean_heap_obj(o);
     if (lean_is_st(o)) {
-        obj.m_rc += @as(i32, @intCast(n));
+        obj.m_rc += @intCast(n);
     } else if (obj.m_rc != 0) {
-        _ = @atomicRmw(i32, lean_get_rc_mt_addr(o), .Sub, @as(i32, @intCast(n)), .monotonic);
+        _ = @atomicRmw(i32, lean_get_rc_mt_addr(o), .Sub, @intCast(n), .monotonic);
     }
 }
 pub inline fn lean_box(n: usize) LeanObj {
@@ -1133,47 +1133,47 @@ pub inline fn lean_box(n: usize) LeanObj {
 }
 pub inline fn lean_unsigned_to_nat(n: c_uint) LeanObj {
     @setEvalBranchQuota(10000000);
-    return lean_usize_to_nat(@as(usize, n));
+    return lean_usize_to_nat(n);
 }
 pub inline fn lean_unbox_uint32(o: LeanObj) u32 {
     @setEvalBranchQuota(10000000);
     if (@sizeOf(usize) == 4) {
-        return lean_ctor_get_uint32(o, @as(c_uint, 0));
+        return lean_ctor_get_uint32(o, 0);
     } else {
-        return @as(u32, @intCast(lean_unbox(o)));
+        return @intCast(lean_unbox(o));
     }
 }
 pub inline fn lean_io_result_mk_ok(a: LeanObj) LeanObj {
     @setEvalBranchQuota(10000000);
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 1), @as(usize, 0));
-    lean_ctor_set(r, @as(c_uint, 0), a);
+    const r = lean_alloc_ctor(0, 1, 0);
+    lean_ctor_set(r, 0, a);
     return r;
 }
 pub inline fn lean_io_mk_world() LeanObj {
     @setEvalBranchQuota(10000000);
-    return lean_box(@as(usize, 0));
+    return lean_box(0);
 }
 pub inline fn lean_obj_tag(o: LeanObj) c_uint {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(o) != 0) {
-        return @as(c_uint, @intCast(lean_unbox(o)));
+        return @intCast(lean_unbox(o));
     } else {
-        return @as(c_uint, lean_ptr_tag(o));
+        return lean_ptr_tag(o);
     }
 }
 pub inline fn lean_ctor_get(o: LeanObj, i: c_uint) LeanObj {
     @setEvalBranchQuota(10000000);
     std.debug.assert(i < lean_ctor_num_objs(o));
-    return lean_ctor_obj_cptr(o)[@as(usize, i)];
+    return lean_ctor_obj_cptr(o)[i];
 }
 pub inline fn lean_ctor_set_tag(o: LeanObj, new_tag: u8) void {
     @setEvalBranchQuota(10000000);
-    std.debug.assert(@as(c_uint, new_tag) <= LeanMaxCtorTag);
+    std.debug.assert(new_tag <= LeanMaxCtorTag);
     lean_heap_obj(o).m_tag = new_tag;
 }
 pub inline fn lean_inc_ref(o: LeanObj) void {
     @setEvalBranchQuota(10000000);
-    lean_inc_ref_n(o, @as(usize, 1));
+    lean_inc_ref_n(o, 1);
 }
 pub inline fn lean_dec_ref(o: LeanObj) void {
     @setEvalBranchQuota(10000000);
@@ -1196,7 +1196,7 @@ pub inline fn lean_dec(o: LeanObj) void {
 pub inline fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: usize) LeanObj {
     @setEvalBranchQuota(10000000);
     std.debug.assert(tag <= LeanMaxCtorTag and num_objs < LeanMaxCtorFields and scalar_sz < LeanMaxCtorScalarsSize);
-    const total = lean_usize_add_checked(lean_usize_add_checked(@sizeOf(lean_object), lean_usize_mul_checked(@sizeOf(usize), @as(usize, num_objs))), scalar_sz);
+    const total = lean_usize_add_checked(lean_usize_add_checked(@sizeOf(lean_object), lean_usize_mul_checked(@sizeOf(usize), @intCast(num_objs))), scalar_sz);
     const o = lean_alloc_object(total);
     lean_set_st_header(o, tag, num_objs);
     return o;
@@ -1218,7 +1218,7 @@ pub inline fn lean_array_uget_borrowed(a: LeanObj, i: usize) LeanObj {
 pub inline fn lean_mk_empty_array_with_capacity(capacity: LeanObj) LeanObj {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(capacity) == 0) lean_internal_panic_out_of_memory();
-    return lean_alloc_array(@as(usize, 0), lean_unbox(capacity));
+    return lean_alloc_array(0, lean_unbox(capacity));
 }
 pub inline fn lean_nat_dec_le(a1: LeanObj, a2: LeanObj) u8 {
     @setEvalBranchQuota(10000000);
@@ -1230,7 +1230,7 @@ pub inline fn lean_nat_dec_lt(a1: LeanObj, a2: LeanObj) u8 {
 }
 pub inline fn lean_uint32_to_nat(a: u32) LeanObj {
     @setEvalBranchQuota(10000000);
-    return lean_usize_to_nat(@as(usize, a));
+    return lean_usize_to_nat(a);
 }
 pub inline fn lean_uint32_add(a1: u32, a2: u32) u32 {
     @setEvalBranchQuota(10000000);
@@ -1263,7 +1263,7 @@ pub inline fn lean_string_utf8_get_fast(s: LeanObj, i: LeanObj) u32 {
     const str: [*:0]const u8 = @ptrCast(bytes + @sizeOf(lean_object) + 3 * @sizeOf(usize));
     const idx = lean_unbox(i);
     const c = str[idx];
-    if ((c & 0x80) == 0) return @as(u32, c);
+    if ((c & 0x80) == 0) return c;
     return lean_string_utf8_get_fast_cold(str, idx, lean_string_size(s) - 1, c);
 }
 pub inline fn lean_string_utf8_next_fast(s: LeanObj, i: LeanObj) LeanObj {
@@ -1314,29 +1314,29 @@ pub inline fn lean_ctor_payload_base(o: LeanObj) [*]u8 {
 }
 pub inline fn lean_ctor_scalar_base(o: LeanObj) [*]u8 {
     @setEvalBranchQuota(10000000);
-    return lean_ctor_payload_base(o) + @sizeOf(usize) * @as(usize, lean_ctor_num_objs(o));
+    return lean_ctor_payload_base(o) + @sizeOf(usize) * lean_ctor_num_objs(o);
 }
 pub inline fn lean_ctor_set(o: LeanObj, i: c_uint, v: LeanObj) void {
     @setEvalBranchQuota(10000000);
     std.debug.assert(i < lean_ctor_num_objs(o));
-    lean_ctor_obj_cptr(o)[@as(usize, i)] = v;
+    lean_ctor_obj_cptr(o)[i] = v;
 }
 pub inline fn lean_ctor_release(o: LeanObj, i: c_uint) void {
     @setEvalBranchQuota(10000000);
     std.debug.assert(i < lean_ctor_num_objs(o));
     const slots = lean_ctor_obj_cptr(o);
-    lean_dec(slots[@as(usize, i)]);
-    slots[@as(usize, i)] = lean_box(0);
+    lean_dec(slots[i]);
+    slots[i] = lean_box(0);
 }
 pub inline fn lean_ctor_get_usize(o: LeanObj, i: c_uint) usize {
     @setEvalBranchQuota(10000000);
     const base = lean_ctor_payload_base(o);
-    return @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * @as(usize, i)))).*;
+    return @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * i))).*;
 }
 pub inline fn lean_ctor_set_usize(o: LeanObj, i: c_uint, v: usize) void {
     @setEvalBranchQuota(10000000);
     const base = lean_ctor_payload_base(o);
-    @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * @as(usize, i)))).* = v;
+    @as(*usize, @ptrCast(@alignCast(base + @sizeOf(usize) * i))).* = v;
 }
 pub inline fn lean_ctor_get_uint8(o: LeanObj, offset: c_uint) u8 {
     @setEvalBranchQuota(10000000);
@@ -1405,7 +1405,7 @@ pub inline fn lean_closure_obj_cptr(o: LeanObj) [*]LeanObj {
 }
 pub inline fn lean_closure_set(o: LeanObj, i: c_uint, v: LeanObj) void {
     @setEvalBranchQuota(10000000);
-    lean_closure_obj_cptr(o)[@as(usize, i)] = v;
+    lean_closure_obj_cptr(o)[i] = v;
 }
 pub inline fn lean_dec_ref_n(o: LeanObj, n: usize) void {
     @setEvalBranchQuota(10000000);
@@ -1429,12 +1429,12 @@ pub inline fn lean_is_exclusive(o: LeanObj) bool {
 pub inline fn lean_alloc_closure(fun: *const anyopaque, arity: c_uint, num_fixed: c_uint) LeanObj {
     @setEvalBranchQuota(10000000);
     std.debug.assert(arity > 0 and num_fixed < arity);
-    const total = lean_usize_add_checked(@sizeOf(lean_closure_object), lean_usize_mul_checked(@sizeOf(*anyopaque), @as(usize, num_fixed)));
+    const total = lean_usize_add_checked(@sizeOf(lean_closure_object), lean_usize_mul_checked(@sizeOf(*anyopaque), @intCast(num_fixed)));
     const o: *lean_closure_object = @ptrCast(@alignCast(lean_alloc_object(total)));
-    lean_set_st_header(@ptrCast(o), @as(c_uint, 245), @as(c_uint, 0));
+    lean_set_st_header(@ptrCast(o), 245, 0);
     o.m_fun = @constCast(fun);
-    o.m_arity = @as(u16, @intCast(arity));
-    o.m_num_fixed = @as(u16, @intCast(num_fixed));
+    o.m_arity = @intCast(arity);
+    o.m_num_fixed = @intCast(num_fixed);
     return @ptrCast(o);
 }
 pub inline fn lean_array_get_borrowed(def_val: LeanObj, a: LeanObj, i: LeanObj) LeanObj {
@@ -1452,9 +1452,8 @@ pub inline fn lean_dec_ref_known(o: LeanObj, objs: c_uint) void {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(o) != 0) return;
     if (lean_is_exclusive(o)) {
-        var i: c_uint = 0;
-        while (i < objs) : (i += 1) {
-            lean_dec(lean_ctor_get(o, i));
+        for (0..objs) |i| {
+            lean_dec(lean_ctor_get(o, @intCast(i)));
         }
         lean_free_object(o);
     } else {
@@ -1468,19 +1467,19 @@ pub inline fn lean_del_object(o: LeanObj) void {
 pub inline fn lean_box_uint32(value: u32) LeanObj {
     @setEvalBranchQuota(10000000);
     if (value <= LeanMaxSmallNat) {
-        return lean_box(@as(usize, value));
+        return lean_box(value);
     }
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @as(usize, 4));
-    lean_ctor_set_uint32(r, @as(c_uint, 0), value);
+    const r = lean_alloc_ctor(0, 0, 4);
+    lean_ctor_set_uint32(r, 0, value);
     return r;
 }
 pub inline fn lean_box_uint64(value: u64) LeanObj {
     @setEvalBranchQuota(10000000);
     if (value <= LeanMaxSmallNat) {
-        return lean_box(@as(usize, @intCast(value)));
+        return lean_box(@intCast(value));
     }
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @as(usize, 8));
-    lean_ctor_set_uint64(r, @as(c_uint, 0), value);
+    const r = lean_alloc_ctor(0, 0, 8);
+    lean_ctor_set_uint64(r, 0, value);
     return r;
 }
 pub inline fn lean_box_usize(value: usize) LeanObj {
@@ -1488,20 +1487,20 @@ pub inline fn lean_box_usize(value: usize) LeanObj {
     if (value <= LeanMaxSmallNat) {
         return lean_box(value);
     }
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @sizeOf(usize));
-    lean_ctor_set_usize(r, @as(c_uint, 0), value);
+    const r = lean_alloc_ctor(0, 0, @sizeOf(usize));
+    lean_ctor_set_usize(r, 0, value);
     return r;
 }
 pub inline fn lean_box_float(value: f64) LeanObj {
     @setEvalBranchQuota(10000000);
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @as(usize, 8));
-    lean_ctor_set_float(r, @as(c_uint, 0), value);
+    const r = lean_alloc_ctor(0, 0, 8);
+    lean_ctor_set_float(r, 0, value);
     return r;
 }
 pub inline fn lean_box_float32(value: f32) LeanObj {
     @setEvalBranchQuota(10000000);
-    const r = lean_alloc_ctor(@as(c_uint, 0), @as(c_uint, 0), @as(usize, 4));
-    lean_ctor_set_float32(r, @as(c_uint, 0), value);
+    const r = lean_alloc_ctor(0, 0, 4);
+    lean_ctor_set_float32(r, 0, value);
     return r;
 }
 pub inline fn lean_unbox_usize(o: LeanObj) usize {
@@ -1509,22 +1508,22 @@ pub inline fn lean_unbox_usize(o: LeanObj) usize {
     if (lean_is_scalar(o) != 0) {
         return lean_unbox(o);
     }
-    return lean_ctor_get_usize(o, @as(c_uint, 0));
+    return lean_ctor_get_usize(o, 0);
 }
 pub inline fn lean_unbox_uint64(o: LeanObj) u64 {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(o) != 0) {
-        return @as(u64, @intCast(lean_unbox(o)));
+        return @intCast(lean_unbox(o));
     }
-    return lean_ctor_get_uint64(o, @as(c_uint, 0));
+    return lean_ctor_get_uint64(o, 0);
 }
 pub inline fn lean_unbox_float(o: LeanObj) f64 {
     @setEvalBranchQuota(10000000);
-    return lean_ctor_get_float(o, @as(c_uint, 0));
+    return lean_ctor_get_float(o, 0);
 }
 pub inline fn lean_unbox_float32(o: LeanObj) f32 {
     @setEvalBranchQuota(10000000);
-    return lean_ctor_get_float32(o, @as(c_uint, 0));
+    return lean_ctor_get_float32(o, 0);
 }
 pub inline fn lean_byte_array_size(a: LeanObj) LeanObj {
     @setEvalBranchQuota(10000000);
@@ -1553,7 +1552,7 @@ pub inline fn lean_uint8_dec_eq(a1: u8, a2: u8) u8 {
 }
 pub inline fn lean_uint8_to_uint32(a: u8) u32 {
     @setEvalBranchQuota(10000000);
-    return @as(u32, a);
+    return a;
 }
 pub inline fn lean_uint32_dec_eq(a1: u32, a2: u32) u8 {
     @setEvalBranchQuota(10000000);
@@ -1593,7 +1592,7 @@ pub extern fn lean_uint64_of_big_nat(a: LeanObj) callconv(.c) u64;
 pub inline fn lean_uint64_to_nat(n: u64) LeanObj {
     @setEvalBranchQuota(10000000);
     if (n <= LeanMaxSmallNat) {
-        return lean_box(@as(usize, @intCast(n)));
+        return lean_box(@intCast(n));
     } else {
         return lean_big_uint64_to_nat(n);
     }
@@ -1601,7 +1600,7 @@ pub inline fn lean_uint64_to_nat(n: u64) LeanObj {
 pub inline fn lean_nat_succ(a: LeanObj) LeanObj {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(a) != 0) {
-        return lean_usize_to_nat(lean_unbox(a) +% @as(usize, 1));
+        return lean_usize_to_nat(lean_unbox(a) +% 1);
     } else {
         return lean_nat_big_succ(a);
     }
@@ -1620,7 +1619,7 @@ pub inline fn lean_nat_sub(a1: LeanObj, a2: LeanObj) LeanObj {
         const n1 = lean_unbox(a1);
         const n2 = lean_unbox(a2);
         if (n1 < n2) {
-            return lean_box(@as(usize, 0));
+            return lean_box(0);
         } else {
             return lean_box(n1 - n2);
         }
@@ -1652,7 +1651,7 @@ pub inline fn lean_nat_div(a1: LeanObj, a2: LeanObj) LeanObj {
         const n1 = lean_unbox(a1);
         const n2 = lean_unbox(a2);
         if (n2 == 0) {
-            return lean_box(@as(usize, 0));
+            return lean_box(0);
         } else {
             return lean_box(n1 / n2);
         }
@@ -1689,7 +1688,7 @@ pub inline fn lean_nat_dec_eq(a1: LeanObj, a2: LeanObj) u8 {
 pub inline fn lean_uint32_of_nat(a: LeanObj) u32 {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(a) != 0) {
-        return @as(u32, @intCast(lean_unbox(a)));
+        return @intCast(lean_unbox(a));
     } else {
         return lean_uint32_of_big_nat(a);
     }
@@ -1697,7 +1696,7 @@ pub inline fn lean_uint32_of_nat(a: LeanObj) u32 {
 pub inline fn lean_uint64_of_nat(a: LeanObj) u64 {
     @setEvalBranchQuota(10000000);
     if (lean_is_scalar(a) != 0) {
-        return @as(u64, @intCast(lean_unbox(a)));
+        return @intCast(lean_unbox(a));
     } else {
         return lean_uint64_of_big_nat(a);
     }

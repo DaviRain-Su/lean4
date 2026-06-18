@@ -411,10 +411,10 @@ def isGlobalVarSignature (env : Environment) (sig : Signature .impure) : Bool :=
   name.mangle (pre := "tail_v_")
 
 @[inline] def usizeLit (n : Nat) : String :=
-  s!"@as(usize, {n})"
+  s!"{n}"
 
 @[inline] def cUIntLit (n : Nat) : String :=
-  s!"@as(c_uint, {n})"
+  s!"{n}"
 
 public def renderDecRefKnownLines (target : String) (n objs : Nat) : List String :=
   if n == 1 then
@@ -451,9 +451,9 @@ def ctorScalarSizeExpressionZig (usize : Nat) (ssize : Nat) : String :=
   if usize == 0 then
     usizeLit ssize
   else if ssize == 0 then
-    s!"@as(usize, @sizeOf(usize) * {usize})"
+    s!"@sizeOf(usize) * {usize}"
   else
-    s!"@as(usize, @sizeOf(usize) * {usize} + {ssize})"
+    s!"@sizeOf(usize) * {usize} + {ssize}"
 
 def offsetExpressionZig (i : Nat) (offset : Nat) : String :=
   if i > 0 then
