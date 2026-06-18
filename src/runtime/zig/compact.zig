@@ -51,9 +51,13 @@ pub fn ptrOther(o: *anyopaque) u8 {
 
 pub fn setNonHeapHeader(o: *anyopaque, sz: usize, tag: u8, other: u8) void {
     const h: *align(1) lean.lean_object = @ptrCast(o);
+    const cs_sz: u16 = switch (tag) {
+        lean.LeanArray, lean.LeanStructArray, lean.LeanScalarArray, lean.LeanString => 1,
+        else => @intCast(sz),
+    };
     h.* = .{
-        .m_rc = 1,
-        .m_cs_sz = @intCast(sz),
+        .m_rc = 0,
+        .m_cs_sz = cs_sz,
         .m_other = other,
         .m_tag = tag,
     };
@@ -139,6 +143,7 @@ pub const Compactor = struct {
         const dst = self.allocBytes(sz);
         const src = @as([*]const u8, @ptrCast(o));
         @memcpy(dst[0..sz], src[0..sz]);
+        setNonHeapHeader(@ptrCast(dst), sz, ptrTag(o), ptrOther(o));
         return dst;
     }
 
@@ -493,12 +498,17 @@ test "compact round-trip simple constructor with string" {
 
     try testing.expectEqual(@as(u8, 0), ptrTag(root));
     try testing.expectEqual(@as(u8, 1), ptrOther(root));
+    const root_header: *lean.lean_object = @ptrCast(@alignCast(root));
+    try testing.expectEqual(@as(i32, 0), root_header.m_rc);
     const root_obj: *lean.lean_ctor_object = @ptrCast(@alignCast(root));
     const root_slots: [*]Obj = @ptrCast(@alignCast(&root_obj.m_objs));
     const str = root_slots[0];
     try testing.expect(str != null);
     try testing.expect(!object.lean_is_scalar(str));
     try testing.expectEqual(lean.LeanString, ptrTag(str.?));
+    const str_header: *lean.lean_object = @ptrCast(@alignCast(str.?));
+    try testing.expectEqual(@as(i32, 0), str_header.m_rc);
+    try testing.expectEqual(@as(u16, 1), str_header.m_cs_sz);
     const str_obj: *lean.lean_string_object = @ptrCast(@alignCast(str.?));
     const len = str_obj.m_size - 1;
     const bytes = @as([*]const u8, @ptrCast(&str_obj.m_data))[0..len];
@@ -547,6 +557,8 @@ test "compact round-trip closure with fixed argument when allowed" {
     const roundtrip_slots: [*]Obj = @ptrCast(@alignCast(&roundtrip.m_objs));
 
     try testing.expectEqual(lean.LeanClosure, ptrTag(root));
+    const root_header: *lean.lean_object = @ptrCast(@alignCast(root));
+    try testing.expectEqual(@as(i32, 0), root_header.m_rc);
     try testing.expectEqual(@as(u16, 2), roundtrip.m_arity);
     try testing.expectEqual(@as(u16, 1), roundtrip.m_num_fixed);
     try testing.expectEqual(closure.m_fun, roundtrip.m_fun);
