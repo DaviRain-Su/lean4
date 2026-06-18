@@ -9,6 +9,7 @@ pub const compact = @import("compact.zig");
 pub const compact_api = @import("compact_api.zig");
 pub const ctor = @import("ctor.zig");
 pub const compat = @import("compat.zig");
+pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
@@ -59,6 +60,7 @@ comptime {
     _ = compact_api;
     _ = ctor;
     _ = compat.force_link;
+    _ = debug;
     _ = dbg;
     _ = stack_overflow;
     _ = float;

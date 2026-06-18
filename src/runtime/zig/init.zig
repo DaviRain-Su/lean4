@@ -99,14 +99,6 @@ pub fn finalizeThreadSubsystems() void {
     thread.finalizeThreadSubsystems();
 }
 
-export fn lean_notify_assert(file_name: [*c]const u8, line: c_int, condition: [*c]const u8) callconv(.c) void {
-    std.debug.print(
-        "LEAN ASSERTION VIOLATION\nFile: {s}\nLine: {}\nCondition: {s}\n",
-        .{ file_name, line, condition },
-    );
-    std.process.abort();
-}
-
 fn panicTaskManagerAlreadyInitialized() noreturn {
     io_min.lean_panic(
         "lean task manager already initialized; call lean_finalize_task_manager() before re-initializing",
