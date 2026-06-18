@@ -28,6 +28,7 @@ pub const mpz_object = @import("mpz_object.zig");
 pub const object = @import("object.zig");
 pub const once = @import("once.zig");
 pub const rc = @import("rc.zig");
+pub const sharecommon = @import("sharecommon.zig");
 pub const st_ref = @import("st_ref.zig");
 pub const string = @import("string.zig");
 pub const sync = @import("sync.zig");
@@ -70,6 +71,7 @@ comptime {
     _ = object;
     _ = once;
     _ = rc;
+    _ = sharecommon;
     _ = st_ref;
     _ = string;
     _ = sync;
