@@ -3,8 +3,8 @@
 
 //! Zig port of the C++ `compact` subsystem.
 //!
-//! First pass: v2 format, no closures, no mmap, no structural hash-consing,
-//! identity-based sharing map only. Correct but larger files than C++.
+//! First pass: v2 format, no mmap, no structural hash-consing, identity-based
+//! sharing map only. Closure function relocation metadata is not emitted yet.
 
 const std = @import("std");
 const testing = std.testing;
@@ -274,12 +274,19 @@ pub const Compactor = struct {
     }
 
     fn insertClosure(self: *Compactor, o: *anyopaque) usize {
-        _ = o;
-        if (self.allow_closures) {
-            @panic("closures not yet supported in Zig compact port");
-        } else {
+        if (!self.allow_closures) {
             @panic("closure in compacted region");
         }
+        const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
+        const sz = object.lean_object_data_byte_size(o);
+        const dst = self.copyObject(o, sz);
+        const new_closure: *lean.lean_closure_object = @ptrCast(@alignCast(dst));
+        const slots: [*]Obj = @ptrCast(@alignCast(&closure.m_objs));
+        const new_slots: [*]Obj = @ptrCast(@alignCast(&new_closure.m_objs));
+        for (0..closure.m_num_fixed) |i| {
+            new_slots[i] = @ptrFromInt(self.compact(slots[i]));
+        }
+        return self.toOffset(dst);
     }
 };
 
@@ -395,9 +402,12 @@ pub const Reader = struct {
     }
 
     fn fixClosure(self: *Reader, o: *anyopaque) void {
-        _ = self;
-        _ = o;
-        @panic("closure in compacted region");
+        const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
+        const slots: [*]Obj = @ptrCast(@alignCast(&closure.m_objs));
+        for (0..closure.m_num_fixed) |i| {
+            slots[i] = self.fixObjectPtr(slots[i]);
+        }
+        self.move(object.lean_object_data_byte_size(o));
     }
 
     fn fixExternal(self: *Reader, o: *anyopaque) void {
@@ -514,4 +524,39 @@ test "compact round-trip scalar root" {
 
     try testing.expect(object.lean_is_scalar(root));
     try testing.expectEqual(@as(usize, 37), object.lean_unbox(root));
+}
+
+fn compactClosureTestFn(_: Obj) callconv(.c) Obj {
+    return object.lean_box(0);
+}
+
+fn testStringBytes(o: *anyopaque) []const u8 {
+    const str_obj: *lean.lean_string_object = @ptrCast(@alignCast(o));
+    const len = str_obj.m_size - 1;
+    return @as([*]const u8, @ptrCast(&str_obj.m_data))[0..len];
+}
+
+test "compact round-trip closure with fixed argument when allowed" {
+    const captured = string.lean_mk_string(@ptrCast(@alignCast("captured")));
+    const closure_obj = alloc.lean_alloc_closure(@ptrCast(@constCast(&compactClosureTestFn)), 2, 1);
+    defer rc.lean_dec(closure_obj);
+    const closure: *lean.lean_closure_object = @ptrCast(@alignCast(closure_obj));
+    const slots: [*]Obj = @ptrCast(@alignCast(&closure.m_objs));
+    slots[0] = captured;
+
+    const base_addr: usize = 0x10000000;
+    var comp = Compactor.init(base_addr, &.{}, true);
+    defer comp.deinit();
+    _ = comp.compactRoot(closure_obj);
+
+    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{});
+    const root = reader.read() orelse return error.ReadFailed;
+    const roundtrip: *lean.lean_closure_object = @ptrCast(@alignCast(root));
+    const roundtrip_slots: [*]Obj = @ptrCast(@alignCast(&roundtrip.m_objs));
+
+    try testing.expectEqual(lean.LeanClosure, ptrTag(root));
+    try testing.expectEqual(@as(u16, 2), roundtrip.m_arity);
+    try testing.expectEqual(@as(u16, 1), roundtrip.m_num_fixed);
+    try testing.expectEqual(closure.m_fun, roundtrip.m_fun);
+    try testing.expectEqualStrings("captured", testStringBytes(roundtrip_slots[0].?));
 }
