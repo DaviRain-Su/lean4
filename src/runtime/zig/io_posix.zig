@@ -434,15 +434,10 @@ pub export fn lean_io_timeit(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *
 }
 
 pub export fn lean_io_allocprof(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *anyopaque {
-    const before_alloc = runtime_alloc.testAllocCount();
-    const before_free = runtime_alloc.testFreeCount();
     const res = lean_apply_1(fn_obj, object.lean_box(0).?) orelse @panic("lean_io_allocprof: apply failed");
-    const after_alloc = runtime_alloc.testAllocCount();
-    const after_free = runtime_alloc.testFreeCount();
-    var buf: [256]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "{s} alloc={d} free={d}", .{ stringBytes(msg), after_alloc - before_alloc, after_free - before_free }) catch "allocprof";
-    _ = c.write(2, line.ptr, line.len);
-    _ = c.write(2, "\n".ptr, 1);
+    _ = writeAllRetry(2, stringBytes(msg));
+    _ = writeAllRetry(2, "\n");
+    _ = writeAllRetry(2, "Allocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`\n");
     return res;
 }
 
