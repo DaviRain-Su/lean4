@@ -57,21 +57,12 @@ endif()
 add_library(leanrt_initial-exec STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt_initial-exec PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-# When LEAN_ZIG_RT_CUTOVER is ON, weaken `lean_*` C-linkage symbols in the C++
-# runtime archive so the Zig runtime's strong definitions override them at link
-# time.  Only `lean_*` symbols are weakened; C++ internal symbols stay strong.
-# This is separate from LEAN_ZIG_RUNTIME because the cutover also requires the
-# Zig archive to be linked into leanshared (currently disabled due to allocator
-# incompatibility between Zig internal allocation and mimalloc).
+# Phase 2 cutover strategy: instead of weakening C++ symbols (which caused
+# 414 behavioral mismatches), we keep C++ strong and weaken only Zig symbols
+# that duplicate C++ definitions.  Zig-only symbols stay strong and fill gaps.
+# The weakening happens in src/runtime/zig/CMakeLists.txt after the Zig
+# helperless archive is built, using weaken_zig_symbols.py.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
-if(LEAN_ZIG_RT_CUTOVER)
-  add_custom_command(
-    TARGET leanrt_initial-exec POST_BUILD
-    COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
-      $<TARGET_FILE:leanrt_initial-exec>
-    COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
-  )
-endif()
 
 # The above library, like all other C++ code, is built using `-ftls-model=initial-exec`, which is necessary for linking it into `leanshared`,
 # but introduces a measurable overhead while accessing the thread-local variable `g_heap` when allocating and deallocating. Therefore we compile
@@ -80,14 +71,6 @@ add_library(leanrt STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
 if(NOT MSVC)
   target_compile_options(leanrt PRIVATE -ftls-model=local-exec)
-endif()
-if(LEAN_ZIG_RT_CUTOVER)
-  add_custom_command(
-    TARGET leanrt POST_BUILD
-    COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
-      $<TARGET_FILE:leanrt>
-    COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
-  )
 endif()
 # We do not export Lean symbols when statically linking on Windows.
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")

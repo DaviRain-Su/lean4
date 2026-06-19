@@ -92,10 +92,32 @@ if(ZIG)
     COMMENT "Building Lean Zig runtime library (helperless)"
     VERBATIM
   )
-  add_custom_target(
-    leanrt_zig_helperless
-    DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
-  )
+  # Phase 2 cutover: weaken Zig symbols that also exist in C++ runtime.
+  # C++ definitions stay strong; Zig-only symbols stay strong to fill gaps.
+  if(LEAN_ZIG_RT_CUTOVER)
+    add_custom_command(
+      OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
+      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_zig_symbols.py
+        "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+        "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
+        "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
+      COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
+      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" leanrt_initial-exec leancpp leancpp_1
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      COMMENT "Weakening Zig lean_* symbols that duplicate C++ definitions"
+      VERBATIM
+    )
+    add_custom_target(
+      leanrt_zig_helperless
+      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
+    )
+  else()
+    add_custom_target(
+      leanrt_zig_helperless
+      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    )
+  endif()
 
   if(LEAN_ZIG_RUNTIME)
     set(LEAN_ZIG_RUNTIME_TEST_ARGS

@@ -113,14 +113,12 @@ option(USE_MIMALLOC "use mimalloc" ON)
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
 # The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
-# When LEAN_ZIG_RT_CUTOVER is also ON, the Zig helperless archive is linked into
-# leanshared alongside the C++ runtime (with C++ lean_* symbols weakened), so the
-# Zig runtime's definitions take precedence at link time.
+# Phase 2 cutover: when LEAN_ZIG_RT_CUTOVER is also ON, the Zig helperless archive
+# is linked into leanshared alongside the C++ runtime.  C++ symbols stay strong;
+# Zig symbols that duplicate C++ are weakened (via weaken_zig_symbols.py) so only
+# Zig-only symbols fill gaps in the C++ runtime.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
 if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
-  # Link both the Zig helperless archive and the C++ initial-exec archive.
-  # The C++ archive has its lean_* symbols weakened (via weaken_lean_symbols.py)
-  # so the Zig runtime's strong definitions override them.
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
@@ -827,20 +825,6 @@ else()
   )
   add_library(leancpp STATIC ${LEAN_OBJS} $<TARGET_OBJECTS:initialize>)
   set_target_properties(leancpp PROPERTIES OUTPUT_NAME leancpp)
-  if(LEAN_ZIG_RT_CUTOVER)
-    add_custom_command(
-      TARGET leancpp_1 POST_BUILD
-      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
-        $<TARGET_FILE:leancpp_1>
-      COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
-    )
-    add_custom_command(
-      TARGET leancpp POST_BUILD
-      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
-        $<TARGET_FILE:leancpp>
-      COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
-    )
-  endif()
 endif()
 
 if(STAGE GREATER 0 AND CADICAL AND INSTALL_CADICAL)
