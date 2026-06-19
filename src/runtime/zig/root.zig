@@ -19,6 +19,7 @@ pub const elab_environment = @import("elab_environment.zig");
 pub const expr_lt = @import("expr_lt.zig");
 pub const expr_accessors = @import("expr_accessors.zig");
 pub const inline_exports = @import("inline_exports.zig");
+pub const ir_interpreter = @import("ir_interpreter.zig");
 pub const dynlib = @import("dynlib.zig");
 pub const dynlib_lib = @import("dynlib_lib.zig");
 pub const init_attribute = @import("init_attribute.zig");
@@ -105,6 +106,7 @@ comptime {
         _ = elab_environment.force_link;
         _ = instantiate_mvars.force_link;
         _ = instantiate_expr_mvars.force_link;
+        _ = ir_interpreter.force_link;
     }
     _ = list;
     _ = memory;

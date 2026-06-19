@@ -241,7 +241,7 @@ export fn lean_apply_16(f: *anyopaque, a1: *anyopaque, a2: *anyopaque, a3: *anyo
     return applySlice(f, args[0..]);
 }
 
-export fn lean_apply_n(f: *anyopaque, n: c_uint, args: [*]Obj) callconv(.c) Obj {
+pub export fn lean_apply_n(f: *anyopaque, n: c_uint, args: [*]Obj) callconv(.c) Obj {
     return switch (n) {
         0 => @panic("lean_apply_n requires at least one argument"),
         1 => lean_apply_1(f, args[0].?),
