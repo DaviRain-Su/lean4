@@ -8,13 +8,14 @@ if [[ "$LEAN_BIN" != /* ]]; then
 fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$ROOT/build/release/stage1}"
-OUT_DIR="${LEAN_ZIG_OUT_DIR:-$BUILD_DIR/tests/emitzig}"
+OUT_DIR_BASE="${LEAN_ZIG_OUT_DIR:-$BUILD_DIR/tests/emitzig}"
 TEST="$1"
 TEST="$(cd "$(dirname "$TEST")" && pwd)/$(basename "$TEST")"
 TEST_DIR="$(dirname "$TEST")"
 BASENAME="$(basename "$TEST" .lean)"
-mkdir -p "$OUT_DIR"
+OUT_DIR="$OUT_DIR_BASE/$BASENAME"
 OUT="$OUT_DIR/$BASENAME.zig"
+mkdir -p "$OUT_DIR" 2>/dev/null || { [[ -d "$OUT_DIR" ]] || { echo "failed to create output directory: $OUT_DIR"; exit 1; }; }
 # Emit Zig code for the module.
 "$LEAN_BIN" -Dbackward.do.legacy=false "$TEST" -z "$OUT"
 
@@ -62,6 +63,9 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
       if [[ -n "${LEAN_ZIG_STDLIB_JOBS:-}" ]]; then
         STDLIB_ARGS+=(--jobs "$LEAN_ZIG_STDLIB_JOBS")
       fi
+      if [[ "${LEAN_ZIG_STDLIB_ARCHIVE:-0}" == "1" ]]; then
+        STDLIB_ARGS+=(--archive-stdlib)
+      fi
       if [[ ${#STDLIB_ARGS[@]} -gt 0 ]]; then
         BUILD_DIR="$BUILD_DIR" "$ROOT/tools/zigc-stdlib" "$TEST" "$EXE" --lean "$LEAN_BIN" --build-dir "$BUILD_DIR" "${STDLIB_ARGS[@]}"
       else
@@ -80,6 +84,10 @@ if [[ "${LEAN_ZIG_EXE:-0}" == "1" ]] && command -v zig &>/dev/null; then
     else
       "$EXE"
     fi
+    # Executables are large (~hundreds of MB) because they statically link the
+    # stdlib + Zig runtime. Remove them after a successful run to keep the
+    # parallel test suite from exhausting disk space.
+    rm -f "$EXE"
   fi
 fi
 

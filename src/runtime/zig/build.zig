@@ -39,7 +39,6 @@ pub fn build(b: *std.Build) void {
         "../uv/tcp.cpp",
         "../uv/timer.cpp",
         "../uv/udp.cpp",
-        "uv_compat.cpp",
         "uv_init.cpp",
         "uv_loop_thread.cpp",
         "uv_promise_bridge.cpp",
@@ -57,21 +56,22 @@ pub fn build(b: *std.Build) void {
         .flags = uv_cpp_flags,
     });
 
-    // Weak exports that let C++ code call lean_mk_io_error_* while the real
-    // implementations live in the Zig runtime (io_error.zig).
-    const uv_c_sources = &.{
-        "io_error_weak_exports.c",
-    };
-    const uv_c_flags = &.{
-        "-std=c11",
-        "-O2",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-    };
-    root_mod.addCSourceFiles(.{
-        .files = uv_c_sources,
-        .flags = uv_c_flags,
-    });
+    // Weak C wrappers that bridge runtime C++ callers (uv_compat.cpp, dns.cpp)
+    // to the Zig io_error implementations. Only emit them when helper symbols
+    // are exported; in the helperless build (used for stdlib linking) the Lean
+    // stdlib's own @[export] definitions are the sole providers, so omitting
+    // these avoids duplicate-symbol collisions at link time.
+    if (export_lean_helpers) {
+        root_mod.addCSourceFiles(.{
+            .files = &.{"io_error_weak_exports.c"},
+            .flags = &.{
+                "-std=c11",
+                "-O2",
+                b.fmt("-I{s}", .{lean_include_dir}),
+                "-I../..",
+            },
+        });
+    }
 
     root_mod.linkSystemLibrary("uv", .{});
 

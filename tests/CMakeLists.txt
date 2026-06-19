@@ -429,7 +429,7 @@ if(LEAN_ZIG_RUNTIME)
         LEAN_ZIG_STDLIB_JOBS=2
         bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
-    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES PROCESSORS 4 TIMEOUT 1200)
+    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES PROCESSORS 6 TIMEOUT 1200)
   endforeach()
   add_test(
     NAME emitzig/zig-symbols

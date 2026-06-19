@@ -228,10 +228,28 @@ def filter_conflicting_objs(
 
 def extract_duplicate_symbol_objs(stderr: str) -> list[str]:
     objs: list[str] = []
+    in_dup_block = False
     for line in stderr.splitlines():
-        m = re.search(r"defined by (/[^\s]+\.o)", line)
+        # Linux lld: ">>> defined at /path/to/foo.o" or ">>> defined by /path/to/foo.o"
+        # The trailing (?:\s|$) skips archive member paths like lib.a(foo.o)
+        # where ')' follows the .o extension.
+        m = re.search(r"defined (?:at|by) (/\S+\.o)(?:\s|$)", line)
         if m and m.group(1) not in objs:
             objs.append(m.group(1))
+            in_dup_block = False
+            continue
+        # Darwin ld: "duplicate symbol '_sym' in:" starts an indented path block.
+        if re.match(r"duplicate symbol .* in:", line):
+            in_dup_block = True
+            continue
+        if in_dup_block:
+            # Only collect plain .o paths; skip archive members like lib.a(foo.o)
+            # since removing the whole archive would drop unrelated symbols.
+            m = re.match(r"^\s+(/\S+\.o)\s*$", line)
+            if m and m.group(1) not in objs:
+                objs.append(m.group(1))
+            elif not line.startswith(" "):
+                in_dup_block = False
     return objs
 
 
@@ -281,7 +299,7 @@ def link(
     include_dir: pathlib.Path,
 ) -> subprocess.CompletedProcess:
     cmd = [
-        str(zig), "build-exe", "-O", "Debug",
+        str(zig), "build-exe", "-O", "Debug", "-fstrip",
     ] + [str(o) for o in objs] + [
         "-I", str(include_dir),
         str(zigrt_lib),
@@ -293,6 +311,100 @@ def link(
         cmd.extend(["-framework", "CoreFoundation"])
     cmd.append(f"-femit-bin={output}")
     return subprocess.run(cmd, capture_output=True, text=True)
+
+def archive_size_limit_bytes() -> int:
+    raw = os.environ.get("LEAN_ZIG_STDLIB_ARCHIVE_LIMIT")
+    if raw is None:
+        return 4 * 1024 * 1024 * 1024
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError("LEAN_ZIG_STDLIB_ARCHIVE_LIMIT must be an integer byte count")
+
+
+def archive_objects(ar_name: pathlib.Path, objs: list[pathlib.Path]) -> pathlib.Path | None:
+    if not objs:
+        return None
+    total_size = sum(obj.stat().st_size for obj in objs)
+    limit = archive_size_limit_bytes()
+    if limit > 0 and total_size > limit:
+        print(
+            f"skipping stdlib archive: object set is {total_size // (1024 * 1024)} MiB "
+            f"(limit {limit // (1024 * 1024)} MiB)",
+            file=sys.stderr,
+        )
+        return None
+    ar = shutil.which("ar")
+    if ar is None:
+        raise FileNotFoundError("ar")
+    tmp = ar_name.with_suffix(f"{ar_name.suffix}.tmp{os.getpid()}")
+    tmp.unlink(missing_ok=True)
+    result = subprocess.run(
+        [ar, "rcs", str(tmp)] + [str(obj) for obj in objs],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        tmp.unlink(missing_ok=True)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+    tmp.replace(ar_name)
+    return ar_name
+
+def archive_cache_key(objs: list[pathlib.Path], cache_dir: pathlib.Path, zigrt_lib: pathlib.Path) -> str:
+    """Hash the obj set + zigrt identity so archive reuse is safe across rebuilds."""
+    h = hashlib.sha256()
+    try:
+        zst = zigrt_lib.stat()
+        h.update(str(zst.st_size).encode())
+        h.update(b"\0")
+        h.update(str(zst.st_mtime_ns).encode())
+    except OSError:
+        h.update(str(zigrt_lib).encode())
+    h.update(b"\0")
+    cache_resolved = cache_dir.resolve()
+    for obj in sorted(objs, key=lambda p: str(p)):
+        try:
+            rel = str(obj.resolve().relative_to(cache_resolved))
+        except ValueError:
+            rel = str(obj.resolve())
+        st = obj.stat()
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(str(st.st_size).encode())
+        h.update(b"\0")
+        h.update(str(st.st_mtime_ns).encode())
+        h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
+def archive_cache_path(cache_dir: pathlib.Path, key: str) -> pathlib.Path:
+    return cache_dir / "archives" / f"stdlib-{key}.a"
+
+
+def build_or_load_archive(
+    objs: list[pathlib.Path],
+    cache_dir: pathlib.Path,
+    work_dir: pathlib.Path,
+    zigrt_lib: pathlib.Path,
+) -> pathlib.Path | None:
+    """Return a stdlib archive for ``objs``, building and caching it on first use."""
+    if not objs:
+        return None
+    key = archive_cache_key(objs, cache_dir, zigrt_lib)
+    cached = archive_cache_path(cache_dir, key)
+    if cached.exists() and cached.stat().st_size > 0:
+        print(f"[cache] stdlib archive ({len(objs)} objs)")
+        return cached
+    tmp_ar = work_dir / "liblean-stdlib-zig.a"
+    built = archive_objects(tmp_ar, objs)
+    if built is None:
+        return None
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(built, cached)
+    return cached
+
 
 def runtime_fingerprint(zig: pathlib.Path, runtime_dir: pathlib.Path) -> dict:
     h = hashlib.sha256()
@@ -449,10 +561,32 @@ def atomic_write_bytes(path: pathlib.Path, content: bytes) -> None:
 
 
 
-def expected_cache_meta(src: pathlib.Path, lean: pathlib.Path) -> dict:
+def zig_file_sha256(zig: pathlib.Path) -> str | None:
+    if not zig.exists():
+        return None
+    h = hashlib.sha256()
+    with zig.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def expected_cache_meta(
+    src: pathlib.Path,
+    lean: pathlib.Path,
+    module: str,
+    cache_dir: pathlib.Path,
+) -> dict:
+    zig = cache_dir / module_to_zig_file(module)
     return {
         "src_mtime": src.stat().st_mtime,
         "lean": lean_fingerprint(lean),
+        # Bind the cached object to the exact emitted Zig it was compiled
+        # from. `src_mtime` + `lean_fingerprint` only catch upstream changes;
+        # without this, a rewritten `.zig` (e.g. EmitZig started exporting
+        # `runtime_initialize_*`) can sit beside a stale `.o` that `cache_valid`
+        # would otherwise reuse, producing undefined init symbols at link time.
+        "zig_sha256": zig_file_sha256(zig),
     }
 
 
@@ -461,10 +595,17 @@ def cache_valid(module: str, src: pathlib.Path, lean: pathlib.Path, cache_dir: p
     obj = cache_dir / f"{module}.o"
     if not zig.exists() or not obj.exists() or obj.stat().st_size == 0:
         return False
+    # The emitted `.zig` must not be newer than the `.o` compiled from it.
+    # A crashed/aborted run can leave a freshly rewritten `.zig` beside a
+    # stale `.o` (e.g. EmitZig started exporting `runtime_initialize_*` but
+    # the old object was never recompiled); the content hash below will not
+    # catch that because the on-disk `.zig` is already the new version.
+    if zig.stat().st_mtime_ns > obj.stat().st_mtime_ns:
+        return False
     meta = load_cache_meta(cache_dir, module)
     if meta is None:
         return False
-    return meta == expected_cache_meta(src, lean)
+    return meta == expected_cache_meta(src, lean, module, cache_dir)
 
 
 def file_stamp(path: pathlib.Path) -> dict:
@@ -621,6 +762,11 @@ def emit_cached_module(
     try:
         emit_zig(lean, src, src_root, tmp_zig)
         if files_equal(tmp_zig, zig_file):
+            # Byte-identical, but the cached `.zig` may have been rewritten
+            # after the `.o` was compiled (e.g. an aborted prior run). Refuse
+            # to reuse the object in that case so the recompile happens.
+            if zig_file.stat().st_mtime_ns > obj_file.stat().st_mtime_ns:
+                return False
             return True
         tmp_zig.replace(zig_file)
         return False
@@ -739,7 +885,7 @@ def build_stdlib_module_under_lock(
     src = module_to_path(module, src_root)
     zig_file = cache_dir / module_to_zig_file(module)
     obj_file = cache_dir / f"{module}.o"
-    meta = expected_cache_meta(src, lean)
+    meta = expected_cache_meta(src, lean, module, cache_dir)
 
     if not force and cache_valid(module, src, lean, cache_dir):
         print(f"[cache] {module}")
@@ -767,7 +913,7 @@ def build_stdlib_module_under_lock(
         obj_file.unlink(missing_ok=True)
         return (module, None, f"compile failed for {module}: {e}")
 
-    save_cache_meta(cache_dir, module, meta)
+    save_cache_meta(cache_dir, module, expected_cache_meta(src, lean, module, cache_dir))
     return (module, obj_file, None)
 
 
@@ -880,6 +1026,11 @@ def main() -> int:
         help="Number of module emit/compile jobs (default: CPU count)",
     )
     parser.add_argument(
+        "--archive-stdlib",
+        action="store_true",
+        help="Link stdlib objects through a temporary archive to reduce link overhead",
+    )
+    parser.add_argument(
         "--allow-stubs",
         action="store_true",
         help="Generate panic stubs for unresolved symbols instead of failing",
@@ -954,13 +1105,17 @@ def main() -> int:
         emit_zig(lean, driver, driver.parent, driver_zig)
         driver_obj = work / f"{driver.stem}.o"
         compile_zig(zig, driver_zig, driver_obj)
-        objs.append(driver_obj)
 
         # Link. By default this is a real parity gate: unresolved symbols are fatal.
         # --allow-stubs preserves the old exploratory behavior for manual debugging.
         stubs_zig = work / "stubs.zig"
         stubs_obj = work / "stubs.o"
-        objs = filter_conflicting_objs(objs, zigrt_lib, work)
+        stdlib_objs = filter_conflicting_objs(objs, zigrt_lib, work)
+        if args.archive_stdlib:
+            stdlib_archive = build_or_load_archive(stdlib_objs, cache_dir, work, zigrt_lib)
+            objs = [driver_obj] + ([stdlib_archive] if stdlib_archive is not None else stdlib_objs)
+        else:
+            objs = stdlib_objs + [driver_obj]
         max_attempts = args.max_stub_iterations if args.allow_stubs else 1
         for iteration in range(max_attempts):
             print(f"linking (attempt {iteration + 1})...")
