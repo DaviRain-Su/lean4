@@ -25,6 +25,7 @@ pub const expr_lt = @import("expr_lt.zig");
 pub const expr_accessors = @import("expr_accessors.zig");
 pub const inline_exports = @import("inline_exports.zig");
 pub const ir_interpreter = @import("ir_interpreter.zig");
+pub const runtime_helpers = @import("runtime_helpers.zig");
 pub const dynlib = @import("dynlib.zig");
 pub const dynlib_lib = @import("dynlib_lib.zig");
 pub const init_attribute = @import("init_attribute.zig");

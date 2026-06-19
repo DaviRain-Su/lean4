@@ -113,19 +113,16 @@ option(USE_MIMALLOC "use mimalloc" ON)
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
 # The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
-if(LEAN_ZIG_RUNTIME)
-  # The Zig runtime is built and tested standalone (via emitzig tests) but NOT yet
-  # linked into leanshared.  The cutover is blocked by allocator incompatibility:
-  # Zig internal functions (e.g. lean_alloc_mpz) use Zig's own allocator while the
-  # C++ kernel/library code expects mimalloc.  Until all Zig internal allocation
-  # goes through the external lean_alloc_object/lean_free_object, linking both
-  # runtimes causes crashes.  The weak-symbol infrastructure (weaken_lean_symbols.py)
-  # and conditional exports (export-allocator-symbols=false, lean_initialize guarded
-  # by export_lean_helpers) are in place for when the allocator is unified.
-  # set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
-  # set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
-  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
-  set(LEAN_ZIG_RT_DEPS)
+# When LEAN_ZIG_RT_CUTOVER is also ON, the Zig helperless archive is linked into
+# leanshared alongside the C++ runtime (with C++ lean_* symbols weakened), so the
+# Zig runtime's definitions take precedence at link time.
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
+if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+  # Link both the Zig helperless archive and the C++ initial-exec archive.
+  # The C++ archive has its lean_* symbols weakened (via weaken_lean_symbols.py)
+  # so the Zig runtime's strong definitions override them.
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS)

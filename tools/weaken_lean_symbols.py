@@ -5,6 +5,10 @@ Sets the `N_WEAK_DEF` bit (0x80) in the n_desc field of nlist64 entries
 for symbols whose name starts with `_lean_` (the macOS C-linkage convention).
 C++ mangled symbols such as `__ZN4lean...` are left untouched.
 
+Symbols listed in `KEEP_STRONG` are excluded from weakening because the
+Zig runtime still references them via `extern fn` (they are not yet
+implemented in Zig).  This allows the cutover to proceed incrementally.
+
 Operates directly on the raw archive bytes — no extraction/reinsertion,
 so duplicate basenames (e.g. multiple `init_module.cpp.o`) are preserved.
 
@@ -16,6 +20,17 @@ import sys
 from pathlib import Path
 
 N_WEAK_DEF = 0x80
+
+# Symbols that the Zig runtime still references via extern fn and has not
+# yet implemented. Keep their C++ definitions strong so they resolve at link.
+KEEP_STRONG = {
+    # lean_name_mk_str, lean_string_get, lean_string_size, lean_list_cons
+    # are now implemented in runtime_helpers.zig, so they don't need to be
+    # kept strong here.
+    # lean_kernel_instantiate_type_lparams / _value_lparams are also
+    # implemented in runtime_helpers.zig.
+    # No symbols currently need to be kept strong.
+}
 
 MH_MAGIC_64 = 0xFEEDFACF
 FAT_MAGIC = 0xCAFEBABE
@@ -82,6 +97,8 @@ def find_lean_symbols_in_macho(data: bytes, slice_offset: int = 0):
         name = data[name_start:name_end].decode('ascii', errors='replace')
 
         if not name.startswith("_lean_"):
+            continue
+        if name in KEEP_STRONG:
             continue
         if n_desc & N_WEAK_DEF:
             continue

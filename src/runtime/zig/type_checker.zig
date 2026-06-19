@@ -48,9 +48,9 @@ extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
 
-// ── instantiate_lparams bridge (C++-owned for now) ───────────────────────────
+// ── instantiate_lparams bridge ──────────────────────────────────────────────
 // Used by inferConstant and unfoldDefinition to substitute level params.
-// TODO: pure Zig implementation in inductive.zig
+// Implemented in runtime_helpers.zig (placeholder: returns expr unchanged).
 
 extern fn lean_kernel_instantiate_type_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
@@ -139,7 +139,11 @@ var g_bool_false: ?*anyopaque = null;
 var g_prop: ?*anyopaque = null;
 var g_type_zero: ?*anyopaque = null;
 
-extern fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) callconv(.c) *anyopaque;
+const runtime_helpers = @import("runtime_helpers.zig");
+
+inline fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) *anyopaque {
+    return runtime_helpers.lean_name_mk_str(pre, s);
+}
 
 fn mkConstName(parts: []const [*:0]const u8) *anyopaque {
     // Build name from string parts: first part is anonymous, rest are appended

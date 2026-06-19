@@ -20,12 +20,17 @@ const kernel = @import("kernel.zig");
 
 // ── Predefined constant names ──────────────────────────────────────────────
 
-extern fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
+
+const runtime_helpers = @import("runtime_helpers.zig");
+
+inline fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) *anyopaque {
+    return runtime_helpers.lean_name_mk_str(pre, s);
+}
 
 var g_nat_zero: ?*anyopaque = null;
 var g_nat_succ: ?*anyopaque = null;
@@ -197,8 +202,12 @@ pub fn stringLitToConstructor(e: *anyopaque) *anyopaque {
     return lean_expr_mk_app(getStringMk(), r);
 }
 
-extern fn lean_string_size(s: *anyopaque) callconv(.c) usize;
-extern fn lean_string_get(s: *anyopaque, i: usize) callconv(.c) u8;
+inline fn lean_string_size(s: *anyopaque) usize {
+    return runtime_helpers.lean_string_size(s);
+}
+inline fn lean_string_get(s: *anyopaque, i: usize) u8 {
+    return runtime_helpers.lean_string_get(s, i);
+}
 
 fn getStringByteLen(s: *anyopaque) usize {
     return lean_string_size(s);

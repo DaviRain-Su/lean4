@@ -16,8 +16,13 @@ const ea = @import("expr_accessors.zig");
 const ka = @import("kernel_accessors.zig");
 
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
-extern fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
+
+const runtime_helpers = @import("runtime_helpers.zig");
+
+inline fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) *anyopaque {
+    return runtime_helpers.lean_name_mk_str(pre, s);
+}
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 
 // ── Quotient constant names ──────────────────────────────────────────────────

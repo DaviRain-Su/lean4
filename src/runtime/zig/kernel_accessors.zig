@@ -34,7 +34,12 @@ extern fn lean_local_ctx_find(lctx: *anyopaque, fvar_id: *anyopaque) callconv(.c
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_mk_let_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, value: *anyopaque, nondep: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_is_empty(lctx: *anyopaque) callconv(.c) u8;
-extern fn lean_list_cons(head: *anyopaque, tail: *anyopaque) callconv(.c) *anyopaque;
+
+const runtime_helpers = @import("runtime_helpers.zig");
+
+inline fn lean_list_cons(head: *anyopaque, tail: *anyopaque) *anyopaque {
+    return runtime_helpers.lean_list_cons(head, tail);
+}
 
 // ── Option helpers ──────────────────────────────────────────────────────────
 
