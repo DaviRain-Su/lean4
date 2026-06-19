@@ -28,7 +28,7 @@ void lean_ipv6_addr_to_in6_addr(b_obj_arg ipv6_addr, in6_addr* out) {
     }
 }
 
-void lean_ip_addr_to_in_addr_storage(b_obj_arg ip_addr, int* type, in_addr_storage* out) {
+void lean_ip_addr_to_in_addr_storage(lean_object* ip_addr, int* type, in_addr_storage* out) {
     lean_object* ip_obj = lean_ctor_get(ip_addr, 0);
 
     if (lean_ptr_tag(ip_addr) == 0) {
@@ -40,7 +40,7 @@ void lean_ip_addr_to_in_addr_storage(b_obj_arg ip_addr, int* type, in_addr_stora
     }
 }
 
-void lean_ip_addr_ntop(b_obj_arg ip_addr, char *buffer, size_t buffer_size) {
+void lean_ip_addr_ntop(lean_object* ip_addr, char *buffer, size_t buffer_size) {
     int ip_type;
     in_addr_storage ip_addr_storage;
 
@@ -50,7 +50,7 @@ void lean_ip_addr_ntop(b_obj_arg ip_addr, char *buffer, size_t buffer_size) {
     lean_always_assert(ret == 0);
 }
 
-void lean_socket_address_to_sockaddr_storage(b_obj_arg ip_addr, sockaddr_storage* out) {
+void lean_socket_address_to_sockaddr_storage(lean_object* ip_addr, sockaddr_storage* out) {
     memset(out, 0, sizeof(*out));
 
     lean_object* socket_addr_obj = lean_ctor_get(ip_addr, 0);
