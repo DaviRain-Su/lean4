@@ -59,6 +59,9 @@ fn checkedAdd(a: usize, b: usize) usize {
     return result[0];
 }
 
+pub fn allocStringExport(size: usize, capacity: usize, len: usize) *anyopaque {
+    return allocString(size, capacity, len);
+}
 fn allocString(size: usize, capacity: usize, len: usize) *anyopaque {
     if (size == 0) @panic("Lean strings must include a trailing NUL");
     if (capacity < size) @panic("string capacity must cover string size");

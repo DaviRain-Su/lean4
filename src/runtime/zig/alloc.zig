@@ -454,6 +454,18 @@ pub fn lean_free_small_object(o: *anyopaque) void {
     }
 }
 
+pub fn allocCtorMemory(sz: usize) *anyopaque {
+    return lean_alloc_object(sz);
+}
+
+pub fn allocSmallObject(sz: usize) *anyopaque {
+    return lean_alloc_object(sz);
+}
+
+pub fn freeSmallObject(o: *anyopaque) void {
+    lean_free_small_object(o);
+}
+
 pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopaque {
     if (tag > lean.LeanMaxCtorTag) @panic("constructor tag out of range");
     if (num_objs > std.math.maxInt(u8)) @panic("constructor object slot overflow");

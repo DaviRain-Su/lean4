@@ -926,7 +926,7 @@ else()
     leanshared
     ALL
     WORKING_DIRECTORY ${LEAN_SOURCE_DIR}
-    DEPENDS Init_shared leancpp_1 leancpp leanshell leaninitialize $<$<BOOL:${LEAN_ZIG_RUNTIME}>:leanrt_zig>
+    DEPENDS Init_shared leancpp_1 leancpp leanshell leaninitialize
     COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make leanshared
     VERBATIM
   )

@@ -41,3 +41,5 @@ tests/emitzig/*
 !tests/emitzig/*.expected
 !tests/emitzig/*.sh
 .zigc-stdlib-cache/
+.zig-cache
+.zig-global-cache

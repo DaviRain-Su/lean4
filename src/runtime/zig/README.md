@@ -16,21 +16,22 @@ calls libuv (C) and libgmp (C) directly via `@cImport`.
 
 ## Build
 
-The Zig runtime is opt-in. Default Lean builds use the C++ runtime.
+The Zig runtime is opt-in. `LEAN_ZIG_RUNTIME=ON` builds and tests it, while
+Lean's own `libleanshared` still links the C++ runtime until the final cutover.
 
 ```bash
 # From an existing stage1 build
 make -C build/release/stage1 leanrt_zig
 
-# Full release with Zig runtime enabled
+# Full release build with Zig runtime tests registered
 cmake --preset release -B build/release -DLEAN_ZIG_RUNTIME=ON
 make -j$(sysctl -n hw.logicalcpu) -C build/release
 ```
 
-Run the opt-in runtime tests:
+Run the opt-in runtime and EmitZig tests:
 
 ```bash
-ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/zigrt|emitzig/zig-symbols'
+ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/(zigrt|stdlib|zig-symbols)'
 ```
 
 ## Status
@@ -54,6 +55,13 @@ ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/zigrt|emitzig/zig-
 - Stack overflow detection is a no-op: Zig does not expose SEH frame
   unwinding. Requires upstream Zig SEH support.
 
+### Kernel C-linkage exports
+
+`kernel.zig` contains experimental Zig implementations for C++-owned kernel
+entrypoints. They are not exported by default; pass `-Dexport-kernel-symbols=true`
+only for a pure-Zig kernel link that also provides the `lean_kernel_*_impl`
+type-checker bridge symbols.
+
 ### EmitZig code generator
 
 Supported: constructors, projections, box/unbox, literals, fap/pap, closures,
@@ -66,11 +74,15 @@ catch compiler bugs that violate the LCNF purity invariant.
 ### Remaining gaps to production
 
 1. **Full regression**: no stdlib + mathlib full-scale test run yet. This is
-   the primary blocker — the code is complete but lacks large-scale validation.
+   the primary blocker — the code has broad targeted coverage but lacks
+   large-scale validation.
 2. **Not default**: opt-in (`-DLEAN_ZIG_RUNTIME=ON`). Switching to default
    requires passing #1.
-3. **Windows SEH**: stack overflow detection not available (upstream Zig).
-4. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
+3. **Kernel cutover**: C++ still owns the kernel entrypoints used by
+   `libleanshared`; the Zig kernel exports are gated behind
+   `-Dexport-kernel-symbols=true`.
+4. **Windows SEH**: stack overflow detection not available (upstream Zig).
+5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
 
 ### External dependencies
 

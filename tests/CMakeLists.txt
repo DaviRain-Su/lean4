@@ -325,6 +325,7 @@ if(LEAN_ZIG_RUNTIME)
     Float.lean
     FloatArray.lean
     JoinPoint.lean
+    InlineHelpers.lean
     List.lean
     Loop.lean
     LoopControl.lean
@@ -338,7 +339,6 @@ if(LEAN_ZIG_RUNTIME)
     StringEscapes.lean
     StringHelpers.lean
     Task.lean
-    TaskDealloc.lean
   )
   foreach(T ${EMITZIG_ZIGRT_TESTS})
     add_test(
@@ -409,6 +409,7 @@ if(LEAN_ZIG_RUNTIME)
     StdlibSubstring.lean
     StdlibSync.lean
     StdlibTask.lean
+    TaskDealloc.lean
     StdlibTime.lean
     StdlibTreeMap.lean
     StdlibTreeSet.lean

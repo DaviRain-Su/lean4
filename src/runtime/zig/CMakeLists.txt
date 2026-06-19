@@ -72,6 +72,29 @@ if(ZIG)
     DEPENDS "${LEAN_ZIG_RUNTIME_LIB}"
   )
 
+  # Helperless build: omits stdlib-overlapping exports so it can be linked
+  # into libleanshared alongside the Lean stdlib without duplicate symbols.
+  set(LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zig-out-helperless")
+  set(LEAN_ZIG_RUNTIME_HELPERLESS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libleanrt_zig.a")
+  add_custom_command(
+    OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    COMMAND "${ZIG}" build
+      --prefix "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}"
+      --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
+      --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
+      "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
+      -Dexport-lean-helpers=false
+    COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building Lean Zig runtime library (helperless)"
+    VERBATIM
+  )
+  add_custom_target(
+    leanrt_zig_helperless
+    DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+  )
+
   if(LEAN_ZIG_RUNTIME)
     set(LEAN_ZIG_RUNTIME_TEST_ARGS
       build

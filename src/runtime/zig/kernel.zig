@@ -17,6 +17,9 @@ const alloc = @import("alloc.zig");
 const ctor = @import("ctor.zig");
 const rc = @import("rc.zig");
 const array = @import("array.zig");
+const runtime_options = @import("runtime_options");
+
+const export_kernel_symbols = runtime_options.export_kernel_symbols;
 
 // ── Expression metadata (trivial bit-packing) ────────────────────────────────
 
@@ -28,7 +31,7 @@ const array = @import("array.zig");
 /// bit     42: hasLevelMVar
 /// bit     43: hasLevelParam
 /// bits 44-63: looseBVarRange (capped at 2^20-1)
-pub export fn lean_expr_mk_data(
+fn lean_expr_mk_data(
     hash_val: u64,
     bvar_range_obj: *anyopaque,
     approx_depth_in: u32,
@@ -53,7 +56,7 @@ pub export fn lean_expr_mk_data(
 }
 
 /// Compute app metadata from function and argument metadata.
-pub export fn lean_expr_mk_app_data(f_data: u64, a_data: u64) callconv(.c) u64 {
+fn lean_expr_mk_app_data(f_data: u64, a_data: u64) callconv(.c) u64 {
     const f_depth: u16 = @intCast((f_data >> 32) & 255);
     const a_depth: u16 = @intCast((a_data >> 32) & 255);
     const depth: u64 = @min(@max(f_depth, a_depth) + 1, 255);
@@ -72,7 +75,7 @@ inline fn hashCombine(a: u64, b: u64) u64 {
 
 // ── Level metadata ───────────────────────────────────────────────────────────
 
-pub export fn lean_level_mk_data(hash_val: u32, depth: u32) callconv(.c) u64 {
+fn lean_level_mk_data(hash_val: u32, depth: u32) callconv(.c) u64 {
     const d: u64 = @min(depth, 65535);
     const h: u64 = hash_val;
     return h + (d << 32);
@@ -80,7 +83,7 @@ pub export fn lean_level_mk_data(hash_val: u32, depth: u32) callconv(.c) u64 {
 
 // ── Level equality (structural) ──────────────────────────────────────────────
 
-pub export fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     // Quick pointer equality
     if (a == b) return 1;
     // Scalar equality
@@ -103,13 +106,13 @@ pub export fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
 // ── Expression structural equality ───────────────────────────────────────────
 
 /// Structural equality with binder info (lean_expr_equal / expr_eq_fn<true>).
-pub export fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     return exprEqRec(a, b, true);
 }
 
 /// Structural equality without binder info (lean_expr_eqv / expr_eq_fn<false>).
 /// Same as lean_expr_equal but ignores binder_info and let_nondep fields.
-pub export fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     return exprEqRec(a, b, false);
 }
 
@@ -159,7 +162,7 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
 // ── Has loose bound variable check ───────────────────────────────────────────
 
 /// Returns true if expression `e` has a loose bound variable with index >= `idx`.
-pub export fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8 {
+fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8 {
     if (object.lean_is_scalar(e)) return 0;
     const tag = object.lean_ptr_tag(e);
     const i = object.lean_unbox(idx);
@@ -251,7 +254,7 @@ extern fn lean_elab_add_decl(env: *anyopaque, mh: usize, decl: *anyopaque, ax: *
 
 // ── Lower / Lift loose bound variables ───────────────────────────────────────
 
-pub export fn lean_expr_lower_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_lower_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(s_obj) or !object.lean_is_scalar(d_obj)) return retain(e);
     const s = object.lean_unbox(s_obj);
     const d = object.lean_unbox(d_obj);
@@ -259,7 +262,7 @@ pub export fn lean_expr_lower_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_ob
     return lowerLiftImpl(e, @intCast(s), @intCast(d), .lower);
 }
 
-pub export fn lean_expr_lift_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_lift_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(s_obj) or !object.lean_is_scalar(d_obj)) return retain(e);
     const s = object.lean_unbox(s_obj);
     const d = object.lean_unbox(d_obj);
@@ -294,19 +297,19 @@ fn lowerLiftRec(e: *anyopaque, offset: u32, s: u32, d: u32, mode: Mode) ?*anyopa
 
 // ── Instantiate ──────────────────────────────────────────────────────────────
 
-pub export fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyopaque {
     if (looseBVarRange(a) == 0) return retain(a);
     var single: [1]*anyopaque = .{e0};
     return instantiateImpl(a, 0, 1, single[0..], false);
 }
 
-pub export fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const n = array.lean_array_size(subst);
     if (n == 0) return retain(a);
     return instantiateImplArr(a, 0, n, subst, false);
 }
 
-pub export fn lean_expr_instantiate_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_instantiate_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(begin_obj) or !object.lean_is_scalar(end_obj)) @panic("invalid range");
     const sz = array.lean_array_size(subst);
     const b = object.lean_unbox(begin_obj);
@@ -317,13 +320,13 @@ pub export fn lean_expr_instantiate_range(a: *anyopaque, begin_obj: *anyopaque, 
     return instantiateImplArr(a, b, n, subst, false);
 }
 
-pub export fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const n = array.lean_array_size(subst);
     if (n == 0) return retain(a);
     return instantiateImplArr(a, 0, n, subst, true);
 }
 
-pub export fn lean_expr_instantiate_rev_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_instantiate_rev_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(begin_obj) or !object.lean_is_scalar(end_obj)) @panic("invalid range");
     const sz = array.lean_array_size(subst);
     const b = object.lean_unbox(begin_obj);
@@ -368,11 +371,11 @@ fn instantiateImpl(e: *anyopaque, offset: u32, n: usize, subst: []*anyopaque, re
 
 // ── Abstract ─────────────────────────────────────────────────────────────────
 
-pub export fn lean_expr_abstract(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_abstract(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     return abstractImpl(e, array.lean_array_size(subst), subst);
 }
 
-pub export fn lean_expr_abstract_range(e: *anyopaque, n_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+fn lean_expr_abstract_range(e: *anyopaque, n_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const sz = array.lean_array_size(subst);
     const n = if (object.lean_is_scalar(n_obj)) @min(object.lean_unbox(n_obj), sz) else sz;
     return abstractImpl(e, n, subst);
@@ -407,7 +410,7 @@ fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque 
 
 // ── Replace (Lean closure) ───────────────────────────────────────────────────
 
-pub export fn lean_replace_expr(f: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+fn lean_replace_expr(f: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
     return replaceClosureImpl(f, e);
 }
 
@@ -473,11 +476,11 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
 
 // ── Find ─────────────────────────────────────────────────────────────────────
 
-pub export fn lean_find_expr(p: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+fn lean_find_expr(p: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
     return findImpl(p, e, true);
 }
 
-pub export fn lean_find_ext_expr(p: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+fn lean_find_ext_expr(p: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
     return findImpl(p, e, false);
 }
 
@@ -546,17 +549,17 @@ fn findRecAppFn(e: *anyopaque, p: *anyopaque, found: *?*anyopaque) void {
 
 // ── Level definitional equality ──────────────────────────────────────────────
 
-pub export fn lean_level_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_level_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     return lean_level_eq(a, b);
 }
 
 // ── Declaration management ───────────────────────────────────────────────────
 
-pub export fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
+fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
     return lean_environment_add(env, decl);
 }
 
-pub export fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, axioms: *anyopaque, trust_level: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque {
+fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, axioms: *anyopaque, trust_level: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque {
     return lean_elab_add_decl(env, max_heartbeat, decl, axioms, trust_level, opts);
 }
 
@@ -573,19 +576,19 @@ extern fn lean_kernel_whnf_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque
 extern fn lean_kernel_is_def_eq_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_check_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 
-pub export fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
     return lean_kernel_whnf_impl(env, lctx, a);
 }
 
-pub export fn lean_kernel_is_def_eq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
+fn lean_kernel_is_def_eq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
     return lean_kernel_is_def_eq_impl(env, lctx, a, b);
 }
 
-pub export fn lean_kernel_check(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+fn lean_kernel_check(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
     return lean_kernel_check_impl(env, lctx, a);
 }
 
-pub export fn lean_internal_get_believer_trust_level(_: *anyopaque) callconv(.c) u32 {
+fn lean_internal_get_believer_trust_level(_: *anyopaque) callconv(.c) u32 {
     return 0; // LEAN_BELIEVER_TRUST_LEVEL — trust everything
 }
 
@@ -671,4 +674,35 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
         .abstract => abstractRec(e, offset, ctx.abstract.n, ctx.abstract.subst),
         .lower_lift => lowerLiftRec(e, offset, ctx.lower_lift.s, ctx.lower_lift.d, ctx.lower_lift.mode) orelse retain(e),
     };
+}
+
+comptime {
+    if (export_kernel_symbols) {
+        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .weak });
+        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .weak });
+        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .weak });
+        @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .weak });
+        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .weak });
+        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .weak });
+        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .weak });
+        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .weak });
+        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .weak });
+        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .weak });
+        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .weak });
+        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .weak });
+        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .weak });
+        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .weak });
+        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .weak });
+        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .weak });
+        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .weak });
+        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .weak });
+        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .weak });
+        @export(&lean_level_eqv, .{ .name = "lean_level_eqv", .linkage = .weak });
+        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .weak });
+        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
+        @export(&lean_kernel_whnf, .{ .name = "lean_kernel_whnf", .linkage = .weak });
+        @export(&lean_kernel_is_def_eq, .{ .name = "lean_kernel_is_def_eq", .linkage = .weak });
+        @export(&lean_kernel_check, .{ .name = "lean_kernel_check", .linkage = .weak });
+        @export(&lean_internal_get_believer_trust_level, .{ .name = "lean_internal_get_believer_trust_level", .linkage = .weak });
+    }
 }
