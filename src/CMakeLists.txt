@@ -110,9 +110,26 @@ option(RUNTIME_STATS "RUNTIME_STATS" OFF)
 option(BSYMBOLIC "Link with -Bsymbolic to reduce call overhead in shared libraries (Linux)" ON)
 option(USE_GMP "USE_GMP" ON)
 option(USE_MIMALLOC "use mimalloc" ON)
-option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" OFF)
+option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
 # The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
+if(LEAN_ZIG_RUNTIME)
+  # The Zig runtime is built and tested standalone (via emitzig tests) but NOT yet
+  # linked into leanshared.  The cutover is blocked by allocator incompatibility:
+  # Zig internal functions (e.g. lean_alloc_mpz) use Zig's own allocator while the
+  # C++ kernel/library code expects mimalloc.  Until all Zig internal allocation
+  # goes through the external lean_alloc_object/lean_free_object, linking both
+  # runtimes causes crashes.  The weak-symbol infrastructure (weaken_lean_symbols.py)
+  # and conditional exports (export-allocator-symbols=false, lean_initialize guarded
+  # by export_lean_helpers) are in place for when the allocator is unified.
+  # set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  # set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_ZIG_RT_DEPS)
+else()
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_ZIG_RT_DEPS)
+endif()
 set(LEAN_MI_SECURE 0 CACHE STRING "Configure mimalloc memory safety mitigations (https://github.com/microsoft/mimalloc/blob/v2.2.7/include/mimalloc/types.h#L56-L60)")
 
 # development-specific options
@@ -813,6 +830,20 @@ else()
   )
   add_library(leancpp STATIC ${LEAN_OBJS} $<TARGET_OBJECTS:initialize>)
   set_target_properties(leancpp PROPERTIES OUTPUT_NAME leancpp)
+  if(LEAN_ZIG_RT_CUTOVER)
+    add_custom_command(
+      TARGET leancpp_1 POST_BUILD
+      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
+        $<TARGET_FILE:leancpp_1>
+      COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
+    )
+    add_custom_command(
+      TARGET leancpp POST_BUILD
+      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_lean_symbols.py
+        $<TARGET_FILE:leancpp>
+      COMMENT "Weakening C++ lean_* symbols for Zig runtime cutover"
+    )
+  endif()
 endif()
 
 if(STAGE GREATER 0 AND CADICAL AND INSTALL_CADICAL)
@@ -917,7 +948,7 @@ else()
     Init_shared
     ALL
     WORKING_DIRECTORY ${LEAN_SOURCE_DIR}
-    DEPENDS make_stdlib leanrt_initial-exec
+    DEPENDS make_stdlib leanrt_initial-exec ${LEAN_ZIG_RT_DEPS}
     COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make Init_shared
     VERBATIM
   )

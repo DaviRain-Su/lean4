@@ -16,16 +16,12 @@ calls libuv (C) and libgmp (C) directly via `@cImport`.
 
 ## Build
 
-The Zig runtime is opt-in. `LEAN_ZIG_RUNTIME=ON` builds and tests it, while
-Lean's own `libleanshared` still links the C++ runtime until the final cutover.
+The Zig runtime is now built by default (`LEAN_ZIG_RUNTIME=ON`). Lean's own
+`libleanshared` still links the C++ runtime until the final cutover (blocked
+by allocator unification). To disable the Zig runtime build:
 
 ```bash
-# From an existing stage1 build
-make -C build/release/stage1 leanrt_zig
-
-# Full release build with Zig runtime tests registered
-cmake --preset release -B build/release -DLEAN_ZIG_RUNTIME=ON
-make -j$(sysctl -n hw.logicalcpu) -C build/release
+cmake --preset release -B build/release -DLEAN_ZIG_RUNTIME=OFF
 ```
 
 Run the opt-in runtime and EmitZig tests:
@@ -73,16 +69,16 @@ catch compiler bugs that violate the LCNF purity invariant.
 
 ### Remaining gaps to production
 
-1. **Full regression**: no stdlib + mathlib full-scale test run yet. This is
-   the primary blocker — the code has broad targeted coverage but lacks
-   large-scale validation.
-2. **Not default**: opt-in (`-DLEAN_ZIG_RUNTIME=ON`). Switching to default
-   requires passing #1.
-3. **Kernel cutover**: C++ still owns the kernel entrypoints used by
+1. **Kernel cutover**: C++ still owns the kernel entrypoints used by
    `libleanshared`; the Zig kernel exports are gated behind
-   `-Dexport-kernel-symbols=true`.
-4. **Windows SEH**: stack overflow detection not available (upstream Zig).
-5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
+   `-Dexport-kernel-symbols=true`. The `instantiate_lparams` bridge in
+   `inductive.zig` is a placeholder (returns expr unchanged).
+2. **Allocator unification**: Zig internal functions use Zig's own allocator
+   while C++ kernel/library code expects mimalloc. Until all Zig internal
+   allocation goes through the external `lean_alloc_object`/`lean_free_object`,
+   linking both runtimes causes crashes.
+3. **Windows SEH**: stack overflow detection not available (upstream Zig).
+4. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
 
 ### External dependencies
 
