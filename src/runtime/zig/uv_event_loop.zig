@@ -63,6 +63,20 @@ pub export fn lean_zig_uv_event_loop_init() void {
     if (!g_initialized) eventLoopInit();
 }
 
+extern fn lean_zig_initialize_libuv_timer() callconv(.c) void;
+extern fn lean_zig_initialize_libuv_tcp() callconv(.c) void;
+extern fn lean_zig_initialize_libuv_udp() callconv(.c) void;
+extern fn lean_zig_initialize_libuv_signal() callconv(.c) void;
+
+/// Initialize all UV subsystems and the event loop. Called from init.zig.
+pub export fn lean_zig_uv_initialize() void {
+    lean_zig_initialize_libuv_timer();
+    lean_zig_initialize_libuv_tcp();
+    lean_zig_initialize_libuv_udp();
+    lean_zig_initialize_libuv_signal();
+    lean_zig_uv_event_loop_init();
+}
+
 // ── Lock / Unlock (extern C, called from both Zig and C++ subsystems) ─────────
 
 pub export fn lean_event_loop_lock() void {

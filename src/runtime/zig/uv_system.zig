@@ -4,9 +4,8 @@
 //! Zig port of the C++ `system` libuv subsystem exports.
 //!
 //! All functions listed in `src/runtime/uv/system.h` are implemented here,
-//! except `lean_uv_random` which is kept as a C++ helper because it needs a
-//! libuv C callback. The C++ helper is declared as `extern` below and linked
-//! from `src/runtime/uv/system.cpp`.
+//! including `lean_uv_random` which uses a libuv C callback for async random
+//! byte generation.
 
 const std = @import("std");
 const c = @cImport({
@@ -33,9 +32,9 @@ extern fn lean_event_loop_lock() callconv(.c) void;
 extern fn lean_event_loop_unlock() callconv(.c) void;
 extern fn lean_event_loop_loop() callconv(.c) *anyopaque;
 
-// C++ helper for `lean_uv_random` (kept on the C++ side because of the libuv
-// C callback).
-extern fn lean_uv_random_helper(size: u64) callconv(.c) *anyopaque;
+extern fn lean_io_promise_new() callconv(.c) *anyopaque;
+extern fn lean_io_promise_resolve(value: *anyopaque, promise: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_mark_mt(obj: *anyopaque) callconv(.c) void;
 
 // ============================================================================
 // String helpers
@@ -478,12 +477,60 @@ pub fn lean_uv_hrtime() callconv(.c) *anyopaque {
 }
 
 // Std.Internal.UV.System.random : UInt64 -> IO (IO.Promise (Except IO.Error (Array UInt8)))
-// Kept as a C++ helper.
-pub fn lean_uv_random(size: u64) callconv(.c) *anyopaque {
-    return lean_uv_random_helper(size);
+// Now fully implemented in Zig with a libuv C callback.
+const RandomReq = extern struct {
+    req: c.uv_random_t,
+    promise: ?*anyopaque,
+    byte_array: ?*anyopaque,
+};
+
+fn randomCallback(uv_req: ?*c.uv_random_t, status: c_int, _: ?*anyopaque, buflen: usize) callconv(.c) void {
+    const req: *RandomReq = @ptrCast(@alignCast(uv_req.?));
+    if (status < 0) {
+        rc.lean_dec(req.byte_array.?);
+        const err = io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(status, null));
+        _ = lean_io_promise_resolve(err, req.promise.?);
+    } else {
+        const sa: *lean.lean_sarray_object = @ptrCast(@alignCast(req.byte_array.?));
+        sa.m_size = buflen;
+        const ok = io_result.lean_io_result_mk_ok(req.byte_array.?);
+        _ = lean_io_promise_resolve(ok, req.promise.?);
+    }
+    rc.lean_dec(req.promise.?);
+    std.heap.c_allocator.destroy(req);
 }
 
-// Std.Internal.UV.System.getrusage : IO RUsage
+pub fn lean_uv_random(size: u64) callconv(.c) *anyopaque {
+    const req = std.heap.c_allocator.create(RandomReq) catch
+        return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
+    const promise = lean_io_promise_new();
+    lean_mark_mt(promise);
+    req.promise = promise;
+    const byte_array = alloc.lean_alloc_sarray(1, 0, @intCast(size));
+    req.byte_array = byte_array;
+    req.req.data = req;
+    rc.lean_inc(promise);
+    lean_event_loop_lock();
+    const sa: *lean.lean_sarray_object = @ptrCast(@alignCast(byte_array));
+    const buf: [*]u8 = @ptrCast(&sa.m_data);
+    const result = c.uv_random(
+        @ptrCast(@alignCast(lean_event_loop_loop())),
+        &req.req,
+        buf,
+        @intCast(size),
+        0,
+        @ptrCast(&randomCallback),
+    );
+    lean_event_loop_unlock();
+    if (result < 0) {
+        rc.lean_dec(byte_array);
+        rc.lean_dec(promise);
+        rc.lean_dec(promise);
+        std.heap.c_allocator.destroy(req);
+        return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
+    }
+    return io_result.lean_io_result_mk_ok(promise);
+}
 pub fn lean_uv_getrusage() callconv(.c) *anyopaque {
     var usage: c.uv_rusage_t = undefined;
     const result = c.uv_getrusage(&usage);

@@ -26,30 +26,8 @@ pub fn build(b: *std.Build) void {
     root_mod.linkSystemLibrary("gmp", .{});
     root_mod.linkSystemLibrary("c++", .{});
 
-    // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
-    // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
-    // net_addr is implemented in net_addr.zig; C++ tcp/udp call via net_addr_bridge.cpp.
-    const uv_cpp_sources = &.{
-        "../uv/event_loop.cpp",
-        "net_addr_bridge.cpp",
-        "../uv/system.cpp",
-        "uv_init.cpp",
-        "uv_promise_bridge.cpp",
-    };
-    const uv_cpp_flags = &.{
-        "-std=c++17",
-        "-O2",
-        "-include",
-        "uv_compat.h",
-        "-DLEAN_SMALL_ALLOCATOR",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-        "-DLEAN_ZIG_RUNTIME",
-    };
-    root_mod.addCSourceFiles(.{
-        .files = uv_cpp_sources,
-        .flags = uv_cpp_flags,
-    });
+    // All UV subsystems (event_loop, timer, dns, signal, net_addr, tcp, udp,
+    // system) are now pure Zig. No C++ sources are compiled into libleanrt_zig.
 
     // Weak C wrappers that bridge runtime C++ callers (uv_compat.cpp, dns.cpp)
     // to the Zig io_error implementations. Only emit them when helper symbols
