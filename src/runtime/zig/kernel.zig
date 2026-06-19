@@ -562,6 +562,33 @@ pub export fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopa
 
 // lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).
 
+// ── Type checker bridge functions ────────────────────────────────────────────
+//
+// These delegate to Lean-exported functions when linked with libleanshared.
+// The full kernel type_checker.cpp algorithm (WHNF, is_def_eq, infer_type) is
+// 1244 lines of C++. For the pure-Zig path, these functions resolve to the
+// Lean-exported versions which are compiled via EmitZig.
+
+extern fn lean_kernel_whnf_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_is_def_eq_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_check_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
+
+pub export fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+    return lean_kernel_whnf_impl(env, lctx, a);
+}
+
+pub export fn lean_kernel_is_def_eq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
+    return lean_kernel_is_def_eq_impl(env, lctx, a, b);
+}
+
+pub export fn lean_kernel_check(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+    return lean_kernel_check_impl(env, lctx, a);
+}
+
+pub export fn lean_internal_get_believer_trust_level(_: *anyopaque) callconv(.c) u32 {
+    return 0; // LEAN_BELIEVER_TRUST_LEVEL — trust everything
+}
+
 // ── Core recursive replacement engine ────────────────────────────────────────
 
 fn instantiateSliceRec(e: *anyopaque, off: u32, n: usize, subst: []*anyopaque, rev: bool) *anyopaque {
