@@ -15,6 +15,7 @@ pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
 pub const exception = @import("exception.zig");
 pub const kernel = @import("kernel.zig");
+pub const kernel_accessors = @import("kernel_accessors.zig");
 pub const elab_environment = @import("elab_environment.zig");
 pub const expr_lt = @import("expr_lt.zig");
 pub const expr_accessors = @import("expr_accessors.zig");
@@ -103,6 +104,7 @@ comptime {
     _ = interrupt;
     if (runtime_options.export_kernel_symbols) {
         _ = kernel.force_link;
+        _ = kernel_accessors.force_link;
         _ = elab_environment.force_link;
         _ = instantiate_mvars.force_link;
         _ = instantiate_expr_mvars.force_link;
