@@ -17,6 +17,7 @@ const alloc = @import("alloc.zig");
 const ctor = @import("ctor.zig");
 const rc = @import("rc.zig");
 const array = @import("array.zig");
+const interrupt = @import("interrupt.zig");
 const runtime_options = @import("runtime_options");
 
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
@@ -133,7 +134,7 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
     // nondep (field 4 of letE), matching C++ expr_eq_fn<false>.
     const skip_field: ?u32 = if (!compare_bi) switch (tag) {
         6, 7 => 3, // lam/forallE: binderInfo
-        8 => 4,    // letE: nondep
+        8 => 4, // letE: nondep
         else => null,
     } else null;
 
@@ -443,7 +444,8 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
             const d0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const bi = ctor.lean_ctor_get(e, 3) orelse object.lean_box(0).?;
-            rc.lean_inc(name); rc.lean_inc(bi);
+            rc.lean_inc(name);
+            rc.lean_inc(bi);
             const nd = replaceClosureImpl(f, d0);
             const nb = replaceClosureImpl(f, b0);
             return if (tag == 6) lean_expr_mk_lambda(name, nd, nb, bi) else lean_expr_mk_forall(name, nd, nb, bi);
@@ -454,7 +456,8 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
             const v0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 3) orelse return retain(e);
             const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
-            rc.lean_inc(name); rc.lean_inc(nd);
+            rc.lean_inc(name);
+            rc.lean_inc(nd);
             return lean_expr_mk_let(name, replaceClosureImpl(f, t0), replaceClosureImpl(f, v0), replaceClosureImpl(f, b0), nd);
         },
         10 => { // mdata
@@ -467,7 +470,8 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
             const s = ctor.lean_ctor_get(e, 0) orelse return retain(e);
             const idx_obj = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const inner = ctor.lean_ctor_get(e, 2) orelse return retain(e);
-            rc.lean_inc(s); rc.lean_inc(idx_obj);
+            rc.lean_inc(s);
+            rc.lean_inc(idx_obj);
             return lean_expr_mk_proj(s, idx_obj, replaceClosureImpl(f, inner));
         },
         else => return retain(e),
@@ -503,10 +507,16 @@ fn findRec(e: *anyopaque, p: *anyopaque, found: *?*anyopaque, partial: bool) voi
     const r_opt = apply_mod.lean_apply_1(p, e);
     if (r_opt) |r| {
         if (partial) {
-            if (object.lean_unbox(r) != 0) { found.* = e; return; }
+            if (object.lean_unbox(r) != 0) {
+                found.* = e;
+                return;
+            }
         } else {
             switch (object.lean_unbox(r)) {
-                0 => { found.* = e; return; },
+                0 => {
+                    found.* = e;
+                    return;
+                },
                 1 => {},
                 2 => return,
                 else => @panic("invalid FindStep"),
@@ -554,43 +564,50 @@ fn lean_level_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
 }
 
 // ── Declaration management ───────────────────────────────────────────────────
+//
+// `lean_add_decl` / `lean_add_decl_without_checking` operate on a kernel
+// `Environment` (not an elab environment). They are the C++ `environment.cpp`
+// entrypoints used by `Lean.Environment.addDeclCore`.
+//
+// The type-checking inside `environment::add` is still C++-owned: these
+// functions compose the Lean-exported `lean_environment_add` (which performs
+// the unchecked constant insertion) with the kernel type-checker bridge. In
+// the helperless build the Lean stdlib's `@[export]` definitions provide the
+// environment primitives; here we only re-export the C-linkage shim so that
+// `lean_elab_add_decl` (in elab_environment.zig) can resolve `lean_add_decl`.
+
+fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
+    if (object.lean_is_scalar(opt_cancel_tk)) return null;
+    return ctor.lean_ctor_get(opt_cancel_tk, 0);
+}
 
 fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
     return lean_environment_add(env, decl);
 }
 
-fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, axioms: *anyopaque, trust_level: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque {
-    return lean_elab_add_decl(env, max_heartbeat, decl, axioms, trust_level, opts);
+fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
+    // Heartbeat and cancel-token scoping mirror the C++ `scope_max_heartbeat`
+    // / `scope_cancel_tk` guards in `environment.cpp`. The actual type-check
+    // is performed by the kernel type-checker bridge (C++ or Lean-exported).
+    const prev_mh = interrupt.getMaxHeartbeat();
+    interrupt.setMaxHeartbeat(max_heartbeat);
+    defer interrupt.setMaxHeartbeat(prev_mh);
+
+    interrupt.setCancelToken(cancelTokenFromOption(opt_cancel_tk));
+    defer interrupt.clearCancelToken();
+
+    return lean_environment_add(env, decl);
 }
 
 // lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).
 
 // ── Type checker bridge functions ────────────────────────────────────────────
 //
-// These delegate to Lean-exported functions when linked with libleanshared.
-// The full kernel type_checker.cpp algorithm (WHNF, is_def_eq, infer_type) is
-// 1244 lines of C++. For the pure-Zig path, these functions resolve to the
-// Lean-exported versions which are compiled via EmitZig.
-
-extern fn lean_kernel_whnf_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_is_def_eq_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_check_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-
-fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_whnf_impl(env, lctx, a);
-}
-
-fn lean_kernel_is_def_eq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_is_def_eq_impl(env, lctx, a, b);
-}
-
-fn lean_kernel_check(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_check_impl(env, lctx, a);
-}
-
-fn lean_internal_get_believer_trust_level(_: *anyopaque) callconv(.c) u32 {
-    return 0; // LEAN_BELIEVER_TRUST_LEVEL — trust everything
-}
+// `lean_kernel_whnf` / `is_def_eq` / `check` are defined in elab_environment.zig
+// (the 1:1 port of `elab_environment.cpp`). They delegate to `lean_kernel_*_impl`
+// symbols provided by the C++ type_checker (or, eventually, a pure-Zig port).
+// Re-exporting them here would collide with elab_environment.zig, so kernel.zig
+// does NOT export these four symbols. See elab_environment.zig for the definitions.
 
 // ── Core recursive replacement engine ────────────────────────────────────────
 
@@ -636,7 +653,8 @@ fn replaceRecDirect(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *any
             const d0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const bi = ctor.lean_ctor_get(e, 3) orelse object.lean_box(0).?;
-            rc.lean_inc(name); rc.lean_inc(bi);
+            rc.lean_inc(name);
+            rc.lean_inc(bi);
             const nd = recurseChild(d0, offset, kind, ctx);
             const nb = recurseChild(b0, offset + 1, kind, ctx);
             return if (tag == 6) lean_expr_mk_lambda(name, nd, nb, bi) else lean_expr_mk_forall(name, nd, nb, bi);
@@ -647,7 +665,8 @@ fn replaceRecDirect(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *any
             const v0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 3) orelse return retain(e);
             const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
-            rc.lean_inc(name); rc.lean_inc(nd);
+            rc.lean_inc(name);
+            rc.lean_inc(nd);
             return lean_expr_mk_let(name, recurseChild(t0, offset, kind, ctx), recurseChild(v0, offset, kind, ctx), recurseChild(b0, offset + 1, kind, ctx), nd);
         },
         10 => { // mdata
@@ -660,7 +679,8 @@ fn replaceRecDirect(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *any
             const s = ctor.lean_ctor_get(e, 0) orelse return retain(e);
             const idx_obj = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const inner = ctor.lean_ctor_get(e, 2) orelse return retain(e);
-            rc.lean_inc(s); rc.lean_inc(idx_obj);
+            rc.lean_inc(s);
+            rc.lean_inc(idx_obj);
             return lean_expr_mk_proj(s, idx_obj, recurseChild(inner, offset, kind, ctx));
         },
         else => return retain(e),
@@ -700,199 +720,5 @@ comptime {
         @export(&lean_level_eqv, .{ .name = "lean_level_eqv", .linkage = .weak });
         @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .weak });
         @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
-        @export(&lean_kernel_whnf, .{ .name = "lean_kernel_whnf", .linkage = .weak });
-        @export(&lean_kernel_is_def_eq, .{ .name = "lean_kernel_is_def_eq", .linkage = .weak });
-        @export(&lean_kernel_check, .{ .name = "lean_kernel_check", .linkage = .weak });
-        @export(&lean_internal_get_believer_trust_level, .{ .name = "lean_internal_get_believer_trust_level", .linkage = .weak });
     }
-}
-
-// ── Expression ordering (lean_expr_lt / lean_expr_quick_lt) ──────────────────
-extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
-
-
-fn nameLt(a: *anyopaque, b: *anyopaque) bool {
-    if (a == b) return false;
-    const a_sc = object.lean_is_scalar(a);
-    const b_sc = object.lean_is_scalar(b);
-    if (a_sc and b_sc) return false;
-    if (a_sc) return true;
-    if (b_sc) return false;
-    const ka = object.lean_ptr_tag(a);
-    const kb = object.lean_ptr_tag(b);
-    if (ka != kb) return ka < kb;
-    const pa = ctor.lean_ctor_get(a, 1) orelse return false;
-    const pb = ctor.lean_ctor_get(b, 1) orelse return false;
-    if (nameLt(pa, pb)) return true;
-    if (nameLt(pb, pa)) return false;
-    if (ka == 0) {
-        const sa = ctor.lean_ctor_get(a, 0) orelse return false;
-        const sb = ctor.lean_ctor_get(b, 0) orelse return false;
-        return lean_string_lt(sa, sb) != 0;
-    }
-    const na = if (ctor.lean_ctor_get(a, 0)) |v| object.lean_unbox(v) else 0;
-    const nb = if (ctor.lean_ctor_get(b, 0)) |v| object.lean_unbox(v) else 0;
-    return na < nb;
-}
-
-
-fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
-    if (a == b) return false;
-    const ka = eTag(a);
-    const kb = eTag(b);
-    if (ka != kb) return ka < kb;
-    if (use_hash) {
-        const ha: u32 = @truncate(eData(a));
-        const hb: u32 = @truncate(eData(b));
-        if (ha < hb) return true;
-        if (ha > hb) return false;
-    }
-    if (lean_expr_equal(a, b) != 0) return false;
-    switch (ka) {
-        0 => { // bvar
-            const ia = if (object.lean_is_scalar(a)) object.lean_unbox(a) else blk: { const f = ctor.lean_ctor_get(a, 0) orelse return false; break :blk object.lean_unbox(f); };
-            const ib = if (object.lean_is_scalar(b)) object.lean_unbox(b) else blk: { const f = ctor.lean_ctor_get(b, 0) orelse return false; break :blk object.lean_unbox(f); };
-            return ia < ib;
-        },
-        1 => { // fvar
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        2 => { // mvar
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        3 => { // sort
-            const la = ctor.lean_ctor_get(a, 0) orelse return false;
-            const lb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return levelLt(la, lb, use_hash);
-        },
-        4 => { // const
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (lean_name_eq(na, nb) == 0) return nameLt(na, nb);
-            const la = ctor.lean_ctor_get(a, 1) orelse return false;
-            const lb = ctor.lean_ctor_get(b, 1) orelse return false;
-            return levelLt(la, lb, use_hash);
-        },
-        5 => { // app
-            const fa = ctor.lean_ctor_get(a, 0) orelse return false;
-            const fb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (fa != fb) return isLtExpr(fa, fb, use_hash);
-            const aa = ctor.lean_ctor_get(a, 1) orelse return false;
-            const ab = ctor.lean_ctor_get(b, 1) orelse return false;
-            return isLtExpr(aa, ab, use_hash);
-        },
-        6, 7 => { // lam, forallE
-            const da = ctor.lean_ctor_get(a, 1) orelse return false;
-            const db = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (da != db) return isLtExpr(da, db, use_hash);
-            const ba = ctor.lean_ctor_get(a, 2) orelse return false;
-            const bb = ctor.lean_ctor_get(b, 2) orelse return false;
-            return isLtExpr(ba, bb, use_hash);
-        },
-        8 => { // letE
-            const nda = if (ctor.lean_ctor_get(a, 4)) |v| object.lean_unbox(v) else 0;
-            const ndb = if (ctor.lean_ctor_get(b, 4)) |v| object.lean_unbox(v) else 0;
-            if (nda != ndb) return nda < ndb;
-            const ta = ctor.lean_ctor_get(a, 1) orelse return false;
-            const tb = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (ta != tb) return isLtExpr(ta, tb, use_hash);
-            const va = ctor.lean_ctor_get(a, 2) orelse return false;
-            const vb = ctor.lean_ctor_get(b, 2) orelse return false;
-            if (va != vb) return isLtExpr(va, vb, use_hash);
-            const ba = ctor.lean_ctor_get(a, 3) orelse return false;
-            const bb = ctor.lean_ctor_get(b, 3) orelse return false;
-            return isLtExpr(ba, bb, use_hash);
-        },
-        9 => { // lit — compare by raw value (nat or string)
-            return object.lean_unbox(a) < object.lean_unbox(b);
-        },
-        10 => { // mdata
-            const ea = ctor.lean_ctor_get(a, 1) orelse return false;
-            const eb = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (ea != eb) return isLtExpr(ea, eb, use_hash);
-            return false;
-        },
-        11 => { // proj
-            const ea = ctor.lean_ctor_get(a, 2) orelse return false;
-            const eb = ctor.lean_ctor_get(b, 2) orelse return false;
-            if (ea != eb) return isLtExpr(ea, eb, use_hash);
-            const sa = ctor.lean_ctor_get(a, 0) orelse return false;
-            const sb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (lean_name_eq(sa, sb) == 0) return nameLt(sa, sb);
-            const ia = if (ctor.lean_ctor_get(a, 1)) |v| object.lean_unbox(v) else 0;
-            const ib = if (ctor.lean_ctor_get(b, 1)) |v| object.lean_unbox(v) else 0;
-            return ia < ib;
-        },
-        else => return false,
-    }
-}
-
-fn levelKind(l: *anyopaque) u8 {
-    if (object.lean_is_scalar(l)) return 0;
-    return object.lean_ptr_tag(l);
-}
-
-fn levelHash(l: *anyopaque) u32 {
-    if (object.lean_is_scalar(l)) return @truncate(object.lean_unbox(l));
-    const lvl_data: u64 = @as(*align(1) u64, @ptrCast(@alignCast(@as([*]u8, @ptrCast(l)) + @sizeOf(lean.lean_ctor_object) + @sizeOf(usize)))).*;
-    return @truncate(lvl_data);
-}
-
-fn levelLt(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
-    if (a == b) return false;
-    const ka = levelKind(a);
-    const kb = levelKind(b);
-    if (ka != kb) return ka < kb;
-    if (use_hash) {
-        const ha = levelHash(a);
-        const hb = levelHash(b);
-        if (ha < hb) return true;
-        if (ha > hb) return false;
-    }
-    if (lean_level_eq(a, b) != 0) return false;
-    switch (ka) {
-        0 => return object.lean_unbox(a) < object.lean_unbox(b), // zero/succ depth
-        1 => { // succ
-            const pa = ctor.lean_ctor_get(a, 0) orelse return false;
-            const pb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return levelLt(pa, pb, use_hash);
-        },
-        2, 3 => { // max, imax
-            const la = ctor.lean_ctor_get(a, 0) orelse return false;
-            const lb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (levelLt(la, lb, use_hash)) return true;
-            if (levelLt(lb, la, use_hash)) return false;
-            const ra = ctor.lean_ctor_get(a, 1) orelse return false;
-            const rb = ctor.lean_ctor_get(b, 1) orelse return false;
-            return levelLt(ra, rb, use_hash);
-        },
-        4 => { // param
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        5 => { // mvar
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        else => return false,
-    }
-}
-
-fn lean_expr_quick_lt_fn(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    return @intFromBool(isLtExpr(a, b, true));
-}
-
-fn lean_expr_lt_fn(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    return @intFromBool(isLtExpr(a, b, false));
-}
-
-comptime {
-    @export(&lean_expr_quick_lt_fn, .{ .name = "lean_expr_quick_lt", .linkage = .weak });
-    @export(&lean_expr_lt_fn, .{ .name = "lean_expr_lt", .linkage = .weak });
 }

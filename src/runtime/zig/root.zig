@@ -1,5 +1,7 @@
 // Root module re-exporting all runtime submodules.
 
+const runtime_options = @import("runtime_options");
+
 pub const alloc = @import("alloc.zig");
 pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
@@ -13,8 +15,14 @@ pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
 pub const exception = @import("exception.zig");
 pub const kernel = @import("kernel.zig");
+pub const elab_environment = @import("elab_environment.zig");
+pub const expr_lt = @import("expr_lt.zig");
 pub const inline_exports = @import("inline_exports.zig");
 pub const dynlib = @import("dynlib.zig");
+pub const dynlib_lib = @import("dynlib_lib.zig");
+pub const init_attribute = @import("init_attribute.zig");
+pub const profiling = @import("profiling.zig");
+pub const time_task = @import("time_task.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
 pub const hash = @import("hash.zig");
@@ -89,6 +97,10 @@ comptime {
     _ = io_min;
     _ = io_posix.force_link;
     _ = interrupt;
+    if (runtime_options.export_kernel_symbols) {
+        _ = kernel.force_link;
+        _ = elab_environment.force_link;
+    }
     _ = list;
     _ = memory;
     _ = misc;
@@ -125,5 +137,4 @@ comptime {
     _ = uv_udp.force_link;
     _ = inline_exports.force_link;
     _ = dynlib.force_link;
-    _ = kernel.force_link;
 }
