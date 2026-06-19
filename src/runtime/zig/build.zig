@@ -40,7 +40,6 @@ pub fn build(b: *std.Build) void {
         "../uv/timer.cpp",
         "../uv/udp.cpp",
         "uv_init.cpp",
-        "uv_loop_thread.cpp",
         "uv_promise_bridge.cpp",
     };
     const uv_cpp_flags = &.{
