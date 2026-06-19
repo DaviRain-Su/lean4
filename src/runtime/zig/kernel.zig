@@ -9,6 +9,7 @@
 //!
 //! They provide the same C-linkage API as the C++ kernel, allowing the Lean
 //! elaborator (compiled via EmitZig) to use a pure-Zig kernel.
+pub const force_link = true;
 
 const std = @import("std");
 const object = @import("object.zig");
@@ -89,11 +90,11 @@ pub export fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     // Constructor equality: same tag, same fields
     const tag_a = object.lean_ptr_tag(a);
     if (tag_a != object.lean_ptr_tag(b)) return 0;
-    const nfields = object.lean_ctor_num_objs(a);
-    if (nfields != object.lean_ctor_num_objs(b)) return 0;
+    const nfields = ctor.ctorNumObjs(a);
+    if (nfields != ctor.ctorNumObjs(b)) return 0;
     for (0..nfields) |i| {
-        const fa = ctor.lean_ctor_get(a, i) orelse continue;
-        const fb = ctor.lean_ctor_get(b, i) orelse continue;
+        const fa = ctor.lean_ctor_get(a, @intCast(i)) orelse continue;
+        const fb = ctor.lean_ctor_get(b, @intCast(i)) orelse continue;
         if (lean_level_eq(fa, fb) == 0) return 0;
     }
     return 1;
@@ -106,11 +107,11 @@ pub export fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     if (object.lean_is_scalar(a) or object.lean_is_scalar(b)) return 0;
     const tag_a = object.lean_ptr_tag(a);
     if (tag_a != object.lean_ptr_tag(b)) return 0;
-    const nfields = object.lean_ctor_num_objs(a);
-    if (nfields != object.lean_ctor_num_objs(b)) return 0;
+    const nfields = ctor.ctorNumObjs(a);
+    if (nfields != ctor.ctorNumObjs(b)) return 0;
     for (0..nfields) |i| {
-        const fa = ctor.lean_ctor_get(a, i) orelse continue;
-        const fb = ctor.lean_ctor_get(b, i) orelse continue;
+        const fa = ctor.lean_ctor_get(a, @intCast(i)) orelse continue;
+        const fb = ctor.lean_ctor_get(b, @intCast(i)) orelse continue;
         // For expressions, fields are either expressions, names, levels, or nats
         // Use generic structural equality
         if (object.lean_is_scalar(fa) and object.lean_is_scalar(fb)) {
@@ -189,3 +190,4 @@ pub export fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(
 // - lean_replace_expr
 // - lean_level_eqv
 // - lean_add_decl / lean_add_decl_without_checking
+pub export fn lean_zig_kernel_test_fn() callconv(.c) void {}

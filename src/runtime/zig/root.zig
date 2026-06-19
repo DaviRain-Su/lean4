@@ -121,4 +121,5 @@ comptime {
     _ = uv_timer.force_link;
     _ = uv_signal.force_link;
     _ = uv_udp.force_link;
+    _ = kernel.force_link;
 }

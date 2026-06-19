@@ -31,7 +31,7 @@ fn ctorSlots(o: *anyopaque) [*]?*anyopaque {
     return @ptrCast(&asCtor(o).m_objs);
 }
 
-fn ctorNumObjs(o: *anyopaque) usize {
+pub fn ctorNumObjs(o: *anyopaque) usize {
     return header(o).m_other;
 }
 
