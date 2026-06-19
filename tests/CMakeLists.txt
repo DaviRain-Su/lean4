@@ -415,6 +415,31 @@ if(LEAN_ZIG_RUNTIME)
     StdlibUInt.lean
     StdlibVector.lean
   )
+  # Pre-warm: build the largest stdlib closure into the shared cache so all
+  # subsequent tests find their .o files cached. This fixture runs once;
+  # without it every test independently recompiles hundreds of modules.
+  add_test(
+    NAME "emitzig/stdlib/prewarm"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/emitzig"
+    COMMAND
+      "${CMAKE_COMMAND}" -E env
+      LEAN_ZIG_EXE=1
+      LEAN_ZIG_STDLIB=1
+      BUILD_DIR=${MANGLED_BINARY_DIR}
+      LEANC=${MANGLED_BINARY_DIR}/bin/leanc
+      LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
+      LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
+      LEAN_ZIG_STDLIB_JOBS=8
+      LEAN_ZIG_STDLIB_ARCHIVE=1
+      LEAN_ZIG_STDLIB_ARCHIVE_LIMIT=0
+      bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "StdlibHttpH1Machine.lean"
+  )
+  set_tests_properties("emitzig/stdlib/prewarm" PROPERTIES
+    FIXTURES_SETUP zig_stdlib_cache
+    PROCESSORS 8
+    TIMEOUT 1800
+    LABELS "emitzig_stdlib_prewarm"
+  )
   foreach(T ${EMITZIG_STDLIB_TESTS})
     add_test(
       NAME "emitzig/stdlib/${T}"
@@ -428,9 +453,15 @@ if(LEAN_ZIG_RUNTIME)
         LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
         LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
         LEAN_ZIG_STDLIB_JOBS=2
+        LEAN_ZIG_STDLIB_ARCHIVE=1
+        LEAN_ZIG_STDLIB_ARCHIVE_LIMIT=0
         bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
-    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES PROCESSORS 6 TIMEOUT 1200)
+    set_tests_properties("emitzig/stdlib/${T}" PROPERTIES
+      FIXTURES_REQUIRED zig_stdlib_cache
+      PROCESSORS 2
+      TIMEOUT 600
+    )
   endforeach()
   add_test(
     NAME emitzig/zig-symbols
