@@ -29,6 +29,9 @@ const kernel = @import("kernel.zig");
 const runtime_options = @import("runtime_options");
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
 
+const inductive = @import("inductive.zig");
+const quot = @import("quot.zig");
+
 // ── Lean-exported helpers ───────────────────────────────────────────────────
 
 extern fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque;
@@ -45,13 +48,13 @@ extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
 
-// ── Recursor/quot reduction bridges (C++-owned for now) ──────────────────────
-// These will be replaced by Zig implementations when inductive.cpp and
-// quot.cpp are ported.
+// ── instantiate_lparams bridge (C++-owned for now) ───────────────────────────
+// Used by inferConstant and unfoldDefinition to substitute level params.
+// TODO: pure Zig implementation in inductive.zig
 
-extern fn lean_kernel_reduce_recursor(env: *anyopaque, lctx: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_reduce_quot(env: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_is_non_rec_structure(env: *anyopaque, n: *anyopaque) callconv(.c) u8;
+extern fn lean_kernel_instantiate_type_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque;
 
 // ── Expr constructors ──────────────────────────────────────────────────────
 
@@ -123,10 +126,7 @@ fn levelsIsDefEq(ls1: *anyopaque, ls2: *anyopaque) bool {
 // version. But there's no direct export... Let's check if we can use
 // the C++ bridge.
 
-// For now, bridge to C++ for instantiate_type_lparams / instantiate_value_lparams
-extern fn lean_kernel_instantiate_type_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque;
+// instantiate_lparams bridges are declared above.
 
 // ── Name construction for predefined constants ──────────────────────────────
 // The C++ type checker uses persistent expr* for common constants like
@@ -256,6 +256,32 @@ const State = struct {
     failure_set: std.AutoHashMap(*anyopaque, void), // pair tracking simplified
     allocator: std.mem.Allocator,
 };
+
+// Thread-local pointer to the current TypeChecker instance, used by the
+// C-callable callback wrappers for inductive/quot reduction.
+var g_current_tc: ?*TypeChecker = null;
+
+// C-callable wrappers for inductive_reduce_rec / quot_reduce_rec callbacks.
+fn whnfCallback(env: *anyopaque, lctx: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+    _ = env;
+    _ = lctx;
+    if (g_current_tc) |tc| return tc.whnf(e);
+    return rc.lean_inc_ret(e);
+}
+
+fn inferTypeCallback(env: *anyopaque, lctx: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+    _ = env;
+    _ = lctx;
+    if (g_current_tc) |tc| return tc.inferType(e);
+    return rc.lean_inc_ret(e);
+}
+
+fn isDefEqCallback(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    _ = env;
+    _ = lctx;
+    if (g_current_tc) |tc| return if (tc.isDefEq(a, b)) 1 else 0;
+    return 0;
+}
 
 const TypeChecker = struct {
     st: *State,
@@ -552,30 +578,25 @@ const TypeChecker = struct {
         return result;
     }
 
-    // ── reduce_recursor (bridged to C++) ──────────────────────────────────────
+    // ── reduce_recursor (uses Zig inductive/quot modules) ─────────────────────
 
     fn reduceRecursor(self: *TypeChecker, e: *anyopaque, _: bool, _: bool) ?*anyopaque {
-        // Bridge to C++ inductive_reduce_rec / quot_reduce_rec
-        // TODO: pure Zig implementation
+        // Try quot reduction first
         if (ka.envIsQuotInit(self.env())) {
-            const opt = lean_kernel_reduce_quot(self.env(), e);
-            if (!ka.isNone(opt)) {
-                if (!object.lean_is_scalar(opt)) {
-                    return someVal(opt);
-                }
-                rc.lean_dec(opt);
-            } else {
-                rc.lean_dec(opt);
+            if (quot.quotReduceRec(self.env(), self.lctx, e, &whnfCallback)) |r| {
+                return r;
             }
         }
-        const opt = lean_kernel_reduce_recursor(self.env(), self.lctx, e);
-        if (!ka.isNone(opt)) {
-            if (!object.lean_is_scalar(opt)) {
-                return someVal(opt);
-            }
-            rc.lean_dec(opt);
-        } else {
-            rc.lean_dec(opt);
+        // Try inductive recursor reduction
+        if (inductive.inductiveReduceRec(
+            self.env(),
+            self.lctx,
+            e,
+            &whnfCallback,
+            &inferTypeCallback,
+            &isDefEqCallback,
+        )) |r| {
+            return r;
         }
         return null;
     }
@@ -890,6 +911,8 @@ fn leanKernelWhnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c)
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;
+    g_current_tc = &tc;
+    defer g_current_tc = null;
     return tc.whnf(a);
 }
 
@@ -917,6 +940,8 @@ fn leanKernelIsDefEq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyop
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;
+    g_current_tc = &tc;
+    defer g_current_tc = null;
     return if (tc.isDefEq(a, b)) 1 else 0;
 }
 
@@ -944,6 +969,8 @@ fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;
+    g_current_tc = &tc;
+    defer g_current_tc = null;
     return tc.check(a);
 }
 

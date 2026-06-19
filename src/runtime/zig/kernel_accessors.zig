@@ -34,6 +34,7 @@ extern fn lean_local_ctx_find(lctx: *anyopaque, fvar_id: *anyopaque) callconv(.c
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_mk_let_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, value: *anyopaque, nondep: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_is_empty(lctx: *anyopaque) callconv(.c) u8;
+extern fn lean_list_cons(head: *anyopaque, tail: *anyopaque) callconv(.c) *anyopaque;
 
 // ── Option helpers ──────────────────────────────────────────────────────────
 
@@ -64,6 +65,12 @@ pub inline fn listHead(o: *anyopaque) *anyopaque {
 
 pub inline fn listTail(o: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(o, 1) orelse @panic("listTail: missing");
+}
+
+/// Build a singleton List: [x] = cons(x, nil)
+pub fn mkList1(x: *anyopaque) *anyopaque {
+    const nil = object.lean_box(0).?; // List.nil is scalar 0
+    return lean_list_cons(x, nil);
 }
 
 pub fn listLength(o: *anyopaque) usize {
@@ -124,27 +131,39 @@ pub inline fn ciIsRecursor(ci: *anyopaque) bool {
     return ciKind(ci) == .rec;
 }
 
-// ConstantVal fields (shared by all *Val via structure inheritance):
-// field 0 = name, field 1 = levelParams, field 2 = type
-// Extended fields vary by kind.
+// ConstantInfo layout:
+//   field 0 = val (the specific *Val object), scalar tag = kind
+// Each *Val has a nested ConstantVal as field 0:
+//   ConstantVal: field 0 = name, field 1 = levelParams, field 2 = type
+// *Val-specific fields start at index 1.
+
+/// Get the val object (field 0 of ConstantInfo).
+pub inline fn ciVal(ci: *anyopaque) *anyopaque {
+    return ctor.lean_ctor_get(ci, 0) orelse @panic("ciVal");
+}
+
+/// Get the nested ConstantVal (field 0 of the val object).
+pub inline fn ciConstantVal(ci: *anyopaque) *anyopaque {
+    return ctor.lean_ctor_get(ciVal(ci), 0) orelse @panic("ciConstantVal");
+}
 
 pub inline fn ciName(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 0) orelse @panic("ciName");
+    return ctor.lean_ctor_get(ciConstantVal(ci), 0) orelse @panic("ciName");
 }
 
 pub inline fn ciLevelParams(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 1) orelse @panic("ciLevelParams");
+    return ctor.lean_ctor_get(ciConstantVal(ci), 1) orelse @panic("ciLevelParams");
 }
 
 pub inline fn ciType(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 2) orelse @panic("ciType");
+    return ctor.lean_ctor_get(ciConstantVal(ci), 2) orelse @panic("ciType");
 }
 
 pub fn ciNumLparams(ci: *anyopaque) usize {
     return listLength(ciLevelParams(ci));
 }
 
-// has_value: defnInfo (field 3 = value), thmInfo (field 3 = value), opaqueInfo (field 3 = value)
+// has_value: DefinitionVal field 1 = value, TheoremVal field 1 = value, OpaqueVal field 1 = value
 pub fn ciHasValue(ci: *anyopaque) bool {
     return switch (ciKind(ci)) {
         .defn, .thm, .opaque_ci => true,
@@ -153,10 +172,8 @@ pub fn ciHasValue(ci: *anyopaque) bool {
 }
 
 pub fn ciValue(ci: *anyopaque) *anyopaque {
-    return switch (ciKind(ci)) {
-        .defn, .thm, .opaque_ci => ctor.lean_ctor_get(ci, 3) orelse @panic("ciValue"),
-        else => @panic("ciValue: not a definition/theorem/opaque"),
-    };
+    // value is field 1 of the val object (after ConstantVal at field 0)
+    return ctor.lean_ctor_get(ciVal(ci), 1) orelse @panic("ciValue");
 }
 
 // ── ReducibilityHints ───────────────────────────────────────────────────────
@@ -211,53 +228,50 @@ pub fn hintCompare(h1: *anyopaque, h2: *anyopaque) i8 {
 }
 
 // ── DefinitionVal ───────────────────────────────────────────────────────────
-// extends ConstantVal: field 3 = value, field 4 = hints, field 5 = safety, field 6 = all
+// field 0 = ConstantVal (nested), field 1 = value, field 2 = hints,
+// scalar = safety, field 3 = all
 // safety is DefinitionSafety: unsafe=0, safe=1, partial=2 (scalar)
 
 pub const DefinitionSafety = enum(u8) { unsafe_def = 0, safe = 1, partial = 2 };
 
 pub fn defnValSafety(ci: *anyopaque) DefinitionSafety {
-    // safety is a scalar stored after obj fields. field 5 is the 6th obj field (0-indexed).
-    // Actually it's an inductive stored as scalar in the ctor.
-    // Let's check: DefinitionVal has obj fields: name, levelParams, type, value, hints, all
-    // and scalar fields: safety
-    // safety = DefinitionSafety is an enum stored as u8 scalar
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque));
-    return @enumFromInt(ctor.lean_ctor_get_uint8(ci, offset));
+    return @enumFromInt(ctor.lean_ctor_get_uint8(v, offset));
 }
 
 pub fn defnValHints(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 4) orelse @panic("defnValHints");
+    return ctor.lean_ctor_get(ciVal(ci), 2) orelse @panic("defnValHints");
 }
 
 pub fn defnValValue(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 3) orelse @panic("defnValValue");
+    return ctor.lean_ctor_get(ciVal(ci), 1) orelse @panic("defnValValue");
 }
 
 pub fn defnValAll(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 6) orelse @panic("defnValAll");
+    return ctor.lean_ctor_get(ciVal(ci), 3) orelse @panic("defnValAll");
 }
 
 // ── InductiveVal ────────────────────────────────────────────────────────────
-// extends ConstantVal: field 3 = numParams, field 4 = numIndices,
-// field 5 = all, field 6 = ctors, field 7 = numNested,
+// field 0 = ConstantVal (nested), field 1 = numParams, field 2 = numIndices,
+// field 3 = all, field 4 = ctors, field 5 = numNested,
 // scalar: isRec, isUnsafe, isReflexive
 
 pub fn inductValNumParams(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 3) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 1) orelse object.lean_box(0).?);
 }
 
 pub fn inductValNumIndices(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 4) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 2) orelse object.lean_box(0).?);
 }
 
 pub fn inductValAll(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 5) orelse @panic("inductValAll");
+    return ctor.lean_ctor_get(ciVal(ci), 3) orelse @panic("inductValAll");
 }
 
 pub fn inductValCtors(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 6) orelse @panic("inductValCtors");
+    return ctor.lean_ctor_get(ciVal(ci), 4) orelse @panic("inductValCtors");
 }
 
 pub fn inductValNumCtors(ci: *anyopaque) usize {
@@ -265,87 +279,94 @@ pub fn inductValNumCtors(ci: *anyopaque) usize {
 }
 
 pub fn inductValIsRec(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque));
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 pub fn inductValIsUnsafe(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque) + 1);
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 pub fn inductValIsReflexive(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque) + 2);
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 // ── ConstructorVal ──────────────────────────────────────────────────────────
-// extends ConstantVal: field 3 = induct, field 4 = cidx,
-// field 5 = numParams, field 6 = numFields, scalar: isUnsafe
+// field 0 = ConstantVal (nested), field 1 = induct, field 2 = cidx,
+// field 3 = numParams, field 4 = numFields, scalar: isUnsafe
 
 pub fn ctorValInduct(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 3) orelse @panic("ctorValInduct");
+    return ctor.lean_ctor_get(ciVal(ci), 1) orelse @panic("ctorValInduct");
 }
 
 pub fn ctorValCidx(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 4) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 2) orelse object.lean_box(0).?);
 }
 
 pub fn ctorValNumParams(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 5) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 3) orelse object.lean_box(0).?);
 }
 
 pub fn ctorValNumFields(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 6) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 4) orelse object.lean_box(0).?);
 }
 
 pub fn ctorValIsUnsafe(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque));
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 // ── RecursorVal ─────────────────────────────────────────────────────────────
-// extends ConstantVal: field 3 = all, field 4 = numParams, field 5 = numIndices,
-// field 6 = numMotives, field 7 = numMinors, field 8 = rules, scalar: k, isUnsafe
+// field 0 = ConstantVal (nested), field 1 = all, field 2 = numParams,
+// field 3 = numIndices, field 4 = numMotives, field 5 = numMinors,
+// field 6 = rules, scalar: k, isUnsafe
 
 pub fn recValAll(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 3) orelse @panic("recValAll");
+    return ctor.lean_ctor_get(ciVal(ci), 1) orelse @panic("recValAll");
 }
 
 pub fn recValNumParams(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 4) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 2) orelse object.lean_box(0).?);
 }
 
 pub fn recValNumIndices(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 5) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 3) orelse object.lean_box(0).?);
 }
 
 pub fn recValNumMotives(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 6) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 4) orelse object.lean_box(0).?);
 }
 
 pub fn recValNumMinors(ci: *anyopaque) usize {
-    return object.lean_unbox(ctor.lean_ctor_get(ci, 7) orelse object.lean_box(0).?);
+    return object.lean_unbox(ctor.lean_ctor_get(ciVal(ci), 5) orelse object.lean_box(0).?);
 }
 
 pub fn recValRules(ci: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ci, 8) orelse @panic("recValRules");
+    return ctor.lean_ctor_get(ciVal(ci), 6) orelse @panic("recValRules");
 }
 
 pub fn recValK(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque));
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 pub fn recValIsUnsafe(ci: *anyopaque) bool {
-    const num_objs = ctor.ctorNumObjs(ci);
+    const v = ciVal(ci);
+    const num_objs = ctor.ctorNumObjs(v);
     const offset: c_uint = @intCast(num_objs * @sizeOf(?*anyopaque) + 1);
-    return ctor.lean_ctor_get_uint8(ci, offset) != 0;
+    return ctor.lean_ctor_get_uint8(v, offset) != 0;
 }
 
 pub fn recValGetMajorIdx(ci: *anyopaque) usize {
@@ -358,6 +379,20 @@ pub fn recValGetFirstIndexIdx(ci: *anyopaque) usize {
 
 pub fn recValGetFirstMinorIdx(ci: *anyopaque) usize {
     return recValNumParams(ci) + recValNumMotives(ci);
+}
+
+/// Get the major inductive type name by walking the recursor type.
+/// This mirrors `RecursorVal.getMajorInduct` in Lean/Declaration.lean.
+pub fn recValMajorInduct(ci: *anyopaque) *anyopaque {
+    const n = recValGetMajorIdx(ci);
+    var t = ciType(ci);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        t = ea.bindingBody(t);
+    }
+    // t is now the domain of the major premise: I ... indices
+    const dom = ea.bindingDomain(t);
+    return ea.constName(ea.getAppFn(dom));
 }
 
 // ── RecursorRule ─────────────────────────────────────────────────────────────

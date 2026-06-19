@@ -17,6 +17,8 @@ pub const exception = @import("exception.zig");
 pub const kernel = @import("kernel.zig");
 pub const kernel_accessors = @import("kernel_accessors.zig");
 pub const type_checker = @import("type_checker.zig");
+pub const inductive = @import("inductive.zig");
+pub const quot = @import("quot.zig");
 pub const elab_environment = @import("elab_environment.zig");
 pub const expr_lt = @import("expr_lt.zig");
 pub const expr_accessors = @import("expr_accessors.zig");
@@ -107,6 +109,8 @@ comptime {
         _ = kernel.force_link;
         _ = kernel_accessors.force_link;
         _ = type_checker.force_link;
+        _ = inductive.force_link;
+        _ = quot.force_link;
         _ = elab_environment.force_link;
         _ = instantiate_mvars.force_link;
         _ = instantiate_expr_mvars.force_link;

@@ -188,6 +188,13 @@ pub export fn lean_inc(o: ?*anyopaque) callconv(.c) void {
     lean_inc_n(o, 1);
 }
 
+/// Increment reference count and return the same pointer.
+/// Convenience helper for retain patterns.
+pub fn lean_inc_ret(o: *anyopaque) *anyopaque {
+    lean_inc(o);
+    return o;
+}
+
 pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
     var o = o_arg;
     const hdr = header(o);
