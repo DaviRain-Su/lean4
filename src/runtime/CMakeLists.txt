@@ -34,6 +34,7 @@ set(
   uv/system.cpp
   uv/signal.cpp
   uv/zig_link_compat.cpp
+  zig/uv_init.cpp
   openssl.cpp
 )
 if(USE_MIMALLOC)
