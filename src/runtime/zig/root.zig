@@ -28,6 +28,7 @@ pub const float = @import("float.zig");
 pub const hash = @import("hash.zig");
 pub const allocprof = @import("allocprof.zig");
 pub const init = @import("init.zig");
+pub const instantiate_mvars = @import("instantiate_mvars.zig");
 pub const int = @import("int.zig");
 pub const int_conv = @import("int_conv.zig");
 pub const io_error = @import("io_error.zig");
@@ -100,6 +101,7 @@ comptime {
     if (runtime_options.export_kernel_symbols) {
         _ = kernel.force_link;
         _ = elab_environment.force_link;
+        _ = instantiate_mvars.force_link;
     }
     _ = list;
     _ = memory;
