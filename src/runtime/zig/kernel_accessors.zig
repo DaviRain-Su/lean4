@@ -37,7 +37,7 @@ extern fn lean_local_ctx_is_empty(lctx: *anyopaque) callconv(.c) u8;
 
 // ── Option helpers ──────────────────────────────────────────────────────────
 
-inline fn isNone(opt: *anyopaque) bool {
+pub inline fn isNone(opt: *anyopaque) bool {
     return object.lean_is_scalar(opt);
 }
 

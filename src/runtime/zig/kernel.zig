@@ -304,7 +304,7 @@ pub fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyop
     return instantiateImpl(a, 0, 1, single[0..], false);
 }
 
-fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const n = array.lean_array_size(subst);
     if (n == 0) return retain(a);
     return instantiateImplArr(a, 0, n, subst, false);
