@@ -294,9 +294,10 @@ typedef struct {
      * invariant: m_imp == nullptr
      * transition: RC becomes 0 ==> freed (`deactivate_task` lock) */
 typedef struct lean_task {
-    lean_object            m_header;
-    _Atomic(lean_object *) m_value;
-    lean_task_imp *        m_imp;
+    lean_object              m_header;
+    _Atomic(lean_object *)   m_value;
+    // This field is atomic as we access it both with and without holding the task_manager mutex.
+    _Atomic(lean_task_imp *) m_imp;
 } lean_task_object;
 
 typedef struct lean_promise {

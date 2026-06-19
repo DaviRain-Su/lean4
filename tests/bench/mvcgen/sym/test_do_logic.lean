@@ -459,22 +459,22 @@ theorem forIn_eq_sum (xs : Array Nat) {m} [Monad m] [Assertion Pred] [Assertion 
 
 theorem forIn_map_eq_sum_add_size' (xs : Array Nat) {m} [Monad m] [Assertion Pred] [Assertion EPred]
     [WPMonad m Pred EPred] :
-    Triple (m := m) ⊤ (do
+    ⦃ ⊤ ⦄ ((do
       let mut sum : Nat := 0
       for n in (xs.iterM Id).map (· + 1) do
         sum := sum + n
-      return sum) (fun r => ⌜r = xs.sum + xs.size⌝) ⊥ := by
+      return sum) : m _) ⦃ fun r => ⌜r = xs.sum + xs.size⌝ ⦄ := by
   mvcgen'
   case inv1 => exact fun cur n => ⌜n = cur.prefix.sum + cur.prefix.length⌝
   all_goals grind
 
 theorem forIn_map_eq_sum_add_size (xs : Array Nat) {m} [Monad m] [Assertion Pred] [Assertion EPred]
     [WPMonad m Pred EPred] :
-    Triple (m := m) ⊤ (do
+    ⦃ ⊤ ⦄ ((do
       let mut sum : Nat := 0
       for n in (xs.iterM Id).map (· + 1) do
         sum := sum + n
-      return sum) (fun r => ⌜r = xs.sum + xs.size⌝) ⊥ := by
+      return sum) : m _) ⦃ fun r => ⌜r = xs.sum + xs.size⌝ ⦄ := by
   mvcgen'
   case inv1 => exact fun cur n => ⌜n = cur.prefix.sum + cur.prefix.length⌝
   all_goals grind
@@ -482,31 +482,31 @@ theorem forIn_map_eq_sum_add_size (xs : Array Nat) {m} [Monad m] [Assertion Pred
 
 theorem forIn_mapM_eq_sum_add_size (xs : Array Nat) {m} [Monad m] [MonadAttach m]
     [LawfulMonad m] [WeaklyLawfulMonadAttach m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] :
-    Triple (m := m) ⊤ (do
+    ⦃ ⊤ ⦄ ((do
       let mut sum : Nat := 0
       for n in (xs.iterM Id).mapM (pure (f := m) <| · + 1) do
         sum := sum + n
-      return sum) (fun r => ⌜r = xs.sum + xs.size⌝) ⊥ := by
+      return sum) : m _) ⦃ fun r => ⌜r = xs.sum + xs.size⌝ ⦄ := by
   mvcgen'
   case inv1 => exact fun cur n => ⌜n = cur.prefix.sum + cur.prefix.length⌝
   all_goals grind
 
 theorem forIn_filterMapM_eq_sum_add_size (xs : Array Nat) {m}
     [Monad m] [LawfulMonad m] [MonadAttach m] [WeaklyLawfulMonadAttach m] [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] :
-    Triple (m := m) ⊤ (do
+    ⦃ ⊤ ⦄ ((do
       let mut sum : Nat := 0
       for n in (xs.iterM Id).filterMapM (pure (f := m) <| some <| · + 1) do
         sum := sum + n
-      return sum)  (fun r => ⌜r = xs.sum + xs.size⌝) ⊥ := by
+      return sum) : m _) ⦃ fun r => ⌜r = xs.sum + xs.size⌝ ⦄ := by
   mvcgen'
   case inv1 => exact fun cur n => ⌜n = cur.prefix.sum + cur.prefix.length⌝
   all_goals grind
 
 theorem foldM_eq_sum (xs : Array Nat) {m} [Monad m] [LawfulMonad m]
     [Assertion Pred] [Assertion EPred] [WPMonad m Pred EPred] :
-    Triple (m := m) ⊤
+    ⦃ ⊤ ⦄
       (xs.iter.foldM (m := m) (init := 0) (pure <| · + ·))
-      (fun r => ⌜r = xs.sum⌝) ⊥ := by
+      ⦃ fun r => ⌜r = xs.sum⌝ ⦄ := by
   mvcgen'
   case inv1 => exact fun cur n => ⌜n = cur.prefix.sum⌝
   all_goals grind
@@ -689,8 +689,8 @@ def incr (n : Nat) : StateT Nat m PUnit := modify (· + n)
 @[spec]
 theorem Spec.incr
     (post : PUnit → Nat → Pred) (epost : EPred) (n : Nat) :
-    Triple (fun s => post ⟨⟩ (s + n))
-      (incr n : StateT Nat m PUnit) post epost := by
+    Triple (incr n : StateT Nat m PUnit)
+      (fun s => post ⟨⟩ (s + n)) post epost := by
   mvcgen' [TopBetaReduction.incr]; rfl
 
 /--
@@ -729,3 +729,28 @@ theorem incr_poly (amounts : List Nat) :
 
 
 end TopBetaReduction
+
+namespace RepeatInvariantOfInvariantAndBreak
+
+/-! Verifies a `while` loop whose `mvcgen'` invariant is supplied via
+`RepeatInvariant.ofInvariantAndBreak`: a loop invariant `inv` that holds after every iteration plus
+an `onBreak` condition (here the negated loop condition) that additionally holds once the loop
+exits. -/
+
+/-- Counts `i` down from `n`, incrementing the state on each iteration, so the final state is `n`. -/
+def countdown (n : Nat) : StateT Nat Id Unit := do
+  let mut i := n
+  while i > 0 do
+    i := i - 1
+    modify (· + 1)
+  return
+
+theorem countdown_spec (n : Nat) :
+    ⦃ fun s => s = 0 ⦄ countdown n ⦃ fun _ s => s = n ⦄ := by
+  mvcgen' [countdown]
+  case inv1 => exact RepeatInvariant.ofInvariantAndBreak (fun i s => s + i = n) (fun i _ => i = 0)
+  case inv2 => exact fun i => i
+  any_goals simp at *
+  all_goals grind
+
+end RepeatInvariantOfInvariantAndBreak

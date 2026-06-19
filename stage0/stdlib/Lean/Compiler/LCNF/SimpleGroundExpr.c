@@ -206,10 +206,10 @@ LEAN_EXPORT lean_object* l_Lean_Compiler_LCNF_addSimpleGroundDecl___lam__0(lean_
 LEAN_EXPORT lean_object* l_Lean_Compiler_LCNF_addSimpleGroundDecl(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Compiler_LCNF_getSimpleGroundExpr(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Compiler_LCNF_getSimpleGroundExpr___boxed(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0(lean_object*, lean_object*, lean_object*);
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Lean_PersistentHashMap_containsAtAux___at___00Lean_PersistentHashMap_containsAux___at___00Lean_PersistentHashMap_contains___at___00Lean_Compiler_LCNF_isSimpleGroundDecl_spec__0_spec__0_spec__1___redArg(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_PersistentHashMap_containsAtAux___at___00Lean_PersistentHashMap_containsAux___at___00Lean_PersistentHashMap_contains___at___00Lean_Compiler_LCNF_isSimpleGroundDecl_spec__0_spec__0_spec__1___redArg___boxed(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Lean_PersistentHashMap_containsAux___at___00Lean_PersistentHashMap_contains___at___00Lean_Compiler_LCNF_isSimpleGroundDecl_spec__0_spec__0___redArg(lean_object*, size_t, lean_object*);
@@ -2050,7 +2050,7 @@ lean_dec(v_declName_574_);
 return v_res_575_;
 }
 }
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(lean_object* v_snd_576_, lean_object* v_other_577_){
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(lean_object* v_snd_576_, lean_object* v_other_577_){
 _start:
 {
 lean_object* v___x_578_; lean_object* v___x_579_; lean_object* v___x_580_; 
@@ -2064,7 +2064,7 @@ lean_ctor_set(v___x_580_, 0, v___x_579_);
 return v___x_580_;
 }
 }
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(lean_object* v_env_581_, lean_object* v_a_582_){
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(lean_object* v_env_581_, lean_object* v_a_582_){
 _start:
 {
 lean_object* v___y_584_; lean_object* v_snd_588_; lean_object* v___x_590_; uint8_t v_isShared_591_; uint8_t v_isSharedCheck_602_; 
@@ -2154,7 +2154,7 @@ else
 lean_object* v___x_600_; 
 lean_dec(v_val_593_);
 lean_del_object(v___x_590_);
-v___x_600_ = l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(v_snd_588_, v___x_592_);
+v___x_600_ = l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(v_snd_588_, v___x_592_);
 v___y_584_ = v___x_600_;
 goto v___jp_583_;
 }
@@ -2163,7 +2163,7 @@ else
 {
 lean_object* v___x_601_; 
 lean_del_object(v___x_590_);
-v___x_601_ = l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(v_snd_588_, v___x_592_);
+v___x_601_ = l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg___lam__0(v_snd_588_, v___x_592_);
 v___y_584_ = v___x_601_;
 goto v___jp_583_;
 }
@@ -2178,7 +2178,7 @@ v___x_606_ = lean_box(0);
 v___x_607_ = lean_alloc_ctor(0, 2, 0);
 lean_ctor_set(v___x_607_, 0, v___x_606_);
 lean_ctor_set(v___x_607_, 1, v_declName_605_);
-v___x_608_ = l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(v_env_604_, v___x_607_);
+v___x_608_ = l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(v_env_604_, v___x_607_);
 v_fst_609_ = lean_ctor_get(v___x_608_, 0);
 lean_inc(v_fst_609_);
 lean_dec_ref(v___x_608_);
@@ -2196,11 +2196,11 @@ return v_val_610_;
 }
 }
 }
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0(lean_object* v_env_611_, lean_object* v_inst_612_, lean_object* v_a_613_){
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0(lean_object* v_env_611_, lean_object* v_inst_612_, lean_object* v_a_613_){
 _start:
 {
 lean_object* v___x_614_; 
-v___x_614_ = l___private_Init_While_0__whileM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(v_env_611_, v_a_613_);
+v___x_614_ = l___private_Init_While_0__repeatM_erased___at___00Lean_Compiler_LCNF_getSimpleGroundExprWithResolvedRefs_spec__0___redArg(v_env_611_, v_a_613_);
 return v___x_614_;
 }
 }

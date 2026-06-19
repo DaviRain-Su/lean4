@@ -1670,10 +1670,10 @@ static const lean_ctor_object l_WellFounded_opaqueFix_u2083___at___00__private_L
 static const lean_object* l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1___redArg___closed__0 = (const lean_object*)&l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1___redArg___closed__0_value;
 LEAN_EXPORT lean_object* l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1___redArg(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1___redArg___boxed(lean_object*, lean_object*, lean_object*);
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(lean_object*);
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(lean_object*);
 LEAN_EXPORT uint8_t l___private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l___private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap___boxed(lean_object*, lean_object*);
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0(lean_object*, lean_object*);
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_WellFounded_opaqueFix_u2083___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__1___boxed(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l___private_Lean_Environment_0__Lean_subsumesInfo(lean_object*, lean_object*, lean_object*);
@@ -27326,7 +27326,7 @@ lean_dec(v_upperBound_8558_);
 return v_res_8561_;
 }
 }
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(lean_object* v_a_8562_){
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(lean_object* v_a_8562_){
 _start:
 {
 lean_object* v_snd_8563_; lean_object* v___x_8565_; uint8_t v_isShared_8566_; uint8_t v_isSharedCheck_8581_; 
@@ -27443,7 +27443,7 @@ v___x_8585_ = lean_box(0);
 v___x_8586_ = lean_alloc_ctor(0, 2, 0);
 lean_ctor_set(v___x_8586_, 0, v___x_8585_);
 lean_ctor_set(v___x_8586_, 1, v_ty_8584_);
-v___x_8587_ = l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(v___x_8586_);
+v___x_8587_ = l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(v___x_8586_);
 v_fst_8588_ = lean_ctor_get(v___x_8587_, 0);
 lean_inc(v_fst_8588_);
 if (lean_obj_tag(v_fst_8588_) == 0)
@@ -27581,11 +27581,11 @@ v_r_8618_ = lean_box(v_res_8617_);
 return v_r_8618_;
 }
 }
-LEAN_EXPORT lean_object* l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0(lean_object* v_inst_8619_, lean_object* v_a_8620_){
+LEAN_EXPORT lean_object* l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0(lean_object* v_inst_8619_, lean_object* v_a_8620_){
 _start:
 {
 lean_object* v___x_8621_; 
-v___x_8621_ = l___private_Init_While_0__whileM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(v_a_8620_);
+v___x_8621_ = l___private_Init_While_0__repeatM_erased___at___00__private_Lean_Environment_0__Lean_subsumesInfo_isPropCheap_spec__0___redArg(v_a_8620_);
 return v___x_8621_;
 }
 }

@@ -45,7 +45,7 @@ lean_object* l_Array_instInhabited(lean_object*);
 lean_object* lean_nat_add(lean_object*, lean_object*);
 lean_object* lean_array_get(lean_object*, lean_object*, lean_object*);
 lean_object* l_WellFounded_opaqueFix_u2083___redArg(lean_object*, lean_object*, lean_object*, lean_object*);
-lean_object* l___private_Init_While_0__whileM_erased___redArg(lean_object*, lean_object*, lean_object*);
+lean_object* l___private_Init_While_0__repeatM_erased___redArg(lean_object*, lean_object*, lean_object*);
 lean_object* l___private_Init_Data_Array_Basic_0__Array_insertIdx_loop(lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_array_fget_borrowed(lean_object*, lean_object*);
 lean_object* l_Lean_NameSet_insert(lean_object*, lean_object*);
@@ -7672,7 +7672,7 @@ lean_ctor_set(v___x_2670_, 1, v_defects_2669_);
 v___x_2671_ = lean_alloc_ctor(0, 2, 0);
 lean_ctor_set(v___x_2671_, 0, v___y_2663_);
 lean_ctor_set(v___x_2671_, 1, v___x_2670_);
-v___x_2672_ = l___private_Init_While_0__whileM_erased___redArg(v_inst_2653_, v___f_2666_, v___x_2671_);
+v___x_2672_ = l___private_Init_While_0__repeatM_erased___redArg(v_inst_2653_, v___f_2666_, v___x_2671_);
 v___x_2673_ = lean_apply_4(v_toBind_2654_, lean_box(0), lean_box(0), v___x_2672_, v___f_2657_);
 return v___x_2673_;
 }
