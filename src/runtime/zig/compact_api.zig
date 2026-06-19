@@ -23,6 +23,7 @@ const c = @cImport({
     @cInclude("sys/stat.h");
     @cInclude("errno.h");
     @cInclude("stdio.h");
+    @cInclude("sys/mman.h");
 });
 
 const Obj = ?*anyopaque;
@@ -134,11 +135,12 @@ pub export fn lean_compacted_region_save(
     const pid = c.getpid();
     const tmp_path = std.fmt.bufPrintZ(&tmp_buf, "{s}.tmp.{d}", .{ path, pid }) catch
         return mkError("output path too long");
-    var fd = c.open(tmp_path, c.O_WRONLY | c.O_CREAT | c.O_TRUNC, @as(c_uint, 0o644));
+    const fd = c.open(tmp_path, c.O_WRONLY | c.O_CREAT | c.O_TRUNC, @as(c_uint, 0o644));
     if (fd < 0) {
         return mkError("failed to open output file");
     }
-    defer if (fd >= 0) {
+    var needs_cleanup = true;
+    defer if (needs_cleanup) {
         _ = c.close(fd);
         _ = c.unlink(tmp_path);
     };
@@ -176,7 +178,7 @@ pub export fn lean_compacted_region_save(
             return mkError("failed to write data");
         }
         _ = c.close(fd);
-        fd = -1;
+        needs_cleanup = false;
         if (c.rename(tmp_path, path) != 0) {
             _ = c.unlink(tmp_path);
             return mkError("failed to rename output file");
@@ -246,7 +248,7 @@ pub export fn lean_compacted_region_save(
         }
     }
     _ = c.close(fd);
-    fd = -1;
+    needs_cleanup = false;
     if (c.rename(tmp_path, path) != 0) {
         _ = c.unlink(tmp_path);
         return mkError("failed to rename output file");
@@ -275,29 +277,61 @@ pub export fn lean_compacted_region_read(
     }
     const size = @as(usize, @intCast(st.st_size));
 
-    const buffer = std.heap.c_allocator.alloc(u8, size) catch return mkError("out of memory");
-
-    var total: usize = 0;
-    while (total < size) {
-        const n = c.read(fd, buffer.ptr + total, size - total);
-        if (n < 0) {
-            std.heap.c_allocator.free(buffer);
-            return mkError("failed to read input file");
-        }
-        if (n == 0) break;
-        total += @as(usize, @intCast(n));
-    }
-    if (total < OLEAN_HEADER_SIZE) {
-        std.heap.c_allocator.free(buffer);
+    // Read just the header to extract base_addr for the mmap attempt.
+    var header_bytes: [OLEAN_HEADER_SIZE]u8 = undefined;
+    if (c.read(fd, &header_bytes, OLEAN_HEADER_SIZE) != OLEAN_HEADER_SIZE) {
         return mkError("file too short");
     }
-
-    const header: *align(1) OleanHeader = @ptrCast(buffer.ptr);
+    const header: *align(1) OleanHeader = @ptrCast(&header_bytes);
     if (!std.mem.eql(u8, &header.marker, "olean")) {
-        std.heap.c_allocator.free(buffer);
         return mkError("invalid olean magic");
     }
     const base_addr = header.base_addr;
+
+    // Try to mmap at base_addr so pointer fixups are zero-cost.
+    // MAP_PRIVATE gives copy-on-write; if the kernel doesn't place it at
+    // base_addr we fall back to malloc + read.
+    const MAP_FAILED_PTR: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var buffer: [*]u8 = undefined;
+    var buffer_is_mmap: bool = false;
+    var buffer_owned: bool = true;
+    {
+        const mapped = c.mmap(
+            @ptrFromInt(base_addr),
+            size,
+            c.PROT_READ | c.PROT_WRITE,
+            c.MAP_PRIVATE,
+            fd,
+            0,
+        );
+        if (mapped != MAP_FAILED_PTR and @intFromPtr(mapped) == base_addr) {
+            buffer = @ptrCast(mapped);
+            buffer_is_mmap = true;
+        } else {
+            if (mapped != MAP_FAILED_PTR) _ = c.munmap(mapped, size);
+            const malloc_buf = std.heap.c_allocator.alloc(u8, size) catch return mkError("out of memory");
+            @memcpy(malloc_buf[0..OLEAN_HEADER_SIZE], &header_bytes);
+            var total: usize = OLEAN_HEADER_SIZE;
+            while (total < size) {
+                const n = c.read(fd, malloc_buf.ptr + total, size - total);
+                if (n < 0) {
+                    std.heap.c_allocator.free(malloc_buf);
+                    return mkError("failed to read input file");
+                }
+                if (n == 0) break;
+                total += @as(usize, @intCast(n));
+            }
+            buffer = malloc_buf.ptr;
+        }
+    }
+    defer if (buffer_owned) {
+        if (buffer_is_mmap) {
+            _ = c.munmap(buffer, size);
+        } else {
+            std.heap.c_allocator.free(buffer[0..size]);
+        }
+    };
+    const total: usize = size;
 
     var data_off: usize = OLEAN_HEADER_SIZE;
     var data_size: usize = size - OLEAN_HEADER_SIZE;
@@ -305,48 +339,37 @@ pub export fn lean_compacted_region_read(
     var lib_relocs: []compact.LibReloc = &.{};
 
     if (header.version == 3) {
-        // v3: [header][data_size][data][closure_offsets][lib_table]
         if (total < OLEAN_HEADER_SIZE + @sizeOf(usize)) {
-            std.heap.c_allocator.free(buffer);
             return mkError("v3 file too short for data_size");
         }
-        const ds: *align(1) usize = @ptrCast(buffer.ptr + OLEAN_HEADER_SIZE);
+        const ds: *align(1) usize = @ptrCast(buffer + OLEAN_HEADER_SIZE);
         data_off = OLEAN_HEADER_SIZE + @sizeOf(usize);
         data_size = ds.*;
 
-        // Parse closure offsets and lib table from after the data section.
         var p = data_off + data_size;
         if (p + @sizeOf(u32) > total) {
-            std.heap.c_allocator.free(buffer);
             return mkError("v3 file truncated before closure section");
         }
-        const num_closure: *align(1) u32 = @ptrCast(buffer.ptr + p);
+        const num_closure: *align(1) u32 = @ptrCast(buffer + p);
         p += @sizeOf(u32);
         if (num_closure.* > 0) {
-            closure_offsets = std.heap.c_allocator.alloc(usize, num_closure.*) catch {
-                std.heap.c_allocator.free(buffer);
+            closure_offsets = std.heap.c_allocator.alloc(usize, num_closure.*) catch
                 return mkError("out of memory");
-            };
             if (p + num_closure.* * @sizeOf(u64) > total) {
                 std.heap.c_allocator.free(closure_offsets);
-                std.heap.c_allocator.free(buffer);
                 return mkError("v3 file truncated in closure offsets");
             }
             for (0..num_closure.*) |i| {
-                const off: *align(1) u64 = @ptrCast(buffer.ptr + p + i * @sizeOf(u64));
+                const off: *align(1) u64 = @ptrCast(buffer + p + i * @sizeOf(u64));
                 closure_offsets[i] = @intCast(off.*);
             }
             p += num_closure.* * @sizeOf(u64);
-
-            // Parse lib table and compute relocations.
-            lib_relocs = parseLibRelocs(buffer.ptr, p, total) orelse {
+            lib_relocs = parseLibRelocs(buffer, p, total) orelse {
                 std.heap.c_allocator.free(closure_offsets);
-                std.heap.c_allocator.free(buffer);
                 return mkError("failed to parse lib relocation table");
             };
         }
     } else if (header.version != 2) {
-        std.heap.c_allocator.free(buffer);
         return mkError("unsupported olean version");
     }
 
@@ -355,7 +378,7 @@ pub export fn lean_compacted_region_read(
 
     compact.sortRegionsByBaseAddr(dep_regions.items);
     var reader = compact.Reader.init(
-        buffer.ptr + data_off,
+        buffer + data_off,
         data_size,
         base_addr + data_off,
         dep_regions.items,
@@ -363,7 +386,6 @@ pub export fn lean_compacted_region_read(
         closure_offsets,
     );
     const root = reader.read() orelse {
-        std.heap.c_allocator.free(buffer);
         return mkError("failed to read region");
     };
 
@@ -373,9 +395,10 @@ pub export fn lean_compacted_region_read(
     ctor.lean_ctor_set(region, 1, root);
     ctor.lean_ctor_set_usize(region, 2, @intCast(size));
     ctor.lean_ctor_set_usize(region, 3, @intCast(base_addr));
-    ctor.lean_ctor_set_usize(region, 4, @intCast(@intFromPtr(root) -% @intFromPtr(buffer.ptr)));
-    ctor.lean_ctor_set_uint8(region, @sizeOf(usize) * 5, 0);
+    ctor.lean_ctor_set_usize(region, 4, @intCast(@intFromPtr(root) -% @intFromPtr(buffer)));
+    ctor.lean_ctor_set_uint8(region, @sizeOf(usize) * 5, @intFromBool(buffer_is_mmap));
 
+    buffer_owned = false; // ownership transferred to region
     const pair = alloc.lean_alloc_ctor(0, 2, 0);
     ctor.lean_ctor_set(pair, 0, root);
     ctor.lean_ctor_set(pair, 1, region);
@@ -450,9 +473,14 @@ pub export fn lean_compacted_region_free(
 ) callconv(.c) *anyopaque {
     const buffer = regionBuffer(region);
     const size = regionSize(region);
+    const is_mmap = ctor.lean_ctor_get_uint8(region, @sizeOf(usize) * 5) != 0;
     ctor.lean_ctor_set(region, 1, object.lean_box(0));
     rc.lean_dec(region);
-    std.heap.c_allocator.free(buffer[0..size]);
+    if (is_mmap) {
+        _ = c.munmap(buffer, size);
+    } else {
+        std.heap.c_allocator.free(buffer[0..size]);
+    }
     return io_result.lean_io_result_mk_ok(object.lean_box(0));
 }
 

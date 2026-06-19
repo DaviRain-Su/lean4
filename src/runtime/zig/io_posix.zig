@@ -611,6 +611,8 @@ pub export fn lean_io_get_tid() callconv(.c) u64 {
         var tid: u64 = 0;
         _ = c.pthread_threadid_np(null, &tid);
         return tid;
+    } else if (builtin.target.os.tag == .linux) {
+        return @intCast(linux.gettid());
     }
     return @intCast(c.getpid());
 }
