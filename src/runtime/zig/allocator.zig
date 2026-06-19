@@ -6,6 +6,7 @@
 //! Provides a unified allocation path that works across environments:
 //! - x86/macOS/Linux: wraps libc malloc/free or mimalloc (via lean_alloc_object)
 //! - Solana SBF/eBPF: wraps a bump allocator or SBF-provided allocator
+//! - WASM (WASI/Emscripten): wraps WASI malloc or linear-memory bump allocator
 //!
 //! All runtime modules that need heap allocation should use
 //! `lean_alloc()` / `lean_free()` / `lean_realloc()` from this module
@@ -141,6 +142,93 @@ pub fn bumpReset() void {
     g_bump_end = @sizeOf(usize);
 }
 
+// ── WASM linear-memory backend ───────────────────────────────────────────────
+// For bare WASM (no WASI/Emscripten libc). Uses Zig's `@wasmMemoryGrow`
+// to extend linear memory, then bump-allocates within it.
+// WASI and Emscripten targets can use the C backend directly since they
+// provide malloc/free via wasi-libc / emscripten malloc.
+
+const builtin = @import("builtin");
+const is_wasm = builtin.cpu.arch.isWasm();
+
+var g_wasm_heap_base: usize = 0;
+var g_wasm_heap_end: usize = 0;
+
+/// Initialize WASM linear memory allocator with a given base address.
+/// The base should point to the end of the data/bss sections (typically
+/// provided by the linker or runtime startup code).
+pub fn setWasmHeapBase(base: usize) void {
+    g_wasm_heap_base = base;
+    g_wasm_heap_end = base;
+}
+
+fn wasmGrowPages(pages: usize) bool {
+    if (!is_wasm) return false;
+    const result = @wasmMemoryGrow(0, pages);
+    return result >= 0;
+}
+
+fn wasmAlloc(size: usize, alignment: usize) ?[*]u8 {
+    const ptr_align = if (alignment > 1) alignment else 1;
+    const aligned = std.mem.alignForward(usize, g_wasm_heap_end, ptr_align);
+    const new_end = aligned + size;
+    const page_size: usize = 64 * 1024; // WASM page size is 64KB
+    const current_pages_end = g_wasm_heap_base + ((g_wasm_heap_end - g_wasm_heap_base + page_size - 1) / page_size) * page_size;
+    if (new_end > current_pages_end) {
+        const needed = new_end - current_pages_end;
+        const pages_needed = (needed + page_size - 1) / page_size;
+        if (!wasmGrowPages(pages_needed)) return null;
+    }
+    g_wasm_heap_end = new_end;
+    return @ptrFromInt(aligned);
+}
+
+fn wasmRealloc(ptr: [*]u8, old_size: usize, new_size: usize, alignment: usize) ?[*]u8 {
+    const last_end = @intFromPtr(ptr) + old_size;
+    if (last_end == g_wasm_heap_end) {
+        if (new_size <= old_size) {
+            g_wasm_heap_end -= old_size - new_size;
+            return ptr;
+        }
+        const extra = new_size - old_size;
+        const page_size: usize = 64 * 1024;
+        const current_pages_end = g_wasm_heap_base + ((g_wasm_heap_end - g_wasm_heap_base + page_size - 1) / page_size) * page_size;
+        if (g_wasm_heap_end + extra > current_pages_end) {
+            const needed = g_wasm_heap_end + extra - current_pages_end;
+            const pages_needed = (needed + page_size - 1) / page_size;
+            if (!wasmGrowPages(pages_needed)) return null;
+        }
+        g_wasm_heap_end += extra;
+        return ptr;
+    }
+    const new_ptr = wasmAlloc(new_size, alignment) orelse return null;
+    @memcpy(new_ptr[0..old_size], ptr[0..old_size]);
+    return new_ptr;
+}
+
+fn wasmFree(ptr: [*]u8, size: usize, alignment: usize) void {
+    _ = alignment;
+    _ = ptr;
+    _ = size;
+    // Bump allocator: no individual frees. Memory reclaimed on reset.
+}
+
+fn wasmOwns(ptr: [*]u8) bool {
+    const p = @intFromPtr(ptr);
+    return p >= g_wasm_heap_base and p < g_wasm_heap_end;
+}
+
+pub const wasm_vtable: VTable = .{
+    .alloc = wasmAlloc,
+    .realloc = wasmRealloc,
+    .free = wasmFree,
+    .owns = wasmOwns,
+};
+
+pub fn wasmReset() void {
+    g_wasm_heap_end = g_wasm_heap_base;
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /// Allocate `size` bytes with the active allocator.
@@ -216,10 +304,20 @@ fn adapterRemap(_: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len:
 /// Call at runtime startup (before any allocation).
 /// On x86: defaults to C allocator (no action needed).
 /// On SBF: call setBumpBuffer() with the program's heap region.
+/// On bare WASM: call setWasmHeapBase() with the end of data/bss.
+/// On WASI/Emscripten: C allocator works directly (they provide malloc/free).
 pub fn initAllocator() void {
-    // Default: C allocator is already set
-    // For SBF: user should call setBumpBuffer() before initAllocator()
+    // Explicit bump buffer overrides everything (SBF)
     if (g_bump_buffer.len > 0) {
         vtable = bump_vtable;
+        return;
     }
+    // Explicit WASM heap base overrides (bare WASM without libc)
+    if (is_wasm and g_wasm_heap_base > 0) {
+        vtable = wasm_vtable;
+        return;
+    }
+    // Default: C allocator (libc malloc/free)
+    // Works for x86, WASI, and Emscripten targets
+    vtable = c_vtable;
 }
