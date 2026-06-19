@@ -102,29 +102,51 @@ pub export fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
 
 // ── Expression structural equality ───────────────────────────────────────────
 
+/// Structural equality with binder info (lean_expr_equal / expr_eq_fn<true>).
 pub export fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    return exprEqRec(a, b, true);
+}
+
+/// Structural equality without binder info (lean_expr_eqv / expr_eq_fn<false>).
+/// Same as lean_expr_equal but ignores binder_info and let_nondep fields.
+pub export fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    return exprEqRec(a, b, false);
+}
+
+/// Core structural equality. compare_bi controls whether binder info is checked.
+fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
     if (a == b) return 1;
-    if (object.lean_is_scalar(a) or object.lean_is_scalar(b)) return 0;
-    const tag_a = object.lean_ptr_tag(a);
-    if (tag_a != object.lean_ptr_tag(b)) return 0;
+    if (object.lean_is_scalar(a) or object.lean_is_scalar(b)) {
+        if (object.lean_is_scalar(a) and object.lean_is_scalar(b))
+            return if (object.lean_unbox(a) == object.lean_unbox(b)) 1 else 0;
+        return 0;
+    }
+    const tag = object.lean_ptr_tag(a);
+    if (tag != object.lean_ptr_tag(b)) return 0;
     const nfields = ctor.ctorNumObjs(a);
     if (nfields != ctor.ctorNumObjs(b)) return 0;
+
+    // When !compare_bi, skip binder_info (field 3 of lam/forallE) and
+    // nondep (field 4 of letE), matching C++ expr_eq_fn<false>.
+    const skip_field: ?u32 = if (!compare_bi) switch (tag) {
+        6, 7 => 3, // lam/forallE: binderInfo
+        8 => 4,    // letE: nondep
+        else => null,
+    } else null;
+
     for (0..nfields) |i| {
+        if (skip_field) |sf| if (i == sf) continue;
         const fa = ctor.lean_ctor_get(a, @intCast(i)) orelse continue;
         const fb = ctor.lean_ctor_get(b, @intCast(i)) orelse continue;
-        // For expressions, fields are either expressions, names, levels, or nats
-        // Use generic structural equality
         if (object.lean_is_scalar(fa) and object.lean_is_scalar(fb)) {
             if (object.lean_unbox(fa) != object.lean_unbox(fb)) return 0;
         } else if (object.lean_is_scalar(fa) != object.lean_is_scalar(fb)) {
             return 0;
         } else {
-            // Both are pointers — could be expressions, names, or other objects
             if (fa != fb) {
-                // Try expression equality first (most common case)
                 const fa_tag = object.lean_ptr_tag(fa);
                 if (fa_tag <= 11 and object.lean_ptr_tag(fb) <= 11) {
-                    if (lean_expr_equal(fa, fb) == 0) return 0;
+                    if (exprEqRec(fa, fb, compare_bi) == 0) return 0;
                 } else if (lean_level_eq(fa, fb) == 0) {
                     return 0;
                 }
@@ -538,11 +560,7 @@ pub export fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopa
     return lean_elab_add_decl(env, max_heartbeat, decl, axioms, trust_level, opts);
 }
 
-// ── Definitional equality (stub) ─────────────────────────────────────────────
-
-pub export fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    return lean_expr_equal(a, b);
-}
+// lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).
 
 // ── Core recursive replacement engine ────────────────────────────────────────
 
