@@ -157,7 +157,7 @@ else
 ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
 ifeq "${LEAN_ZIG_RUNTIME}" "ON"
 	$(LEANC_SH) -shared -o $@ \
-  	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out/lib/libleanrt_zig.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+  	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
  	$(LEANC_SH) -shared -o $@ \
   	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
@@ -165,7 +165,7 @@ endif
 else
 ifeq "${LEAN_ZIG_RUNTIME}" "ON"
 	$(LEANC_SH) -shared -o $@ \
-  	  -Wl,--whole-archive ${LIB}/temp/Lean.*o.export ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lleancpp -Wl,--end-group ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out/lib/libleanrt_zig.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+  	  -Wl,--whole-archive ${LIB}/temp/Lean.*o.export ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lleancpp -Wl,--end-group ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
 	$(LEANC_SH) -shared -o $@ \
   	  -Wl,--whole-archive ${LIB}/temp/Lean.*o.export ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lleancpp -Wl,--end-group ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
@@ -175,6 +175,8 @@ ifeq "${CMAKE_SYSTEM_NAME}" "Linux"
 # We only strip like this on Linux for now as our other platforms already seem to exclude the
 # unexported symbols by default
 	strip --strip-unneeded $@
+endif
+endif
 endif
 endif
 

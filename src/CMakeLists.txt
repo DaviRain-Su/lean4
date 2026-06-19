@@ -111,9 +111,8 @@ option(BSYMBOLIC "Link with -Bsymbolic to reduce call overhead in shared librari
 option(USE_GMP "USE_GMP" ON)
 option(USE_MIMALLOC "use mimalloc" ON)
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" OFF)
-if(LEAN_ZIG_RUNTIME)
-  add_compile_definitions(LEAN_ZIG_RUNTIME)
-endif()
+# Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
+# The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
 set(LEAN_MI_SECURE 0 CACHE STRING "Configure mimalloc memory safety mitigations (https://github.com/microsoft/mimalloc/blob/v2.2.7/include/mimalloc/types.h#L56-L60)")
 
 # development-specific options
