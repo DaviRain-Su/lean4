@@ -9,9 +9,6 @@ const rc = @import("rc.zig");
 const mpz_zig = @import("mpz_zig");
 const runtime_options = @import("runtime_options");
 
-const gmp = struct {
-    extern fn __gmpz_get_d(op: *const mpz_zig.Mpz) callconv(.c) f64;
-};
 var g_exit_on_panic = false;
 var g_panic_messages = true;
 var g_stdout: ?*anyopaque = null;
@@ -356,7 +353,7 @@ fn natToF64(n: *anyopaque) f64 {
     } else {
         const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(n));
         const mpz: *mpz_zig.Mpz = @ptrCast(@alignCast(&mpz_obj.m_value));
-        return gmp.__gmpz_get_d(mpz);
+        return mpz.getDouble();
     }
 }
 

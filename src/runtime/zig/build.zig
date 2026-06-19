@@ -7,9 +7,10 @@ pub fn build(b: *std.Build) void {
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
     const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse false;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
+    const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
 
     const mpz_mod = b.addModule("mpz_zig", .{
-        .root_source_file = b.path("mpz_zig.zig"),
+        .root_source_file = b.path(if (use_gmp) "mpz_zig.zig" else "big_int.zig"),
     });
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
@@ -25,7 +26,9 @@ pub fn build(b: *std.Build) void {
     });
     root_mod.addImport("mpz_zig", mpz_mod);
     root_mod.addImport("runtime_options", opts_mod);
-    root_mod.linkSystemLibrary("gmp", .{});
+    if (use_gmp) {
+        root_mod.linkSystemLibrary("gmp", .{});
+    }
     root_mod.linkSystemLibrary("c++", .{});
 
     // All UV subsystems (event_loop, timer, dns, signal, net_addr, tcp, udp,
