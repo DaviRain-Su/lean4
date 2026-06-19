@@ -12,6 +12,7 @@ pub const compat = @import("compat.zig");
 pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
 pub const exception = @import("exception.zig");
+pub const kernel = @import("kernel.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
 pub const hash = @import("hash.zig");
