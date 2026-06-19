@@ -169,17 +169,3 @@ lean_obj_res lean_sockaddr_to_socketaddress(const struct sockaddr* sockaddr) {
 
 #endif
 }
-#ifndef LEAN_EMSCRIPTEN
-#include "runtime/object.h"
-extern "C" {
-
-lean_obj_res lean_zig_in_addr_storage_to_ip_addr(short family, void* addr) {
-    return lean::lean_in_addr_storage_to_ip_addr(family, (lean::in_addr_storage*)addr);
-}
-
-void lean_zig_socket_address_to_sockaddr_storage(lean_object* ip_addr, void* out) {
-    lean::lean_socket_address_to_sockaddr_storage(ip_addr, (sockaddr_storage*)out);
-}
-
-}
-#endif

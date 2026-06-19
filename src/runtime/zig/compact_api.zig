@@ -3,7 +3,7 @@
 
 //! Exported API for the Zig compact subsystem.
 //!
-//! First pass: v2 format, no closures, no mmap, POSIX file I/O.
+//! v2/v3 format with closures, mmap read, and POSIX file I/O.
 
 const std = @import("std");
 const testing = std.testing;

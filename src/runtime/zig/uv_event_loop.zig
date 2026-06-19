@@ -99,7 +99,6 @@ pub export fn lean_uv_loop_configure_idle_helper(loop: ?*anyopaque) c_int {
     return uv.uv_loop_configure(@ptrCast(@alignCast(loop)), uv.UV_METRICS_IDLE_TIME);
 }
 
-
 pub export fn lean_uv_loop_configure_block_signal_helper(loop: ?*anyopaque) c_int {
     if (builtin.os.tag == .windows) return 0;
     return uv.uv_loop_configure(@ptrCast(@alignCast(loop)), uv.UV_LOOP_BLOCK_SIGNAL, uv.SIGPROF);

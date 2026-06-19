@@ -33,7 +33,7 @@ if(ZIG)
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/dns.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/event_loop.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/event_loop.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../uv/net_addr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/net_addr_bridge.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/net_addr.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/signal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/signal.h"

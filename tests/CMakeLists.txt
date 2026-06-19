@@ -430,8 +430,6 @@ if(LEAN_ZIG_RUNTIME)
       LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
       LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
       LEAN_ZIG_STDLIB_JOBS=8
-      LEAN_ZIG_STDLIB_ARCHIVE=1
-      LEAN_ZIG_STDLIB_ARCHIVE_LIMIT=0
       bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "StdlibHttpH1Machine.lean"
   )
   set_tests_properties("emitzig/stdlib/prewarm" PROPERTIES
@@ -453,9 +451,7 @@ if(LEAN_ZIG_RUNTIME)
         LEAN_ZIG_OUT_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib
         LEAN_ZIG_STDLIB_CACHE_DIR=${MANGLED_BINARY_DIR}/tests/emitzig-stdlib-cache
         LEAN_ZIG_STDLIB_JOBS=2
-        LEAN_ZIG_STDLIB_ARCHIVE=1
-        LEAN_ZIG_STDLIB_ARCHIVE_LIMIT=0
-        bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
+      bash "${WITH_TEST_ENV}" "${CMAKE_CURRENT_SOURCE_DIR}/emitzig/run_test.sh" "${T}"
     )
     set_tests_properties("emitzig/stdlib/${T}" PROPERTIES
       FIXTURES_REQUIRED zig_stdlib_cache

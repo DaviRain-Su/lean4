@@ -15,6 +15,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const string = @import("string.zig");
 const uv_event_loop = @import("uv_event_loop.zig");
+const net_addr = @import("net_addr.zig");
 
 const uv = @cImport({
     @cInclude("uv.h");
@@ -25,9 +26,6 @@ pub const force_link = true;
 
 extern fn lean_promise_new() callconv(.c) *anyopaque;
 extern fn lean_promise_resolve(value: *anyopaque, promise: *anyopaque) callconv(.c) void;
-
-extern fn lean_zig_in_addr_storage_to_ip_addr(family: c_short, addr: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_zig_socket_address_to_sockaddr_storage(ip_addr: *anyopaque, out: *anyopaque) callconv(.c) void;
 
 fn leanStringCStr(s: *anyopaque) [*:0]const u8 {
     const str: *const lean.lean_string_object = @ptrCast(@alignCast(s));
@@ -111,7 +109,7 @@ fn getAddrInfoCallback(
             continue;
         }
 
-        const addr = lean_zig_in_addr_storage_to_ip_addr(@intCast(sa_family), storage_ptr);
+        const addr = net_addr.lean_zig_in_addr_storage_to_ip_addr(@intCast(sa_family), storage_ptr);
         arr = array.lean_array_push(arr, addr);
     }
 
@@ -205,7 +203,7 @@ pub export fn lean_uv_dns_get_name_helper(addr: *anyopaque) callconv(.c) *anyopa
     req.*.data = promise;
 
     var addr_ptr: uv.sockaddr_storage = std.mem.zeroes(uv.sockaddr_storage);
-    lean_zig_socket_address_to_sockaddr_storage(addr, @ptrCast(&addr_ptr));
+    net_addr.lean_zig_socket_address_to_sockaddr_storage(addr, @ptrCast(&addr_ptr));
 
     uv_event_loop.lean_event_loop_lock();
     rc.lean_inc(promise);
