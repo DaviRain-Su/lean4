@@ -263,7 +263,7 @@ fn lean_expr_lower_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaq
     return lowerLiftImpl(e, @intCast(s), @intCast(d), .lower);
 }
 
-fn lean_expr_lift_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_expr_lift_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyopaque) callconv(.c) *anyopaque {
     if (!object.lean_is_scalar(s_obj) or !object.lean_is_scalar(d_obj)) return retain(e);
     const s = object.lean_unbox(s_obj);
     const d = object.lean_unbox(d_obj);
@@ -298,7 +298,7 @@ fn lowerLiftRec(e: *anyopaque, offset: u32, s: u32, d: u32, mode: Mode) ?*anyopa
 
 // ── Instantiate ──────────────────────────────────────────────────────────────
 
-fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyopaque {
     if (looseBVarRange(a) == 0) return retain(a);
     var single: [1]*anyopaque = .{e0};
     return instantiateImpl(a, 0, 1, single[0..], false);

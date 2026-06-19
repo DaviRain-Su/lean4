@@ -17,6 +17,7 @@ pub const exception = @import("exception.zig");
 pub const kernel = @import("kernel.zig");
 pub const elab_environment = @import("elab_environment.zig");
 pub const expr_lt = @import("expr_lt.zig");
+pub const expr_accessors = @import("expr_accessors.zig");
 pub const inline_exports = @import("inline_exports.zig");
 pub const dynlib = @import("dynlib.zig");
 pub const dynlib_lib = @import("dynlib_lib.zig");
@@ -29,6 +30,7 @@ pub const hash = @import("hash.zig");
 pub const allocprof = @import("allocprof.zig");
 pub const init = @import("init.zig");
 pub const instantiate_mvars = @import("instantiate_mvars.zig");
+pub const instantiate_expr_mvars = @import("instantiate_expr_mvars.zig");
 pub const int = @import("int.zig");
 pub const int_conv = @import("int_conv.zig");
 pub const io_error = @import("io_error.zig");
@@ -102,6 +104,7 @@ comptime {
         _ = kernel.force_link;
         _ = elab_environment.force_link;
         _ = instantiate_mvars.force_link;
+        _ = instantiate_expr_mvars.force_link;
     }
     _ = list;
     _ = memory;

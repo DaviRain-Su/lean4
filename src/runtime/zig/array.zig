@@ -426,6 +426,19 @@ pub export fn lean_array_push(a: *anyopaque, v: *anyopaque) callconv(.c) *anyopa
     return result;
 }
 
+/// Build a Lean array from a slice of opaque object pointers.
+/// Each element gets its refcount incremented. The input slice is not consumed.
+pub fn mkArrayFromSlice(slice: []*anyopaque) *anyopaque {
+    const size = slice.len;
+    const result = allocObjectArray(size, size);
+    const slots = arraySlots(result);
+    for (0..size) |i| {
+        rc.lean_inc(slice[i]);
+        slots[i] = slice[i];
+    }
+    return result;
+}
+
 export fn lean_mk_array(n: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque {
     const size: usize = if (object.lean_is_scalar(n))
         object.lean_unbox(n)

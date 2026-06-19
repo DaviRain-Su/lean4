@@ -77,29 +77,29 @@ extern fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaq
 
 const CacheEntry = struct { key: *anyopaque, value: *anyopaque };
 
-const SharingCache = struct {
+pub const SharingCache = struct {
     entries: std.ArrayListUnmanaged(CacheEntry) = .empty,
     arena: std.heap.ArenaAllocator,
 
-    fn init(allocator: std.mem.Allocator) SharingCache {
+    pub fn init(allocator: std.mem.Allocator) SharingCache {
         return .{ .arena = std.heap.ArenaAllocator.init(allocator) };
     }
 
-    fn deinit(self: *SharingCache) void {
+    pub fn deinit(self: *SharingCache) void {
         // Drop reference counts on cached values.
         for (self.entries.items) |e| rc.lean_dec(e.value);
         self.entries.deinit(self.arena.allocator());
         self.arena.deinit();
     }
 
-    fn find(self: *SharingCache, key: *anyopaque) ?*anyopaque {
+    pub fn find(self: *SharingCache, key: *anyopaque) ?*anyopaque {
         for (self.entries.items) |e| {
             if (e.key == key) return e.value;
         }
         return null;
     }
 
-    fn insert(self: *SharingCache, key: *anyopaque, value: *anyopaque) void {
+    pub fn insert(self: *SharingCache, key: *anyopaque, value: *anyopaque) void {
         rc.lean_inc(value);
         self.entries.append(self.arena.allocator(), .{ .key = key, .value = value }) catch
             @panic("instantiate_lmvars: cache OOM");
@@ -113,7 +113,7 @@ const SharingCache = struct {
 // assignment itself contains mvars, recurses and writes back the normalized
 // value. Sharing is preserved via a pointer-keyed cache.
 
-fn visitLevel(l: *anyopaque, mctx: *anyopaque, cache: *SharingCache) *anyopaque {
+pub fn visitLevel(l: *anyopaque, mctx: *anyopaque, cache: *SharingCache) *anyopaque {
     if (!levelHasMVar(l)) {
         rc.lean_inc(l);
         return l;
