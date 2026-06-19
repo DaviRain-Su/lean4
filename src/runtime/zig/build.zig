@@ -33,8 +33,6 @@ pub fn build(b: *std.Build) void {
         "../uv/event_loop.cpp",
         "net_addr_bridge.cpp",
         "../uv/system.cpp",
-        "../uv/tcp.cpp",
-        "../uv/udp.cpp",
         "uv_init.cpp",
         "uv_promise_bridge.cpp",
     };
