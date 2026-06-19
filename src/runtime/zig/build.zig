@@ -29,15 +29,13 @@ pub fn build(b: *std.Build) void {
     // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
     // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
     // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
-    // test-only). A few small helpers live alongside the Zig sources.
+    // test-only). Timer is implemented in uv_timer.zig.
     const uv_cpp_sources = &.{
-        "../uv/dns.cpp",
         "../uv/event_loop.cpp",
         "../uv/net_addr.cpp",
         "../uv/signal.cpp",
         "../uv/system.cpp",
         "../uv/tcp.cpp",
-        "../uv/timer.cpp",
         "../uv/udp.cpp",
         "uv_init.cpp",
         "uv_promise_bridge.cpp",
@@ -50,6 +48,7 @@ pub fn build(b: *std.Build) void {
         "-DLEAN_SMALL_ALLOCATOR",
         b.fmt("-I{s}", .{lean_include_dir}),
         "-I../..",
+        "-DLEAN_ZIG_RUNTIME",
     };
     root_mod.addCSourceFiles(.{
         .files = uv_cpp_sources,

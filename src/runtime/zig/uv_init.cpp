@@ -7,14 +7,15 @@ loop thread itself is started from the Zig runtime after this returns.
 */
 
 #include "runtime/uv/event_loop.h"
-#include "runtime/uv/timer.h"
 #include "runtime/uv/tcp.h"
 #include "runtime/uv/udp.h"
 #include "runtime/uv/signal.h"
 
+extern "C" void lean_zig_initialize_libuv_timer();
+
 extern "C" void lean_zig_uv_initialize() {
 #ifndef LEAN_EMSCRIPTEN
-    lean::initialize_libuv_timer();
+    lean_zig_initialize_libuv_timer();
     lean::initialize_libuv_tcp_socket();
     lean::initialize_libuv_udp_socket();
     lean::initialize_libuv_signal();
