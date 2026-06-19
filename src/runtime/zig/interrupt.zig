@@ -96,6 +96,10 @@ pub fn checkSystem(component_name: [*:0]const u8, do_check_interrupted: bool) vo
 
 fn sleepMs(ms: c_uint) void {
     if (ms == 0) return;
+    if (builtin.os.tag == .windows) {
+        std.os.windows.kernel32.Sleep(ms);
+        return;
+    }
     const ns = std.time.ns_per_ms * ms;
     const sec = ns / std.time.ns_per_s;
     const nsec = ns % std.time.ns_per_s;

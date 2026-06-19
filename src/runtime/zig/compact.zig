@@ -3,10 +3,12 @@
 
 //! Zig port of the C++ `compact` subsystem.
 //!
-//! First pass: v2 format, no mmap, no structural hash-consing, identity-based
-//! sharing map only. Closure function relocation metadata is not emitted yet.
+//! Supports v2 (no closures) and v3 (closures with fn-pointer relocation)
+//! olean formats. No mmap, no structural hash-consing, identity-based
+//! sharing map only.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
@@ -36,8 +38,8 @@ pub const LibInfo = struct {
 };
 
 pub const LibReloc = struct {
-    obj_offset: usize,
-    fn_idx: usize,
+    old_base: usize,
+    delta: isize,
 };
 
 pub fn ptrTag(o: *anyopaque) u8 {
@@ -85,6 +87,8 @@ pub const Compactor = struct {
     map: std.AutoHashMap(usize, usize),
     dep_regions: []RegionView,
     allow_closures: bool,
+    closure_offsets: std.ArrayList(usize),
+    libs: []LibInfo,
 
     pub fn init(base_addr: usize, dep_regions: []RegionView, allow_closures: bool) Compactor {
         const initial = 4096;
@@ -97,12 +101,16 @@ pub const Compactor = struct {
             .map = std.AutoHashMap(usize, usize).init(std.heap.c_allocator),
             .dep_regions = dep_regions,
             .allow_closures = allow_closures,
+            .closure_offsets = .empty,
+            .libs = if (allow_closures) getLoadedLibs() else &.{},
         };
     }
 
     pub fn deinit(self: *Compactor) void {
         std.heap.c_allocator.free(self.buffer[0..self.capacity]);
         self.map.deinit();
+        self.closure_offsets.deinit(std.heap.c_allocator);
+        if (self.libs.len > 0) freeLoadedLibs(self.libs);
     }
 
     fn grow(self: *Compactor, need: usize) void {
@@ -291,7 +299,45 @@ pub const Compactor = struct {
         for (0..closure.m_num_fixed) |i| {
             new_slots[i] = @ptrFromInt(self.compact(slots[i]));
         }
+        // Record the buffer-relative offset of `m_fun` so the reader can patch
+        // fn pointers on load without scanning the compacted region.
+        const fn_field_off = @intFromPtr(&new_closure.m_fun) - @intFromPtr(self.buffer);
+        self.closure_offsets.append(std.heap.c_allocator, fn_field_off) catch @panic("out of memory");
         return self.toOffset(dst);
+    }
+
+    /// Return the distinct loaded libraries that contain a compacted closure's
+    /// `m_fun` pointer — the subset needed to relocate this region's closures
+    /// on load. `m_fun` still holds the raw code pointer at this point.
+    pub fn usedLibs(self: *Compactor) []LibInfo {
+        if (self.closure_offsets.items.len == 0) return &.{};
+        var used = std.heap.c_allocator.alloc(bool, self.libs.len) catch @panic("out of memory");
+        defer std.heap.c_allocator.free(used);
+        @memset(used, false);
+        for (self.closure_offsets.items) |off| {
+            const fn_ptr: *usize = @ptrCast(@alignCast(self.buffer + off));
+            const fn_addr = fn_ptr.*;
+            // Binary search for the last lib whose base_addr <= fn_addr.
+            var lo: usize = 0;
+            var hi: usize = self.libs.len;
+            while (lo < hi) {
+                const mid = (lo + hi) / 2;
+                if (self.libs[mid].base_addr <= fn_addr) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            if (lo == 0) @panic("closure function pointer does not belong to any loaded library");
+            used[lo - 1] = true;
+        }
+        var result: std.ArrayList(LibInfo) = .empty;
+        for (0..self.libs.len) |i| {
+            if (used[i]) {
+                result.append(std.heap.c_allocator, self.libs[i]) catch @panic("out of memory");
+            }
+        }
+        return result.toOwnedSlice(std.heap.c_allocator) catch @panic("out of memory");
     }
 };
 
@@ -302,8 +348,20 @@ pub const Reader = struct {
     next: [*]u8,
     end: [*]u8,
     dep_regions: []RegionView,
+    // Sorted (old_base, delta) pairs for closure fn-pointer relocation.
+    // Empty when no closures or same-process (all deltas zero).
+    lib_relocs: []const LibReloc,
+    // Data-relative byte offsets of every closure's `m_fun` field.
+    closure_offsets: []const usize,
 
-    pub fn init(data: [*]u8, sz: usize, base_addr: usize, dep_regions: []RegionView) Reader {
+    pub fn init(
+        data: [*]u8,
+        sz: usize,
+        base_addr: usize,
+        dep_regions: []RegionView,
+        lib_relocs: []const LibReloc,
+        closure_offsets: []const usize,
+    ) Reader {
         return .{
             .size = sz,
             .base_addr = base_addr,
@@ -311,6 +369,8 @@ pub const Reader = struct {
             .next = data,
             .end = data + sz,
             .dep_regions = dep_regions,
+            .lib_relocs = lib_relocs,
+            .closure_offsets = closure_offsets,
         };
     }
 
@@ -423,6 +483,39 @@ pub const Reader = struct {
 
     pub fn read(self: *Reader) ?*anyopaque {
         if (@intFromPtr(self.next) >= @intFromPtr(self.end)) return null;
+
+        // Apply closure fn-pointer relocations directly via the offset list
+        // rather than scanning the compacted region for closure tags.
+        if (self.closure_offsets.len > 0) {
+            var needs_reloc = false;
+            for (self.lib_relocs) |reloc| {
+                if (reloc.delta != 0) { needs_reloc = true; break; }
+            }
+            if (needs_reloc) {
+                for (self.closure_offsets) |off| {
+                    const fn_field: *usize = @ptrCast(@alignCast(self.begin + off));
+                    const fn_addr = fn_field.*;
+                    // Binary search for the last reloc whose old_base <= fn_addr.
+                    var lo: usize = 0;
+                    var hi: usize = self.lib_relocs.len;
+                    while (lo < hi) {
+                        const mid = (lo + hi) / 2;
+                        if (self.lib_relocs[mid].old_base <= fn_addr) {
+                            lo = mid + 1;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    if (lo > 0) {
+                        const delta = self.lib_relocs[lo - 1].delta;
+                        if (delta != 0) {
+                            fn_field.* = @intCast(@as(isize, @intCast(fn_addr)) + delta);
+                        }
+                    }
+                }
+            }
+        }
+
         const root_slot: *align(1) Obj = @ptrCast(self.next);
         const root = self.fixObjectPtr(root_slot.*);
         self.move(@sizeOf(Obj));
@@ -477,8 +570,69 @@ pub fn extractDepRegions(o: *anyopaque) std.ArrayList(RegionView) {
     return result;
 }
 
+// Minimal view of `struct dl_phdr_info` — only the leading fields we need.
+const DlPhdrInfo = extern struct {
+    dlpi_addr: usize,
+    dlpi_name: ?[*:0]const u8,
+};
+
+const dl = @cImport({
+    if (builtin.os.tag == .macos) {
+        @cInclude("mach-o/dyld.h");
+    } else if (builtin.os.tag == .linux) {
+        @cDefine("_GNU_SOURCE", "1");
+        @cInclude("link.h");
+    }
+});
+
+fn dlIterateCallback(info: ?*DlPhdrInfo, _: usize, data: ?*anyopaque) callconv(.c) c_int {
+    if (info == null) return 0;
+    const list: *std.ArrayList(LibInfo) = @ptrCast(@alignCast(data.?));
+    const name_ptr = info.?.dlpi_name orelse @as([*:0]const u8, "");
+    list.append(std.heap.c_allocator, .{
+        .name = @constCast(name_ptr),
+        .handle = null,
+        .base_addr = info.?.dlpi_addr,
+    }) catch @panic("out of memory");
+    return 0;
+}
+
+fn cmpLibInfoByBaseAddr(_: void, a: LibInfo, b: LibInfo) bool {
+    return a.base_addr < b.base_addr;
+}
+
+/// Return loaded shared libraries sorted by `base_addr`, for closure fn-pointer
+/// relocation. The returned slice is heap-allocated; the caller must free it.
+/// Names point into the dynamic linker's image table and are valid for the
+/// process lifetime — no copy needed.
 pub fn getLoadedLibs() []LibInfo {
-    return &.{};
+    var list: std.ArrayList(LibInfo) = .empty;
+
+    if (builtin.os.tag == .macos) {
+        const n = dl._dyld_image_count();
+        var i: u32 = 0;
+        while (i < n) : (i += 1) {
+            const hdr = dl._dyld_get_image_header(i);
+            if (hdr == null) continue;
+            const name = dl._dyld_get_image_name(i);
+            if (name == null) continue;
+            list.append(std.heap.c_allocator, .{
+                .name = @constCast(name),
+                .handle = @ptrCast(@constCast(hdr)),
+                .base_addr = @intFromPtr(hdr),
+            }) catch @panic("out of memory");
+        }
+    } else if (builtin.os.tag == .linux) {
+        _ = dl.dl_iterate_phdr(@ptrCast(&dlIterateCallback), &list);
+    }
+
+    std.mem.sort(LibInfo, list.items, {}, cmpLibInfoByBaseAddr);
+    return list.toOwnedSlice(std.heap.c_allocator) catch @panic("out of memory");
+}
+
+/// Free a slice returned by `getLoadedLibs`.
+pub fn freeLoadedLibs(libs: []LibInfo) void {
+    std.heap.c_allocator.free(libs);
 }
 
 test "compact round-trip simple constructor with string" {
@@ -493,7 +647,7 @@ test "compact round-trip simple constructor with string" {
     defer comp.deinit();
     _ = comp.compactRoot(obj);
 
-    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{});
+    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{}, &.{}, &.{});
     const root = reader.read() orelse return error.ReadFailed;
 
     try testing.expectEqual(@as(u8, 0), ptrTag(root));
@@ -521,7 +675,7 @@ test "compact round-trip scalar root" {
     defer comp.deinit();
     _ = comp.compactRoot(object.lean_box(37).?);
 
-    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{});
+    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{}, &.{}, &.{});
     const root = reader.read() orelse return error.ReadFailed;
 
     try testing.expect(object.lean_is_scalar(root));
@@ -551,7 +705,7 @@ test "compact round-trip closure with fixed argument when allowed" {
     defer comp.deinit();
     _ = comp.compactRoot(closure_obj);
 
-    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{});
+    var reader = Reader.init(comp.data(), comp.size(), base_addr, &.{}, &.{}, comp.closure_offsets.items);
     const root = reader.read() orelse return error.ReadFailed;
     const roundtrip: *lean.lean_closure_object = @ptrCast(@alignCast(root));
     const roundtrip_slots: [*]Obj = @ptrCast(@alignCast(&roundtrip.m_objs));

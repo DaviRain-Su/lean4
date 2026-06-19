@@ -3,7 +3,12 @@
 
 //! Zig port of the C++ stack overflow detection subsystem.
 //!
-//! First pass: POSIX (macOS/Linux). Windows is a no-op stub.
+//! POSIX (macOS/Linux) uses a SIGSEGV/SIGBUS handler on an alternate signal
+//! stack. Windows would need structured exception handling (SEH) via
+//! `__try/__except` with `EXCEPTION_STACK_OVERFLOW` — Zig does not expose SEH
+//! frame unwinding, so Windows remains a no-op stub until a Zig SEH story
+//! exists. The `lean_initialize_stack_overflow` / `lean_finalize_stack_overflow`
+//! exports are defined but return immediately on Windows.
 
 const std = @import("std");
 const builtin = @import("builtin");
