@@ -16,6 +16,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const runtime_alloc = @import("alloc.zig");
 const string = @import("string.zig");
+const allocprof = @import("allocprof.zig");
 
 pub const force_link = true;
 
@@ -434,10 +435,28 @@ pub export fn lean_io_timeit(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *
 }
 
 pub export fn lean_io_allocprof(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *anyopaque {
+    const before = allocprof.snapshot();
     const res = lean_apply_1(fn_obj, object.lean_box(0).?) orelse @panic("lean_io_allocprof: apply failed");
-    _ = writeAllRetry(2, stringBytes(msg));
-    _ = writeAllRetry(2, "\n");
-    _ = writeAllRetry(2, "Allocation profiling data is not available, compile lean using `-D RUNTIME_STATS=ON`\n");
+    const after = allocprof.snapshot();
+    const ctor_n = after.ctor - before.ctor;
+    const closure_n = after.closure - before.closure;
+    const string_n = after.string - before.string;
+    const array_n = after.array - before.array;
+    const thunk_n = after.thunk - before.thunk;
+    const task_n = after.task - before.task;
+    const ext_n = after.ext - before.ext;
+    std.debug.print("{s}\n", .{stringBytes(msg)});
+    if (ctor_n > 0) std.debug.print("num. constructor: {d}\n", .{ctor_n});
+    if (closure_n > 0) std.debug.print("num. closure:     {d}\n", .{closure_n});
+    if (string_n > 0) std.debug.print("num. string:      {d}\n", .{string_n});
+    if (array_n > 0) std.debug.print("num. array:       {d}\n", .{array_n});
+    if (thunk_n > 0) std.debug.print("num. thunk:       {d}\n", .{thunk_n});
+    if (task_n > 0) std.debug.print("num. task:        {d}\n", .{task_n});
+    if (ext_n > 0) std.debug.print("num. external:    {d}\n", .{ext_n});
+    if (ctor_n == 0 and closure_n == 0 and string_n == 0 and array_n == 0 and thunk_n == 0 and task_n == 0 and ext_n == 0) {
+        std.debug.print("***no runtime object allocation has occurred**\n", .{});
+    }
+    std.debug.print("-------------\n", .{});
     return res;
 }
 

@@ -4,6 +4,7 @@ const testing = std.testing;
 const lean = @import("lean_object.zig");
 const mpz_zig = @import("mpz_zig");
 const runtime_options = @import("runtime_options");
+const allocprof = @import("allocprof.zig");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
 const external_allocator = struct {
@@ -464,6 +465,7 @@ pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopa
     const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
     setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
     ctor.m_header.m_cs_sz = @intCast(scalar_sz);
+    allocprof.recordAlloc(@intCast(tag));
     return ptr;
 }
 
@@ -479,6 +481,7 @@ pub fn lean_alloc_closure(fun: ?*anyopaque, arity: c_uint, num_fixed: c_uint) *a
     closure.m_fun = fun;
     closure.m_arity = @intCast(arity);
     closure.m_num_fixed = @intCast(num_fixed);
+    allocprof.recordAlloc(lean.LeanClosure);
     return ptr;
 }
 
@@ -491,6 +494,7 @@ pub fn lean_alloc_array(size: usize, capacity: usize) *anyopaque {
     const array: *lean.lean_array_object = @ptrCast(@alignCast(ptr));
     setHeapHeader(&array.m_header, lean.LeanArray, 0);
     array.m_size = size;
+    allocprof.recordAlloc(lean.LeanArray);
     array.m_capacity = capacity;
     return ptr;
 }

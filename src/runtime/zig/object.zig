@@ -3,6 +3,7 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_object = @import("mpz_object.zig");
+const allocprof = @import("allocprof.zig");
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -79,6 +80,7 @@ pub export fn lean_alloc_external(cls: *lean.lean_external_class, data: ?*anyopa
         .m_class = cls,
         .m_data = data,
     };
+    allocprof.recordAlloc(lean.LeanExternal);
     return ptr;
 }
 

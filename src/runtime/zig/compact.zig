@@ -718,3 +718,35 @@ test "compact round-trip closure with fixed argument when allowed" {
     try testing.expectEqual(closure.m_fun, roundtrip.m_fun);
     try testing.expectEqualStrings("captured", testStringBytes(roundtrip_slots[0].?));
 }
+
+test "compact closure fn-pointer relocation with non-zero delta" {
+    const closure_obj = alloc.lean_alloc_closure(@ptrCast(@constCast(&compactClosureTestFn)), 1, 0);
+    defer rc.lean_dec(closure_obj);
+    const closure: *lean.lean_closure_object = @ptrCast(@alignCast(closure_obj));
+    const original_fn = @intFromPtr(closure.m_fun);
+
+    const base_addr: usize = 0x20000000;
+    var comp = Compactor.init(base_addr, &.{}, true);
+    defer comp.deinit();
+    _ = comp.compactRoot(closure_obj);
+
+    // Simulate the library loading at a different base address.
+    // The reloc says: the lib that used to be at old_base is now at
+    // old_base + delta. The fn pointer should be patched by delta.
+    const delta: isize = 0x10000;
+    var relocs = [_]LibReloc{.{ .old_base = 0, .delta = delta }};
+    var reader = Reader.init(
+        comp.data(),
+        comp.size(),
+        base_addr,
+        &.{},
+        &relocs,
+        comp.closure_offsets.items,
+    );
+    const root = reader.read() orelse return error.ReadFailed;
+    const roundtrip: *lean.lean_closure_object = @ptrCast(@alignCast(root));
+    const relocated_fn = @intFromPtr(roundtrip.m_fun);
+
+    // The fn pointer should have been shifted by delta.
+    try testing.expectEqual(@as(usize, @intCast(@as(isize, @intCast(original_fn)) + delta)), relocated_fn);
+}
