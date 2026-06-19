@@ -136,7 +136,8 @@ fn allocationKind(ptr: *anyopaque) ?u8 {
 
 pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, 0, kind);
     const payload = payloadFromMeta(meta);
@@ -146,7 +147,10 @@ pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
 }
 
 pub fn freeTrackedPayload(ptr: *anyopaque) void {
-    std.c.free(metaFromPayload(ptr));
+    const lean_alloc = @import("lean_allocator");
+    const meta = metaFromPayload(ptr);
+    const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+    lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
 }
 
 pub fn legacyPayloadSize(ptr: *anyopaque) usize {
@@ -181,9 +185,9 @@ fn setHeapHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
 
 fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const word_count = total_size / @sizeOf(usize);
-    const words = std.heap.page_allocator.alloc(usize, word_count) catch @panic("out of memory");
-    const meta: *AllocationMeta = @ptrCast(words.ptr);
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
+    const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, slot_idx, allocation_kind_small);
     const payload = payloadFromMeta(meta);
     zeroPayload(payload, payload_size);
@@ -192,7 +196,8 @@ fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
 
 fn allocLarge(sz: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), sz);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(sz, 0, allocation_kind_large);
     const payload = payloadFromMeta(meta);
@@ -218,16 +223,21 @@ fn freeSmall(ptr: *anyopaque) void {
 fn freeLarge(ptr: *anyopaque) void {
     if (metaFromPayload(ptr).magic != allocation_magic) @panic("missing allocation record for large object");
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
-    std.c.free(metaFromPayload(ptr));
+    const lean_alloc = @import("lean_allocator");
+    const meta = metaFromPayload(ptr);
+    const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+    lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
 }
 
 fn freeLegacySmall(ptr: *anyopaque) void {
-    std.c.free(ptr);
+    const lean_alloc = @import("lean_allocator");
+    lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
 }
 
 fn freeLegacyRaw(ptr: *anyopaque) void {
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
-    std.c.free(ptr);
+    const lean_alloc = @import("lean_allocator");
+    lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
 }
 
 fn freeDelegatedCppObject(ptr: *anyopaque) void {

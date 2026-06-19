@@ -17,9 +17,12 @@
 
 const std = @import("std");
 const BigInt = std.math.big.int;
+const lean_alloc = @import("lean_allocator");
 
 /// Allocator used for all big-integer limb allocations.
-const c_allocator = std.heap.c_allocator;
+/// Routes through the pluggable allocator interface (allocator.zig)
+/// so limbs are allocated by the same backend as all other runtime memory.
+const bigint_allocator = lean_alloc.lean_allocator;
 
 /// Limb type matching GMP's `mp_limb_t` on 64-bit platforms.
 pub const Limb = usize;
@@ -38,7 +41,7 @@ pub const Mpz = extern struct {
 
     pub fn deinit(self: *Mpz) void {
         if (self._mp_d != null and self._mp_alloc > 0) {
-            c_allocator.free(self._mp_d[0..@intCast(self._mp_alloc)]);
+            bigint_allocator.free(self._mp_d[0..@intCast(self._mp_alloc)]);
             self._mp_d = null;
             self._mp_alloc = 0;
             self._mp_size = 0;
@@ -73,7 +76,7 @@ pub const Mpz = extern struct {
             ._mp_d = null,
         };
         if (value == 0) return self;
-        const limbs = c_allocator.alloc(Limb, 1) catch return error.OutOfMemory;
+        const limbs = bigint_allocator.alloc(Limb, 1) catch return error.OutOfMemory;
         limbs[0] = value;
         self._mp_d = limbs.ptr;
         self._mp_alloc = 1;
@@ -154,7 +157,7 @@ pub const Mpz = extern struct {
     }
 
     pub fn setStr(self: *Mpz, base: u8, str: []const u8) error{ OutOfMemory, InvalidCharacter }!void {
-        var big = BigInt.Managed.init(c_allocator) catch return error.OutOfMemory;
+        var big = BigInt.Managed.init(bigint_allocator) catch return error.OutOfMemory;
         defer big.deinit();
         big.setString(base, str) catch return error.InvalidCharacter;
         try writeToMpz(self, &big);
@@ -187,7 +190,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.add(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -198,7 +201,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.sub(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -209,7 +212,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.mul(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -230,9 +233,9 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divTrunc(&result, &remainder, &big_a, &big_b);
         try writeToMpz(self, &result);
@@ -244,9 +247,9 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divFloor(&result, &remainder, &big_a, &big_b);
         try writeToMpz(self, &result);
@@ -258,9 +261,9 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divFloor(&result, &remainder, &big_a, &big_b);
         try writeToMpz(self, &result);
@@ -273,15 +276,15 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divFloor(&result, &remainder, &big_a, &big_b);
         // If remainder is negative, adjust: r_new = r + |b|, q_new = q ± 1
         // When b > 0: q_new = q - 1. When b < 0: q_new = q + 1.
         if (!remainder.isPositive() and remainder.len() > 0 and !(remainder.len() == 1 and remainder.limbs[0] == 0)) {
-            var one = try BigInt.Managed.initSet(c_allocator, @as(usize, 1));
+            var one = try BigInt.Managed.initSet(bigint_allocator, @as(usize, 1));
             defer one.deinit();
             if (big_b.isPositive()) {
                 try result.sub(&result, &one);
@@ -300,20 +303,20 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divFloor(&result, &remainder, &big_a, &big_b);
         // If remainder is negative, add |b| to remainder
         if (!remainder.isPositive() and remainder.len() > 0 and !(remainder.len() == 1 and remainder.limbs[0] == 0)) {
-            var abs_b = try BigInt.Managed.init(c_allocator);
+            var abs_b = try BigInt.Managed.init(bigint_allocator);
             defer abs_b.deinit();
             try abs_b.copy(big_b.toConst());
             if (!abs_b.isPositive()) {
                 abs_b.metadata &= ~BigInt.Managed.sign_bit; // make positive
             }
-            var new_remainder = try BigInt.Managed.init(c_allocator);
+            var new_remainder = try BigInt.Managed.init(bigint_allocator);
             defer new_remainder.deinit();
             try new_remainder.add(&remainder, &abs_b);
             try writeToMpz(self, &new_remainder);
@@ -325,7 +328,7 @@ pub const Mpz = extern struct {
     pub fn div2k(self: *Mpz, a: *const Mpz, k: usize) error{OutOfMemory}!void {
         var big_a = try readFromMpz(a);
         defer big_a.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.shiftRight(&big_a, k);
         try writeToMpz(self, &result);
@@ -334,7 +337,7 @@ pub const Mpz = extern struct {
     pub fn mul2k(self: *Mpz, a: *const Mpz, k: usize) error{OutOfMemory}!void {
         var big_a = try readFromMpz(a);
         defer big_a.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.shiftLeft(&big_a, k);
         try writeToMpz(self, &result);
@@ -345,7 +348,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.bitAnd(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -356,7 +359,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.bitOr(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -367,7 +370,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.bitXor(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -376,7 +379,7 @@ pub const Mpz = extern struct {
     pub fn pow(self: *Mpz, a: *const Mpz, exp: u32) error{OutOfMemory}!void {
         var big_a = try readFromMpz(a);
         defer big_a.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.pow(&big_a, exp);
         try writeToMpz(self, &result);
@@ -387,7 +390,7 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
         var big_b = try readFromMpz(b);
         defer big_b.deinit();
-        var result = try BigInt.Managed.init(c_allocator);
+        var result = try BigInt.Managed.init(bigint_allocator);
         defer result.deinit();
         try result.gcd(&big_a, &big_b);
         try writeToMpz(self, &result);
@@ -471,24 +474,24 @@ pub const Mpz = extern struct {
         defer big_a.deinit();
 
         // Compute a mod 2^k
-        var modulus = try BigInt.Managed.initSet(c_allocator, @as(usize, 1));
+        var modulus = try BigInt.Managed.initSet(bigint_allocator, @as(usize, 1));
         defer modulus.deinit();
         try modulus.shiftLeft(&modulus, k);
 
-        var quotient = try BigInt.Managed.init(c_allocator);
+        var quotient = try BigInt.Managed.init(bigint_allocator);
         defer quotient.deinit();
-        var remainder = try BigInt.Managed.init(c_allocator);
+        var remainder = try BigInt.Managed.init(bigint_allocator);
         defer remainder.deinit();
         try BigInt.Managed.divFloor(&quotient, &remainder, &big_a, &modulus);
 
         // Adjust to signed range [-2^(k-1), 2^(k-1))
-        var half = try BigInt.Managed.initSet(c_allocator, @as(usize, 1));
+        var half = try BigInt.Managed.initSet(bigint_allocator, @as(usize, 1));
         defer half.deinit();
         try half.shiftLeft(&half, k - 1);
 
         if (remainder.order(half) != .lt) {
             // remainder >= half, so subtract modulus
-            var result = try BigInt.Managed.init(c_allocator);
+            var result = try BigInt.Managed.init(bigint_allocator);
             defer result.deinit();
             try result.copy(remainder.toConst());
             try result.sub(&remainder, &modulus);
@@ -506,11 +509,11 @@ fn ensureCapacity(self: *Mpz, needed: usize) error{OutOfMemory}!void {
     if (current >= needed) return;
     const new_cap = if (needed > 0) @max(needed, current * 2) else 1;
     if (self._mp_d == null or self._mp_alloc == 0) {
-        const new_buf = c_allocator.alloc(Limb, new_cap) catch return error.OutOfMemory;
+        const new_buf = bigint_allocator.alloc(Limb, new_cap) catch return error.OutOfMemory;
         self._mp_d = new_buf.ptr;
     } else {
         const old_buf = self._mp_d[0..current];
-        const new_buf = c_allocator.realloc(old_buf, new_cap) catch return error.OutOfMemory;
+        const new_buf = bigint_allocator.realloc(old_buf, new_cap) catch return error.OutOfMemory;
         self._mp_d = new_buf.ptr;
     }
     self._mp_alloc = @intCast(new_cap);
@@ -536,9 +539,9 @@ fn cmpMpz(a: *const Mpz, b: *const Mpz) i32 {
 fn readFromMpz(src: *const Mpz) error{OutOfMemory}!BigInt.Managed {
     const abs_size: usize = @intCast(if (src._mp_size < 0) -src._mp_size else src._mp_size);
     if (abs_size == 0) {
-        return BigInt.Managed.init(c_allocator) catch return error.OutOfMemory;
+        return BigInt.Managed.init(bigint_allocator) catch return error.OutOfMemory;
     }
-    var big = BigInt.Managed.init(c_allocator) catch return error.OutOfMemory;
+    var big = BigInt.Managed.init(bigint_allocator) catch return error.OutOfMemory;
     errdefer big.deinit();
     big.ensureCapacity(abs_size) catch return error.OutOfMemory;
     @memcpy(big.limbs[0..abs_size], src._mp_d[0..abs_size]);

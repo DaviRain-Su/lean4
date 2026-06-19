@@ -9,14 +9,21 @@ pub fn build(b: *std.Build) void {
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
 
-    const mpz_mod = b.addModule("mpz_zig", .{
-        .root_source_file = b.path(if (use_gmp) "mpz_zig.zig" else "big_int.zig"),
-    });
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
     const opts_mod = opts.createModule();
+
+    const allocator_mod = b.addModule("lean_allocator", .{
+        .root_source_file = b.path("allocator.zig"),
+    });
+    allocator_mod.addImport("runtime_options", opts_mod);
+
+    const mpz_mod = b.addModule("mpz_zig", .{
+        .root_source_file = b.path(if (use_gmp) "mpz_zig.zig" else "big_int.zig"),
+    });
+    mpz_mod.addImport("lean_allocator", allocator_mod);
 
     const root_mod = b.createModule(.{
         .root_source_file = b.path("root.zig"),
@@ -25,6 +32,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     root_mod.addImport("mpz_zig", mpz_mod);
+    root_mod.addImport("lean_allocator", allocator_mod);
     root_mod.addImport("runtime_options", opts_mod);
     if (use_gmp) {
         root_mod.linkSystemLibrary("gmp", .{});

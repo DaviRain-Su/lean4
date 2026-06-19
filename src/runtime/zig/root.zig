@@ -5,6 +5,7 @@ const runtime_options = @import("runtime_options");
 pub const alloc = @import("alloc.zig");
 pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
+pub const allocator = @import("lean_allocator");
 pub const box = @import("box.zig");
 pub const byteslice = @import("byteslice.zig");
 pub const compact = @import("compact.zig");
