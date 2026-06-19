@@ -489,7 +489,10 @@ pub const Reader = struct {
         if (self.closure_offsets.len > 0) {
             var needs_reloc = false;
             for (self.lib_relocs) |reloc| {
-                if (reloc.delta != 0) { needs_reloc = true; break; }
+                if (reloc.delta != 0) {
+                    needs_reloc = true;
+                    break;
+                }
             }
             if (needs_reloc) {
                 for (self.closure_offsets) |off| {

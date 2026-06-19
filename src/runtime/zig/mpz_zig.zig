@@ -63,7 +63,7 @@ pub const Mpz = extern struct {
         }
     }
 
-    pub fn setStr(self: *Mpz, base: u8, str: []const u8) error{OutOfMemory, InvalidCharacter}!void {
+    pub fn setStr(self: *Mpz, base: u8, str: []const u8) error{ OutOfMemory, InvalidCharacter }!void {
         const zstr = std.heap.c_allocator.dupeZ(u8, str) catch return error.OutOfMemory;
         defer std.heap.c_allocator.free(zstr);
         if (__gmpz_set_str(self, zstr, @intCast(base)) != 0) {
@@ -71,7 +71,7 @@ pub const Mpz = extern struct {
         }
     }
 
-    pub fn toString(self: *const Mpz, allocator: std.mem.Allocator, base: u8) error{OutOfMemory, InvalidCharacter}![]u8 {
+    pub fn toString(self: *const Mpz, allocator: std.mem.Allocator, base: u8) error{ OutOfMemory, InvalidCharacter }![]u8 {
         const raw = __gmpz_get_str(null, @intCast(base), self);
         defer std.c.free(raw);
         const len = std.mem.len(raw);

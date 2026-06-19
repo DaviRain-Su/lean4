@@ -556,4 +556,3 @@ pub fn lean_uv_get_available_memory() callconv(.c) *anyopaque {
     const mem = c.uv_get_available_memory();
     return io_result.lean_io_result_mk_ok(boxU64(mem));
 }
-

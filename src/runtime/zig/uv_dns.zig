@@ -21,4 +21,3 @@ pub fn lean_uv_dns_get_info(name: *anyopaque, service: *anyopaque, family: u8) c
 pub fn lean_uv_dns_get_name(addr: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_dns_get_name_helper(addr);
 }
-

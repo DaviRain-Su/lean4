@@ -491,25 +491,63 @@ pub export fn lean_uint8_of_nat_mk(a: *anyopaque) callconv(.c) u8 {
     return r;
 }
 
-pub export fn lean_uint8_to_nat(a: u8) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint8_add(a1: u8, a2: u8) callconv(.c) u8 { return a1 +% a2; }
-pub export fn lean_uint8_sub(a1: u8, a2: u8) callconv(.c) u8 { return a1 -% a2; }
-pub export fn lean_uint8_mul(a1: u8, a2: u8) callconv(.c) u8 { return a1 *% a2; }
-pub export fn lean_uint8_div(a1: u8, a2: u8) callconv(.c) u8 { return divOrZero(u8, a1, a2); }
-pub export fn lean_uint8_mod(a1: u8, a2: u8) callconv(.c) u8 { return modOrSelf(u8, a1, a2); }
-pub export fn lean_uint8_lor(a: u8, b: u8) callconv(.c) u8 { return a | b; }
-pub export fn lean_uint8_xor(a: u8, b: u8) callconv(.c) u8 { return a ^ b; }
-pub export fn lean_uint8_shift_left(a: u8, b: u8) callconv(.c) u8 { return shiftLeft(u8, a, b); }
-pub export fn lean_uint8_shift_right(a: u8, b: u8) callconv(.c) u8 { return shiftRight(u8, a, b); }
-pub export fn lean_uint8_complement(a: u8) callconv(.c) u8 { return ~a; }
-pub export fn lean_uint8_neg(a: u8) callconv(.c) u8 { return 0 -% a; }
-pub export fn lean_uint8_dec_lt(a1: u8, a2: u8) callconv(.c) u8 { return @intFromBool(a1 < a2); }
-pub export fn lean_uint8_dec_le(a1: u8, a2: u8) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
-pub export fn lean_uint8_to_uint16(a: u8) callconv(.c) u16 { return a; }
-pub export fn lean_uint8_to_uint64(a: u8) callconv(.c) u64 { return a; }
-pub export fn lean_uint8_to_usize(a: u8) callconv(.c) usize { return a; }
-pub export fn lean_uint8_to_float(a: u8) callconv(.c) f64 { return @floatFromInt(a); }
-pub export fn lean_uint8_to_float32(a: u8) callconv(.c) f32 { return @floatFromInt(a); }
+pub export fn lean_uint8_to_nat(a: u8) callconv(.c) *anyopaque {
+    return usizeToNat(a);
+}
+pub export fn lean_uint8_add(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 +% a2;
+}
+pub export fn lean_uint8_sub(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 -% a2;
+}
+pub export fn lean_uint8_mul(a1: u8, a2: u8) callconv(.c) u8 {
+    return a1 *% a2;
+}
+pub export fn lean_uint8_div(a1: u8, a2: u8) callconv(.c) u8 {
+    return divOrZero(u8, a1, a2);
+}
+pub export fn lean_uint8_mod(a1: u8, a2: u8) callconv(.c) u8 {
+    return modOrSelf(u8, a1, a2);
+}
+pub export fn lean_uint8_lor(a: u8, b: u8) callconv(.c) u8 {
+    return a | b;
+}
+pub export fn lean_uint8_xor(a: u8, b: u8) callconv(.c) u8 {
+    return a ^ b;
+}
+pub export fn lean_uint8_shift_left(a: u8, b: u8) callconv(.c) u8 {
+    return shiftLeft(u8, a, b);
+}
+pub export fn lean_uint8_shift_right(a: u8, b: u8) callconv(.c) u8 {
+    return shiftRight(u8, a, b);
+}
+pub export fn lean_uint8_complement(a: u8) callconv(.c) u8 {
+    return ~a;
+}
+pub export fn lean_uint8_neg(a: u8) callconv(.c) u8 {
+    return 0 -% a;
+}
+pub export fn lean_uint8_dec_lt(a1: u8, a2: u8) callconv(.c) u8 {
+    return @intFromBool(a1 < a2);
+}
+pub export fn lean_uint8_dec_le(a1: u8, a2: u8) callconv(.c) u8 {
+    return @intFromBool(a1 <= a2);
+}
+pub export fn lean_uint8_to_uint16(a: u8) callconv(.c) u16 {
+    return a;
+}
+pub export fn lean_uint8_to_uint64(a: u8) callconv(.c) u64 {
+    return a;
+}
+pub export fn lean_uint8_to_usize(a: u8) callconv(.c) usize {
+    return a;
+}
+pub export fn lean_uint8_to_float(a: u8) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub export fn lean_uint8_to_float32(a: u8) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
 
 pub export fn lean_uint16_of_nat(a: *anyopaque) callconv(.c) u16 {
     return if (object.lean_is_scalar(a)) @truncate(object.lean_unbox(a)) else lean_uint16_of_big_nat(a);
@@ -521,34 +559,88 @@ pub export fn lean_uint16_of_nat_mk(a: *anyopaque) callconv(.c) u16 {
     return r;
 }
 
-pub export fn lean_uint16_to_nat(a: u16) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint16_add(a1: u16, a2: u16) callconv(.c) u16 { return a1 +% a2; }
-pub export fn lean_uint16_sub(a1: u16, a2: u16) callconv(.c) u16 { return a1 -% a2; }
-pub export fn lean_uint16_mul(a1: u16, a2: u16) callconv(.c) u16 { return a1 *% a2; }
-pub export fn lean_uint16_div(a1: u16, a2: u16) callconv(.c) u16 { return divOrZero(u16, a1, a2); }
-pub export fn lean_uint16_mod(a1: u16, a2: u16) callconv(.c) u16 { return modOrSelf(u16, a1, a2); }
-pub export fn lean_uint16_land(a: u16, b: u16) callconv(.c) u16 { return a & b; }
-pub export fn lean_uint16_lor(a: u16, b: u16) callconv(.c) u16 { return a | b; }
-pub export fn lean_uint16_xor(a: u16, b: u16) callconv(.c) u16 { return a ^ b; }
-pub export fn lean_uint16_shift_left(a: u16, b: u16) callconv(.c) u16 { return shiftLeft(u16, a, b); }
-pub export fn lean_uint16_shift_right(a: u16, b: u16) callconv(.c) u16 { return shiftRight(u16, a, b); }
-pub export fn lean_uint16_complement(a: u16) callconv(.c) u16 { return ~a; }
-pub export fn lean_uint16_neg(a: u16) callconv(.c) u16 { return 0 -% a; }
-pub export fn lean_uint16_dec_eq(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 == a2); }
-pub export fn lean_uint16_dec_lt(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 < a2); }
-pub export fn lean_uint16_dec_le(a1: u16, a2: u16) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
-pub export fn lean_uint16_to_uint8(a: u16) callconv(.c) u8 { return @truncate(a); }
-pub export fn lean_uint16_to_uint32(a: u16) callconv(.c) u32 { return a; }
-pub export fn lean_uint16_to_uint64(a: u16) callconv(.c) u64 { return a; }
-pub export fn lean_uint16_to_usize(a: u16) callconv(.c) usize { return a; }
-pub export fn lean_uint16_to_float(a: u16) callconv(.c) f64 { return @floatFromInt(a); }
-pub export fn lean_uint16_to_float32(a: u16) callconv(.c) f32 { return @floatFromInt(a); }
+pub export fn lean_uint16_to_nat(a: u16) callconv(.c) *anyopaque {
+    return usizeToNat(a);
+}
+pub export fn lean_uint16_add(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 +% a2;
+}
+pub export fn lean_uint16_sub(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 -% a2;
+}
+pub export fn lean_uint16_mul(a1: u16, a2: u16) callconv(.c) u16 {
+    return a1 *% a2;
+}
+pub export fn lean_uint16_div(a1: u16, a2: u16) callconv(.c) u16 {
+    return divOrZero(u16, a1, a2);
+}
+pub export fn lean_uint16_mod(a1: u16, a2: u16) callconv(.c) u16 {
+    return modOrSelf(u16, a1, a2);
+}
+pub export fn lean_uint16_land(a: u16, b: u16) callconv(.c) u16 {
+    return a & b;
+}
+pub export fn lean_uint16_lor(a: u16, b: u16) callconv(.c) u16 {
+    return a | b;
+}
+pub export fn lean_uint16_xor(a: u16, b: u16) callconv(.c) u16 {
+    return a ^ b;
+}
+pub export fn lean_uint16_shift_left(a: u16, b: u16) callconv(.c) u16 {
+    return shiftLeft(u16, a, b);
+}
+pub export fn lean_uint16_shift_right(a: u16, b: u16) callconv(.c) u16 {
+    return shiftRight(u16, a, b);
+}
+pub export fn lean_uint16_complement(a: u16) callconv(.c) u16 {
+    return ~a;
+}
+pub export fn lean_uint16_neg(a: u16) callconv(.c) u16 {
+    return 0 -% a;
+}
+pub export fn lean_uint16_dec_eq(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(a1 == a2);
+}
+pub export fn lean_uint16_dec_lt(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(a1 < a2);
+}
+pub export fn lean_uint16_dec_le(a1: u16, a2: u16) callconv(.c) u8 {
+    return @intFromBool(a1 <= a2);
+}
+pub export fn lean_uint16_to_uint8(a: u16) callconv(.c) u8 {
+    return @truncate(a);
+}
+pub export fn lean_uint16_to_uint32(a: u16) callconv(.c) u32 {
+    return a;
+}
+pub export fn lean_uint16_to_uint64(a: u16) callconv(.c) u64 {
+    return a;
+}
+pub export fn lean_uint16_to_usize(a: u16) callconv(.c) usize {
+    return a;
+}
+pub export fn lean_uint16_to_float(a: u16) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub export fn lean_uint16_to_float32(a: u16) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
 
-pub export fn lean_bool_to_uint8(a: u8) callconv(.c) u8 { return a; }
-pub export fn lean_bool_to_uint16(a: u8) callconv(.c) u16 { return a; }
-pub export fn lean_bool_to_uint32(a: u8) callconv(.c) u32 { return a; }
-pub export fn lean_bool_to_uint64(a: u8) callconv(.c) u64 { return a; }
-pub export fn lean_bool_to_usize(a: u8) callconv(.c) usize { return a; }
+pub export fn lean_bool_to_uint8(a: u8) callconv(.c) u8 {
+    return a;
+}
+pub export fn lean_bool_to_uint16(a: u8) callconv(.c) u16 {
+    return a;
+}
+pub export fn lean_bool_to_uint32(a: u8) callconv(.c) u32 {
+    return a;
+}
+pub export fn lean_bool_to_uint64(a: u8) callconv(.c) u64 {
+    return a;
+}
+pub export fn lean_bool_to_usize(a: u8) callconv(.c) usize {
+    return a;
+}
 pub export fn lean_uint32_of_nat(a: *anyopaque) callconv(.c) u32 {
     return if (object.lean_is_scalar(a)) @truncate(object.lean_unbox(a)) else lean_uint32_of_big_nat(a);
 }
@@ -559,28 +651,72 @@ pub export fn lean_uint32_of_nat_mk(a: *anyopaque) callconv(.c) u32 {
     return r;
 }
 
-pub export fn lean_uint32_to_nat(a: u32) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_uint32_add(a1: u32, a2: u32) callconv(.c) u32 { return a1 +% a2; }
-pub export fn lean_uint32_sub(a1: u32, a2: u32) callconv(.c) u32 { return a1 -% a2; }
-pub export fn lean_uint32_mul(a1: u32, a2: u32) callconv(.c) u32 { return a1 *% a2; }
-pub export fn lean_uint32_div(a1: u32, a2: u32) callconv(.c) u32 { return divOrZero(u32, a1, a2); }
-pub export fn lean_uint32_mod(a1: u32, a2: u32) callconv(.c) u32 { return modOrSelf(u32, a1, a2); }
-pub export fn lean_uint32_land(a: u32, b: u32) callconv(.c) u32 { return a & b; }
-pub export fn lean_uint32_lor(a: u32, b: u32) callconv(.c) u32 { return a | b; }
-pub export fn lean_uint32_xor(a: u32, b: u32) callconv(.c) u32 { return a ^ b; }
-pub export fn lean_uint32_shift_left(a: u32, b: u32) callconv(.c) u32 { return shiftLeft(u32, a, b); }
-pub export fn lean_uint32_shift_right(a: u32, b: u32) callconv(.c) u32 { return shiftRight(u32, a, b); }
-pub export fn lean_uint32_complement(a: u32) callconv(.c) u32 { return ~a; }
-pub export fn lean_uint32_neg(a: u32) callconv(.c) u32 { return 0 -% a; }
-pub export fn lean_uint32_dec_eq(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 == a2); }
-pub export fn lean_uint32_dec_lt(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 < a2); }
-pub export fn lean_uint32_dec_le(a1: u32, a2: u32) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
-pub export fn lean_uint32_to_uint8(a: u32) callconv(.c) u8 { return @truncate(a); }
-pub export fn lean_uint32_to_uint16(a: u32) callconv(.c) u16 { return @truncate(a); }
-pub export fn lean_uint32_to_uint64(a: u32) callconv(.c) u64 { return a; }
-pub export fn lean_uint32_to_usize(a: u32) callconv(.c) usize { return a; }
-pub export fn lean_uint32_to_float(a: u32) callconv(.c) f64 { return @floatFromInt(a); }
-pub export fn lean_uint32_to_float32(a: u32) callconv(.c) f32 { return @floatFromInt(a); }
+pub export fn lean_uint32_to_nat(a: u32) callconv(.c) *anyopaque {
+    return usizeToNat(a);
+}
+pub export fn lean_uint32_add(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 +% a2;
+}
+pub export fn lean_uint32_sub(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 -% a2;
+}
+pub export fn lean_uint32_mul(a1: u32, a2: u32) callconv(.c) u32 {
+    return a1 *% a2;
+}
+pub export fn lean_uint32_div(a1: u32, a2: u32) callconv(.c) u32 {
+    return divOrZero(u32, a1, a2);
+}
+pub export fn lean_uint32_mod(a1: u32, a2: u32) callconv(.c) u32 {
+    return modOrSelf(u32, a1, a2);
+}
+pub export fn lean_uint32_land(a: u32, b: u32) callconv(.c) u32 {
+    return a & b;
+}
+pub export fn lean_uint32_lor(a: u32, b: u32) callconv(.c) u32 {
+    return a | b;
+}
+pub export fn lean_uint32_xor(a: u32, b: u32) callconv(.c) u32 {
+    return a ^ b;
+}
+pub export fn lean_uint32_shift_left(a: u32, b: u32) callconv(.c) u32 {
+    return shiftLeft(u32, a, b);
+}
+pub export fn lean_uint32_shift_right(a: u32, b: u32) callconv(.c) u32 {
+    return shiftRight(u32, a, b);
+}
+pub export fn lean_uint32_complement(a: u32) callconv(.c) u32 {
+    return ~a;
+}
+pub export fn lean_uint32_neg(a: u32) callconv(.c) u32 {
+    return 0 -% a;
+}
+pub export fn lean_uint32_dec_eq(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(a1 == a2);
+}
+pub export fn lean_uint32_dec_lt(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(a1 < a2);
+}
+pub export fn lean_uint32_dec_le(a1: u32, a2: u32) callconv(.c) u8 {
+    return @intFromBool(a1 <= a2);
+}
+pub export fn lean_uint32_to_uint8(a: u32) callconv(.c) u8 {
+    return @truncate(a);
+}
+pub export fn lean_uint32_to_uint16(a: u32) callconv(.c) u16 {
+    return @truncate(a);
+}
+pub export fn lean_uint32_to_uint64(a: u32) callconv(.c) u64 {
+    return a;
+}
+pub export fn lean_uint32_to_usize(a: u32) callconv(.c) usize {
+    return a;
+}
+pub export fn lean_uint32_to_float(a: u32) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub export fn lean_uint32_to_float32(a: u32) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
 
 pub export fn lean_uint64_of_nat(a: *anyopaque) callconv(.c) u64 {
     return if (object.lean_is_scalar(a)) object.lean_unbox(a) else lean_uint64_of_big_nat(a);
@@ -592,28 +728,72 @@ pub export fn lean_uint64_of_nat_mk(a: *anyopaque) callconv(.c) u64 {
     return r;
 }
 
-pub export fn lean_uint64_to_nat(a: u64) callconv(.c) *anyopaque { return uint64ToNat(a); }
-pub export fn lean_uint64_add(a1: u64, a2: u64) callconv(.c) u64 { return a1 +% a2; }
-pub export fn lean_uint64_sub(a1: u64, a2: u64) callconv(.c) u64 { return a1 -% a2; }
-pub export fn lean_uint64_mul(a1: u64, a2: u64) callconv(.c) u64 { return a1 *% a2; }
-pub export fn lean_uint64_div(a1: u64, a2: u64) callconv(.c) u64 { return divOrZero(u64, a1, a2); }
-pub export fn lean_uint64_mod(a1: u64, a2: u64) callconv(.c) u64 { return modOrSelf(u64, a1, a2); }
-pub export fn lean_uint64_land(a: u64, b: u64) callconv(.c) u64 { return a & b; }
-pub export fn lean_uint64_lor(a: u64, b: u64) callconv(.c) u64 { return a | b; }
-pub export fn lean_uint64_xor(a: u64, b: u64) callconv(.c) u64 { return a ^ b; }
-pub export fn lean_uint64_shift_left(a: u64, b: u64) callconv(.c) u64 { return shiftLeft(u64, a, b); }
-pub export fn lean_uint64_shift_right(a: u64, b: u64) callconv(.c) u64 { return shiftRight(u64, a, b); }
-pub export fn lean_uint64_complement(a: u64) callconv(.c) u64 { return ~a; }
-pub export fn lean_uint64_neg(a: u64) callconv(.c) u64 { return 0 -% a; }
-pub export fn lean_uint64_dec_eq(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 == a2); }
-pub export fn lean_uint64_dec_lt(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 < a2); }
-pub export fn lean_uint64_dec_le(a1: u64, a2: u64) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
-pub export fn lean_uint64_to_uint8(a: u64) callconv(.c) u8 { return @truncate(a); }
-pub export fn lean_uint64_to_uint16(a: u64) callconv(.c) u16 { return @truncate(a); }
-pub export fn lean_uint64_to_uint32(a: u64) callconv(.c) u32 { return @truncate(a); }
-pub export fn lean_uint64_to_usize(a: u64) callconv(.c) usize { return @truncate(a); }
-pub export fn lean_uint64_to_float(a: u64) callconv(.c) f64 { return @floatFromInt(a); }
-pub export fn lean_uint64_to_float32(a: u64) callconv(.c) f32 { return @floatFromInt(a); }
+pub export fn lean_uint64_to_nat(a: u64) callconv(.c) *anyopaque {
+    return uint64ToNat(a);
+}
+pub export fn lean_uint64_add(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 +% a2;
+}
+pub export fn lean_uint64_sub(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 -% a2;
+}
+pub export fn lean_uint64_mul(a1: u64, a2: u64) callconv(.c) u64 {
+    return a1 *% a2;
+}
+pub export fn lean_uint64_div(a1: u64, a2: u64) callconv(.c) u64 {
+    return divOrZero(u64, a1, a2);
+}
+pub export fn lean_uint64_mod(a1: u64, a2: u64) callconv(.c) u64 {
+    return modOrSelf(u64, a1, a2);
+}
+pub export fn lean_uint64_land(a: u64, b: u64) callconv(.c) u64 {
+    return a & b;
+}
+pub export fn lean_uint64_lor(a: u64, b: u64) callconv(.c) u64 {
+    return a | b;
+}
+pub export fn lean_uint64_xor(a: u64, b: u64) callconv(.c) u64 {
+    return a ^ b;
+}
+pub export fn lean_uint64_shift_left(a: u64, b: u64) callconv(.c) u64 {
+    return shiftLeft(u64, a, b);
+}
+pub export fn lean_uint64_shift_right(a: u64, b: u64) callconv(.c) u64 {
+    return shiftRight(u64, a, b);
+}
+pub export fn lean_uint64_complement(a: u64) callconv(.c) u64 {
+    return ~a;
+}
+pub export fn lean_uint64_neg(a: u64) callconv(.c) u64 {
+    return 0 -% a;
+}
+pub export fn lean_uint64_dec_eq(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(a1 == a2);
+}
+pub export fn lean_uint64_dec_lt(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(a1 < a2);
+}
+pub export fn lean_uint64_dec_le(a1: u64, a2: u64) callconv(.c) u8 {
+    return @intFromBool(a1 <= a2);
+}
+pub export fn lean_uint64_to_uint8(a: u64) callconv(.c) u8 {
+    return @truncate(a);
+}
+pub export fn lean_uint64_to_uint16(a: u64) callconv(.c) u16 {
+    return @truncate(a);
+}
+pub export fn lean_uint64_to_uint32(a: u64) callconv(.c) u32 {
+    return @truncate(a);
+}
+pub export fn lean_uint64_to_usize(a: u64) callconv(.c) usize {
+    return @truncate(a);
+}
+pub export fn lean_uint64_to_float(a: u64) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub export fn lean_uint64_to_float32(a: u64) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
 
 pub export fn lean_usize_of_nat(a: *anyopaque) callconv(.c) usize {
     return if (object.lean_is_scalar(a)) object.lean_unbox(a) else lean_usize_of_big_nat(a);
@@ -625,64 +805,160 @@ pub export fn lean_usize_of_nat_mk(a: *anyopaque) callconv(.c) usize {
     return r;
 }
 
-pub export fn lean_usize_to_nat(a: usize) callconv(.c) *anyopaque { return usizeToNat(a); }
-pub export fn lean_usize_add(a1: usize, a2: usize) callconv(.c) usize { return a1 +% a2; }
-pub export fn lean_usize_sub(a1: usize, a2: usize) callconv(.c) usize { return a1 -% a2; }
-pub export fn lean_usize_mul(a1: usize, a2: usize) callconv(.c) usize { return a1 *% a2; }
-pub export fn lean_usize_div(a1: usize, a2: usize) callconv(.c) usize { return divOrZero(usize, a1, a2); }
-pub export fn lean_usize_mod(a1: usize, a2: usize) callconv(.c) usize { return modOrSelf(usize, a1, a2); }
-pub export fn lean_usize_land(a: usize, b: usize) callconv(.c) usize { return a & b; }
-pub export fn lean_usize_lor(a: usize, b: usize) callconv(.c) usize { return a | b; }
-pub export fn lean_usize_xor(a: usize, b: usize) callconv(.c) usize { return a ^ b; }
-pub export fn lean_usize_shift_left(a: usize, b: usize) callconv(.c) usize { return shiftLeft(usize, a, b); }
-pub export fn lean_usize_shift_right(a: usize, b: usize) callconv(.c) usize { return shiftRight(usize, a, b); }
-pub export fn lean_usize_complement(a: usize) callconv(.c) usize { return ~a; }
-pub export fn lean_usize_neg(a: usize) callconv(.c) usize { return 0 -% a; }
-pub export fn lean_usize_dec_eq(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 == a2); }
-pub export fn lean_usize_dec_lt(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 < a2); }
-pub export fn lean_usize_dec_le(a1: usize, a2: usize) callconv(.c) u8 { return @intFromBool(a1 <= a2); }
-pub export fn lean_usize_to_uint8(a: usize) callconv(.c) u8 { return @truncate(a); }
-pub export fn lean_usize_to_uint16(a: usize) callconv(.c) u16 { return @truncate(a); }
-pub export fn lean_usize_to_uint32(a: usize) callconv(.c) u32 { return @truncate(a); }
-pub export fn lean_usize_to_uint64(a: usize) callconv(.c) u64 { return a; }
-pub export fn lean_usize_to_float(a: usize) callconv(.c) f64 { return @floatFromInt(a); }
-pub export fn lean_usize_to_float32(a: usize) callconv(.c) f32 { return @floatFromInt(a); }
+pub export fn lean_usize_to_nat(a: usize) callconv(.c) *anyopaque {
+    return usizeToNat(a);
+}
+pub export fn lean_usize_add(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 +% a2;
+}
+pub export fn lean_usize_sub(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 -% a2;
+}
+pub export fn lean_usize_mul(a1: usize, a2: usize) callconv(.c) usize {
+    return a1 *% a2;
+}
+pub export fn lean_usize_div(a1: usize, a2: usize) callconv(.c) usize {
+    return divOrZero(usize, a1, a2);
+}
+pub export fn lean_usize_mod(a1: usize, a2: usize) callconv(.c) usize {
+    return modOrSelf(usize, a1, a2);
+}
+pub export fn lean_usize_land(a: usize, b: usize) callconv(.c) usize {
+    return a & b;
+}
+pub export fn lean_usize_lor(a: usize, b: usize) callconv(.c) usize {
+    return a | b;
+}
+pub export fn lean_usize_xor(a: usize, b: usize) callconv(.c) usize {
+    return a ^ b;
+}
+pub export fn lean_usize_shift_left(a: usize, b: usize) callconv(.c) usize {
+    return shiftLeft(usize, a, b);
+}
+pub export fn lean_usize_shift_right(a: usize, b: usize) callconv(.c) usize {
+    return shiftRight(usize, a, b);
+}
+pub export fn lean_usize_complement(a: usize) callconv(.c) usize {
+    return ~a;
+}
+pub export fn lean_usize_neg(a: usize) callconv(.c) usize {
+    return 0 -% a;
+}
+pub export fn lean_usize_dec_eq(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(a1 == a2);
+}
+pub export fn lean_usize_dec_lt(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(a1 < a2);
+}
+pub export fn lean_usize_dec_le(a1: usize, a2: usize) callconv(.c) u8 {
+    return @intFromBool(a1 <= a2);
+}
+pub export fn lean_usize_to_uint8(a: usize) callconv(.c) u8 {
+    return @truncate(a);
+}
+pub export fn lean_usize_to_uint16(a: usize) callconv(.c) u16 {
+    return @truncate(a);
+}
+pub export fn lean_usize_to_uint32(a: usize) callconv(.c) u32 {
+    return @truncate(a);
+}
+pub export fn lean_usize_to_uint64(a: usize) callconv(.c) u64 {
+    return a;
+}
+pub export fn lean_usize_to_float(a: usize) callconv(.c) f64 {
+    return @floatFromInt(a);
+}
+pub export fn lean_usize_to_float32(a: usize) callconv(.c) f32 {
+    return @floatFromInt(a);
+}
 
-pub export fn lean_float_add(a: f64, b: f64) callconv(.c) f64 { return a + b; }
-pub export fn lean_float_sub(a: f64, b: f64) callconv(.c) f64 { return a - b; }
-pub export fn lean_float_mul(a: f64, b: f64) callconv(.c) f64 { return a * b; }
-pub export fn lean_float_div(a: f64, b: f64) callconv(.c) f64 { return a / b; }
-pub export fn lean_float_negate(a: f64) callconv(.c) f64 { return -a; }
-pub export fn lean_float_beq(a: f64, b: f64) callconv(.c) u8 { return @intFromBool(a == b); }
-pub export fn lean_float_decLe(a: f64, b: f64) callconv(.c) u8 { return @intFromBool(a <= b); }
-pub export fn lean_float_decLt(a: f64, b: f64) callconv(.c) u8 { return @intFromBool(a < b); }
-pub export fn lean_float_to_uint8(a: f64) callconv(.c) u8 { return intFromFloatClamp(u8, a, 256.0); }
-pub export fn lean_float_to_uint16(a: f64) callconv(.c) u16 { return intFromFloatClamp(u16, a, 65536.0); }
-pub export fn lean_float_to_uint32(a: f64) callconv(.c) u32 { return intFromFloatClamp(u32, a, 4294967296.0); }
-pub export fn lean_float_to_uint64(a: f64) callconv(.c) u64 { return intFromFloatClamp(u64, a, 18446744073709551616.0); }
+pub export fn lean_float_add(a: f64, b: f64) callconv(.c) f64 {
+    return a + b;
+}
+pub export fn lean_float_sub(a: f64, b: f64) callconv(.c) f64 {
+    return a - b;
+}
+pub export fn lean_float_mul(a: f64, b: f64) callconv(.c) f64 {
+    return a * b;
+}
+pub export fn lean_float_div(a: f64, b: f64) callconv(.c) f64 {
+    return a / b;
+}
+pub export fn lean_float_negate(a: f64) callconv(.c) f64 {
+    return -a;
+}
+pub export fn lean_float_beq(a: f64, b: f64) callconv(.c) u8 {
+    return @intFromBool(a == b);
+}
+pub export fn lean_float_decLe(a: f64, b: f64) callconv(.c) u8 {
+    return @intFromBool(a <= b);
+}
+pub export fn lean_float_decLt(a: f64, b: f64) callconv(.c) u8 {
+    return @intFromBool(a < b);
+}
+pub export fn lean_float_to_uint8(a: f64) callconv(.c) u8 {
+    return intFromFloatClamp(u8, a, 256.0);
+}
+pub export fn lean_float_to_uint16(a: f64) callconv(.c) u16 {
+    return intFromFloatClamp(u16, a, 65536.0);
+}
+pub export fn lean_float_to_uint32(a: f64) callconv(.c) u32 {
+    return intFromFloatClamp(u32, a, 4294967296.0);
+}
+pub export fn lean_float_to_uint64(a: f64) callconv(.c) u64 {
+    return intFromFloatClamp(u64, a, 18446744073709551616.0);
+}
 pub export fn lean_float_to_usize(a: f64) callconv(.c) usize {
     if (@sizeOf(usize) == @sizeOf(u64)) return @intCast(lean_float_to_uint64(a));
     return @intCast(lean_float_to_uint32(a));
 }
-pub export fn lean_float_to_float32(a: f64) callconv(.c) f32 { return @floatCast(a); }
+pub export fn lean_float_to_float32(a: f64) callconv(.c) f32 {
+    return @floatCast(a);
+}
 
-pub export fn lean_float32_add(a: f32, b: f32) callconv(.c) f32 { return a + b; }
-pub export fn lean_float32_sub(a: f32, b: f32) callconv(.c) f32 { return a - b; }
-pub export fn lean_float32_mul(a: f32, b: f32) callconv(.c) f32 { return a * b; }
-pub export fn lean_float32_div(a: f32, b: f32) callconv(.c) f32 { return a / b; }
-pub export fn lean_float32_negate(a: f32) callconv(.c) f32 { return -a; }
-pub export fn lean_float32_beq(a: f32, b: f32) callconv(.c) u8 { return @intFromBool(a == b); }
-pub export fn lean_float32_decLe(a: f32, b: f32) callconv(.c) u8 { return @intFromBool(a <= b); }
-pub export fn lean_float32_decLt(a: f32, b: f32) callconv(.c) u8 { return @intFromBool(a < b); }
-pub export fn lean_float32_to_uint8(a: f32) callconv(.c) u8 { return intFromFloatClamp(u8, a, 256.0); }
-pub export fn lean_float32_to_uint16(a: f32) callconv(.c) u16 { return intFromFloatClamp(u16, a, 65536.0); }
-pub export fn lean_float32_to_uint32(a: f32) callconv(.c) u32 { return intFromFloatClamp(u32, a, 4294967296.0); }
-pub export fn lean_float32_to_uint64(a: f32) callconv(.c) u64 { return intFromFloatClamp(u64, a, 18446744073709551616.0); }
+pub export fn lean_float32_add(a: f32, b: f32) callconv(.c) f32 {
+    return a + b;
+}
+pub export fn lean_float32_sub(a: f32, b: f32) callconv(.c) f32 {
+    return a - b;
+}
+pub export fn lean_float32_mul(a: f32, b: f32) callconv(.c) f32 {
+    return a * b;
+}
+pub export fn lean_float32_div(a: f32, b: f32) callconv(.c) f32 {
+    return a / b;
+}
+pub export fn lean_float32_negate(a: f32) callconv(.c) f32 {
+    return -a;
+}
+pub export fn lean_float32_beq(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a == b);
+}
+pub export fn lean_float32_decLe(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a <= b);
+}
+pub export fn lean_float32_decLt(a: f32, b: f32) callconv(.c) u8 {
+    return @intFromBool(a < b);
+}
+pub export fn lean_float32_to_uint8(a: f32) callconv(.c) u8 {
+    return intFromFloatClamp(u8, a, 256.0);
+}
+pub export fn lean_float32_to_uint16(a: f32) callconv(.c) u16 {
+    return intFromFloatClamp(u16, a, 65536.0);
+}
+pub export fn lean_float32_to_uint32(a: f32) callconv(.c) u32 {
+    return intFromFloatClamp(u32, a, 4294967296.0);
+}
+pub export fn lean_float32_to_uint64(a: f32) callconv(.c) u64 {
+    return intFromFloatClamp(u64, a, 18446744073709551616.0);
+}
 pub export fn lean_float32_to_usize(a: f32) callconv(.c) usize {
     if (@sizeOf(usize) == @sizeOf(u64)) return @intCast(lean_float32_to_uint64(a));
     return @intCast(lean_float32_to_uint32(a));
 }
-pub export fn lean_float32_to_float(a: f32) callconv(.c) f64 { return @floatCast(a); }
+pub export fn lean_float32_to_float(a: f32) callconv(.c) f64 {
+    return @floatCast(a);
+}
 
 pub export fn lean_sarray_size(o: *anyopaque) callconv(.c) usize {
     return sarrayPtr(o).m_size;

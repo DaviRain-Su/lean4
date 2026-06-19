@@ -104,7 +104,6 @@ pub export fn lean_internal_panic_overflow() callconv(.c) void {
     exitWithCodeOne();
 }
 
-
 pub const lean_io_initializing = io_result.lean_io_initializing;
 pub const lean_io_mark_end_initialization = io_result.lean_io_mark_end_initialization;
 pub const lean_io_result_get_error = io_result.lean_io_result_get_error;
@@ -211,7 +210,6 @@ fn lean_mk_io_error_unsupported_operation(os_code: u32, details: *anyopaque) *an
     return io_error.lean_mk_io_error_unsupported_operation(os_code, details);
 }
 
-
 // Minimal IO implementation for programs that link the Zig runtime without the
 // Lean standard library. `initialize_Init` creates the standard streams; the
 // getters return cached objects and the setters swap them, matching the C++
@@ -284,11 +282,11 @@ fn streamIsTtyFalse(_: *anyopaque) callconv(.c) *anyopaque {
 }
 
 fn makeStreamClosure(comptime fun: anytype) *anyopaque {
-    return alloc.lean_alloc_closure(@constCast(@ptrCast(&fun)), 1, 0);
+    return alloc.lean_alloc_closure(@ptrCast(@constCast(&fun)), 1, 0);
 }
 
 fn makeStreamClosure2(comptime fun: anytype) *anyopaque {
-    return alloc.lean_alloc_closure(@constCast(@ptrCast(&fun)), 2, 0);
+    return alloc.lean_alloc_closure(@ptrCast(@constCast(&fun)), 2, 0);
 }
 
 fn makeOutputStream(put_str: anytype, write_fn: anytype) *anyopaque {
@@ -380,7 +378,6 @@ comptime {
 }
 
 fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
-
     _ = builtin;
     if (g_stdout == null) g_stdout = makeOutputStream(stdoutPutStr, stdoutWrite);
     if (g_stderr == null) g_stderr = makeOutputStream(stderrPutStr, stderrWrite);

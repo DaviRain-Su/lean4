@@ -240,8 +240,6 @@ pub export fn lean_dec_n(o: ?*anyopaque, n: usize) callconv(.c) void {
     }
 }
 
-
-
 pub export fn lean_is_exclusive(o: *anyopaque) callconv(.c) bool {
     return header(o).m_rc == 1;
 }

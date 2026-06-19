@@ -338,6 +338,7 @@ if(LEAN_ZIG_RUNTIME)
     StringEscapes.lean
     StringHelpers.lean
     Task.lean
+    TaskDealloc.lean
   )
   foreach(T ${EMITZIG_ZIGRT_TESTS})
     add_test(

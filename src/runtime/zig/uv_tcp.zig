@@ -105,4 +105,3 @@ pub fn lean_uv_tcp_nodelay(socket: *anyopaque) callconv(.c) *anyopaque {
 pub fn lean_uv_tcp_keepalive(socket: *anyopaque, enable: i32, delay: u32) callconv(.c) *anyopaque {
     return lean_uv_tcp_keepalive_helper(socket, enable, delay);
 }
-

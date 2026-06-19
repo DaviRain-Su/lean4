@@ -46,7 +46,8 @@ pub fn build(b: *std.Build) void {
     const uv_cpp_flags = &.{
         "-std=c++17",
         "-O2",
-        "-include", "uv_compat.h",
+        "-include",
+        "uv_compat.h",
         "-DLEAN_SMALL_ALLOCATOR",
         b.fmt("-I{s}", .{lean_include_dir}),
         "-I../..",

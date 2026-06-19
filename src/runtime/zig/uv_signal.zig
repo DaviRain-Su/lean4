@@ -33,4 +33,3 @@ pub fn lean_uv_signal_stop(signal: *anyopaque) callconv(.c) *anyopaque {
 pub fn lean_uv_signal_cancel(signal: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_signal_cancel_helper(signal);
 }
-

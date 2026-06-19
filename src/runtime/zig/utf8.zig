@@ -125,7 +125,6 @@ pub fn prevIndex(str: [*]const u8, pos: usize) usize {
     return 0;
 }
 
-
 pub fn pushUnicodeScalar(dest: [*]u8, code: u32) usize {
     if (code < 0x80) {
         dest[0] = @intCast(code);

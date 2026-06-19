@@ -53,4 +53,3 @@ pub fn lean_uv_event_loop_configure(options: *anyopaque) callconv(.c) *anyopaque
 pub fn lean_uv_event_loop_alive() callconv(.c) u8 {
     return if (lean_event_loop_is_alive() != 0) 1 else 0;
 }
-

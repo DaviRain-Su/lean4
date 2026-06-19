@@ -99,4 +99,3 @@ pub fn lean_uv_udp_set_multicast_interface(socket: *anyopaque, interface_addr: *
 pub fn lean_uv_udp_set_ttl(socket: *anyopaque, ttl: u32) callconv(.c) *anyopaque {
     return lean_uv_udp_set_ttl_helper(socket, ttl);
 }
-

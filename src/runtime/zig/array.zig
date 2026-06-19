@@ -208,7 +208,7 @@ fn copySArray(a: *anyopaque, cap: usize) *anyopaque {
     std.debug.assert(cap >= size);
 
     const result = alloc.lean_alloc_sarray(@intCast(elem_size), size, cap);
-    @memcpy(sarrayBytes(result)[0 .. checkedMul(elem_size, size)], sarrayBytes(a)[0 .. checkedMul(elem_size, size)]);
+    @memcpy(sarrayBytes(result)[0..checkedMul(elem_size, size)], sarrayBytes(a)[0..checkedMul(elem_size, size)]);
     rc.lean_dec(a);
     return result;
 }

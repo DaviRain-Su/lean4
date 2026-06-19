@@ -222,19 +222,11 @@ const ShareCommonQuick = struct {
         const ptr = a.?;
         const tag = ptrTag(ptr);
         switch (tag) {
-            lean.LeanClosure,
-            lean.LeanThunk,
-            lean.LeanTask,
-            lean.LeanRef,
-            lean.LeanExternal,
-            lean.LeanPromise,
-            lean.LeanReserved => {
+            lean.LeanClosure, lean.LeanThunk, lean.LeanTask, lean.LeanRef, lean.LeanExternal, lean.LeanPromise, lean.LeanReserved => {
                 rc.lean_inc_ref(ptr);
                 return a;
             },
-            lean.LeanMPZ,
-            lean.LeanScalarArray,
-            lean.LeanString => return self.visitTerminal(ptr),
+            lean.LeanMPZ, lean.LeanScalarArray, lean.LeanString => return self.visitTerminal(ptr),
             lean.LeanArray => return self.visitArray(ptr),
             else => return self.visitCtor(ptr),
         }
@@ -371,13 +363,7 @@ const ShareCommonStateful = struct {
         const ptr = a.?;
         const tag = ptrTag(ptr);
         switch (tag) {
-            lean.LeanClosure,
-            lean.LeanThunk,
-            lean.LeanTask,
-            lean.LeanRef,
-            lean.LeanExternal,
-            lean.LeanPromise,
-            lean.LeanReserved => {
+            lean.LeanClosure, lean.LeanThunk, lean.LeanTask, lean.LeanRef, lean.LeanExternal, lean.LeanPromise, lean.LeanReserved => {
                 self.children.append(self.allocator, ptr) catch @panic("out of memory");
                 return true;
             },
@@ -503,13 +489,7 @@ const ShareCommonStateful = struct {
         const ptr = a.?;
         const tag = ptrTag(ptr);
         switch (tag) {
-            lean.LeanClosure,
-            lean.LeanThunk,
-            lean.LeanTask,
-            lean.LeanRef,
-            lean.LeanExternal,
-            lean.LeanPromise,
-            lean.LeanReserved => {
+            lean.LeanClosure, lean.LeanThunk, lean.LeanTask, lean.LeanRef, lean.LeanExternal, lean.LeanPromise, lean.LeanReserved => {
                 rc.lean_inc_ref(ptr);
                 return a;
             },
@@ -573,4 +553,3 @@ test "lean_sharecommon_quick on array of scalars" {
 
     try testing.expectEqual(@as(u8, 1), lean_sharecommon_eq(a1, shared));
 }
-

@@ -6,7 +6,6 @@
 // ensures the C-visible symbols are retained when linking the helperless
 // Zig runtime as a static library.
 
-
 const uv_dns = @import("uv_dns.zig");
 const uv_event_loop = @import("uv_event_loop.zig");
 const uv_signal = @import("uv_signal.zig");

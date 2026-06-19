@@ -22,6 +22,7 @@ const c = @cImport({
     @cInclude("unistd.h");
     @cInclude("sys/stat.h");
     @cInclude("errno.h");
+    @cInclude("stdio.h");
 });
 
 const Obj = ?*anyopaque;
@@ -126,11 +127,21 @@ pub export fn lean_compacted_region_save(
     const comp = toCompactor(compactor_obj);
 
     const path = stringCStr(ofname);
-    const fd = c.open(path, c.O_WRONLY | c.O_CREAT | c.O_TRUNC, @as(c_uint, 0o644));
+
+    // Write to a temp file then atomically rename so we never expose
+    // partially-written files or modify possibly memory-mapped files.
+    var tmp_buf: [4096]u8 = undefined;
+    const pid = c.getpid();
+    const tmp_path = std.fmt.bufPrintZ(&tmp_buf, "{s}.tmp.{d}", .{ path, pid }) catch
+        return mkError("output path too long");
+    var fd = c.open(tmp_path, c.O_WRONLY | c.O_CREAT | c.O_TRUNC, @as(c_uint, 0o644));
     if (fd < 0) {
         return mkError("failed to open output file");
     }
-    defer _ = c.close(fd);
+    defer if (fd >= 0) {
+        _ = c.close(fd);
+        _ = c.unlink(tmp_path);
+    };
 
     // Reserve space for the header at a 64KB-aligned offset.
     const current_size = comp.size();
@@ -163,6 +174,12 @@ pub export fn lean_compacted_region_save(
         const data_size = comp.size() - file_offset - OLEAN_HEADER_SIZE;
         if (c.write(fd, data + file_offset + OLEAN_HEADER_SIZE, data_size) != data_size) {
             return mkError("failed to write data");
+        }
+        _ = c.close(fd);
+        fd = -1;
+        if (c.rename(tmp_path, path) != 0) {
+            _ = c.unlink(tmp_path);
+            return mkError("failed to rename output file");
         }
         return io_result.lean_io_result_mk_ok(compactor_obj);
     }
@@ -228,7 +245,12 @@ pub export fn lean_compacted_region_save(
             return mkError("failed to write lib table");
         }
     }
-
+    _ = c.close(fd);
+    fd = -1;
+    if (c.rename(tmp_path, path) != 0) {
+        _ = c.unlink(tmp_path);
+        return mkError("failed to rename output file");
+    }
     return io_result.lean_io_result_mk_ok(compactor_obj);
 }
 
@@ -506,7 +528,13 @@ test "compacted region save/read closure with v3 format" {
 
     // Save with allow_closures=true → v3 format.
     const save_result = lean_compacted_region_save(
-        fname, object.lean_box(0).?, closure_obj, deps, object.lean_box(0).?, 1, object.lean_box(0),
+        fname,
+        object.lean_box(0).?,
+        closure_obj,
+        deps,
+        object.lean_box(0).?,
+        1,
+        object.lean_box(0),
     );
     defer rc.lean_dec(save_result);
     try testing.expect(io_result.lean_io_result_is_ok(save_result));

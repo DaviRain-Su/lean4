@@ -39,4 +39,3 @@ pub fn lean_uv_timer_stop(timer: *anyopaque) callconv(.c) *anyopaque {
 pub fn lean_uv_timer_cancel(timer: *anyopaque) callconv(.c) *anyopaque {
     return lean_uv_timer_cancel_helper(timer);
 }
-
