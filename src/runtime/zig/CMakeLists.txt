@@ -84,6 +84,7 @@ if(ZIG)
       --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
       "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
       -Dexport-lean-helpers=false
+      -Dexport-allocator-symbols=false
       -Dexport-kernel-symbols=true
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
     DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"

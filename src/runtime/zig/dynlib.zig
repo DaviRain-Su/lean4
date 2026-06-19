@@ -46,6 +46,12 @@ fn ensureSymbolClass() *lean.lean_external_class {
     return g_dynlib_symbol_class.?;
 }
 
+/// Eager registration matching `lean::initialize_dynlib()` in `src/library/dynlib.cpp`.
+pub fn initializeDynlibClasses() void {
+    _ = ensureDynlibClass();
+    _ = ensureSymbolClass();
+}
+
 fn dynlibFinalize(h: *anyopaque) void {
     if (builtin.target.os.tag == .windows) {
         _ = c.FreeLibrary(h);

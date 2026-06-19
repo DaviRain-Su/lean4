@@ -331,9 +331,6 @@ pub export fn lean_internal_get_default_options(_: ?*anyopaque) callconv(.c) *an
     return object.lean_box(0).?;
 }
 
-pub export fn lean_display_cumulative_profiling_times(_: ?*anyopaque) callconv(.c) void {}
-
-pub export fn lean_profileit(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {}
 
 pub export fn lean_get_leanc_extra_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
     return string.mkAsciiStringBytes("");
@@ -349,6 +346,83 @@ pub export fn lean_get_linker_flags(_: u8) callconv(.c) *anyopaque {
 
 pub export fn lean_get_internal_linker_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
     return string.mkAsciiStringBytes("");
+}
+
+pub export fn lean_expr_dbg_to_string(e: *anyopaque) callconv(.c) *anyopaque {
+    var fbs = std.Io.Writer.Allocating.init(std.heap.page_allocator);
+    defer fbs.deinit();
+    exprDebugPrint(&fbs.writer, e, 0);
+    const written = fbs.written();
+    return string.mkStringFromBytes(written);
+}
+
+fn exprDebugPrint(w: *std.Io.Writer, e: *anyopaque, depth: u32) void {
+    if (object.lean_is_scalar(e)) {
+        w.print("@{}", .{object.lean_unbox(e)}) catch return;
+        return;
+    }
+    const tag = object.lean_ptr_tag(e);
+    const ctor_mod = @import("ctor.zig");
+    switch (tag) {
+        0 => w.print("@{}", .{object.lean_unbox(ctor_mod.lean_ctor_get(e, 0) orelse return)}) catch return,
+        1 => { // fvar
+            w.print("?", .{}) catch return;
+            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
+        },
+        2 => { // mvar
+            w.print("?m.", .{}) catch return;
+            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
+        },
+        3 => { // sort
+            w.print("Sort", .{}) catch return;
+        },
+        4 => { // const
+            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
+        },
+        5 => { // app
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 0) orelse return, depth);
+            w.writeByte(' ') catch return;
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 1) orelse return, depth);
+        },
+        6, 7 => { // lam, forallE
+            w.print("{s} ", .{if (tag == 6) "fun" else "@@@"}) catch return;
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 2) orelse return, depth);
+        },
+        8 => { // letE
+            w.print("let ", .{}) catch return;
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 3) orelse return, depth);
+        },
+        10 => { // mdata
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 1) orelse return, depth);
+        },
+        11 => { // proj
+            w.print("proj", .{}) catch return;
+            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 2) orelse return, depth);
+        },
+        else => w.print("<expr:{}>", .{tag}) catch return,
+    }
+}
+
+fn printName(w: *std.Io.Writer, n: *anyopaque) void {
+    if (object.lean_is_scalar(n)) {
+        w.print("_", .{}) catch return;
+        return;
+    }
+    const ctor_mod = @import("ctor.zig");
+    const tag = object.lean_ptr_tag(n);
+    const parent = ctor_mod.lean_ctor_get(n, 1) orelse return;
+    if (!object.lean_is_scalar(parent)) {
+        printName(w, parent);
+        w.writeByte('.') catch return;
+    }
+    if (tag == 0) {
+        const str_obj = ctor_mod.lean_ctor_get(n, 0) orelse return;
+        const s: *lean.lean_string_object = @ptrCast(@alignCast(str_obj));
+        const data: [*]const u8 = @ptrCast(&s.m_data);
+        w.writeAll(data[0..s.m_size -| 1]) catch return;
+    } else {
+        w.print("{d}", .{object.lean_unbox(ctor_mod.lean_ctor_get(n, 0) orelse return)}) catch return;
+    }
 }
 
 pub export fn lean_sorry(_: u8) callconv(.c) *anyopaque {
