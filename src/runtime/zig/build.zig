@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
-    const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export experimental pure-Zig kernel entrypoints") orelse false;
+    const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse false;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
 
     const mpz_mod = b.addModule("mpz_zig", .{
