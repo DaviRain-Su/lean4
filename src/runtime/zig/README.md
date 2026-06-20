@@ -78,19 +78,28 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 872 of ~1360 C++ runtime symbols have been flipped
-   to Zig (64%). All 171 emitzig tests pass with clean stdlib cache build.
-   Key fixes: (1) lean_alloc_mpz delegates to C++ lean_alloc_object when
-   export_allocator_symbols is false, (2) freeDelegatedCppObject routes
-   through C++ lean_free_object for mimalloc compatibility, (3) allocSmallObject
-   uses mi_malloc_small and sets m_cs_sz in mimalloc mode, (4) setHeapHeader
-   preserves m_cs_sz in mimalloc mode, (5) ctorScalarBytes subtracts header
-   from m_cs_sz, (6) task/promise deactivation: lean_deactivate_task/
-   lean_deactivate_promise exported from both C++ (strong) and Zig (weak) —
-   C++ overrides in libleanshared, Zig handles deactivation in zigrt mode.
-   Remaining ~488 symbols need: compact region fix (3), IO promise delegation
-   (4), runtime init/check fixes (~20), IO/UV/process symbols (~170),
-   compiler kernel/elab (~178), and Lean stdlib symbols (~100, not flippable).
+2. **Phase 3 symbol flip**: 987 of ~1360 C++ runtime symbols have been flipped
+  to Zig (73%). All 106 non-stdlib emitzig tests and 20/21 zigrt tests pass.
+  Key fixes: (1) lean_alloc_mpz delegates to C++ lean_alloc_object when
+  export_allocator_symbols is false, (2) freeDelegatedCppObject routes
+  through C++ lean_free_object for mimalloc compatibility, (3) allocSmallObject
+  uses mi_malloc_small and sets m_cs_sz in mimalloc mode, (4) setHeapHeader
+  preserves m_cs_sz in mimalloc mode, (5) ctorScalarBytes subtracts header
+  from m_cs_sz, (6) task/promise deactivation: lean_deactivate_task/
+  lean_deactivate_promise exported from both C++ (strong) and Zig (weak) —
+  C++ overrides in libleanshared, Zig handles deactivation in zigrt mode,
+  (7) scoped_task_manager uses volatile function pointers to delegate to
+  Zig lean_init_task_manager_using, preventing C++ inlining, (8) deactivateTask
+  no longer eagerly frees pending task objects — matches C++ behavior where
+  the task is left alive for the scheduler to free later, (9) resolveTaskLocked
+  and handleFinishedLocked use atomic stores/loads for m_value and m_imp,
+  (10) handleFinishedLocked saves m_next_dep before enqueueing to avoid
+  use-after-free from recursive inline resolution, (11) 30 GMP externs
+  replaced with pure-Zig big_int implementations.
+  Remaining ~373 symbols: allocator delegation (3: lean_alloc_mpz/object,
+  lean_free_object), heartbeat/MPZ/debug (3), UV TCP/UDP/signal/random
+  helpers (36, need Zig libuv implementations), and Lean stdlib @[export]
+  symbols (~100, not flippable — compiled from .lean source, not C++).
 3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.
