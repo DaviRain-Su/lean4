@@ -78,8 +78,8 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 987 of ~1360 C++ runtime symbols have been flipped
-  to Zig (73%). All 106 non-stdlib emitzig tests and 20/21 zigrt tests pass.
+2. **Phase 3 symbol flip**: 1024 of ~1360 C++ runtime symbols have been flipped
+  to Zig (75%). All 106 non-stdlib emitzig tests and 21/21 zigrt tests pass.
   Key fixes: (1) lean_alloc_mpz delegates to C++ lean_alloc_object when
   export_allocator_symbols is false, (2) freeDelegatedCppObject routes
   through C++ lean_free_object for mimalloc compatibility, (3) allocSmallObject
@@ -95,11 +95,26 @@ catch compiler bugs that violate the LCNF purity invariant.
   and handleFinishedLocked use atomic stores/loads for m_value and m_imp,
   (10) handleFinishedLocked saves m_next_dep before enqueueing to avoid
   use-after-free from recursive inline resolution, (11) 30 GMP externs
-  replaced with pure-Zig big_int implementations.
-  Remaining ~373 symbols: allocator delegation (3: lean_alloc_mpz/object,
-  lean_free_object), heartbeat/MPZ/debug (3), UV TCP/UDP/signal/random
-  helpers (36, need Zig libuv implementations), and Lean stdlib @[export]
-  symbols (~100, not flippable — compiled from .lean source, not C++).
+  replaced with pure-Zig big_int implementations, (12) lean_inc_heartbeat
+  independently exported (not gated by export_allocator_symbols), (13) 36 UV
+  helper symbols exported as aliases from uv_exports.zig pointing to existing
+  Zig lean_uv_* implementations.
+  Remaining 5 lean_* C ABI symbols cannot be flipped without deeper changes:
+  - lean_alloc_object / lean_free_object (2): delegate to mimalloc when
+    export_allocator_symbols=false. Flipping requires implementing the full
+    mimalloc-equivalent allocator in Zig.
+  - lean_alloc_mpz (1): C++ signature uses GMP mpz_t parameter; Zig version
+    uses different Mpz type. Signature mismatch prevents flipping.
+  - lean_extract_mpz_value (1): C++ copies mpz value into GMP mpz_t output
+    parameter; Zig version returns a pointer to internal Mpz. Different
+    semantics, only defined under LEAN_USE_GMP.
+  - lean_demangle_bt_line_cstr (1): defined as @[export] in Lean source
+    (Lean/Compiler/NameDemangling.lean), not a C++ symbol. The C++ version
+    is a weak stub that returns empty string when the Lean demangler is not
+    linked. Not a C++ → Zig flip candidate.
+  The remaining ~863 unflipped symbols are mangled C++ names (namespace lean,
+  mimalloc internals, C++ STL) — internal C++ implementation detail without
+  C ABI, not callable from Lean code directly.
 3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.
