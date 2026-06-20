@@ -8,14 +8,11 @@ set(
   apply.cpp
   exception.cpp
   interrupt.cpp
-  memory.cpp
   stackinfo.cpp
   compact.cpp
   io.cpp
-  hash.cpp
   alloc.cpp
   sharecommon.cpp
-  stack_overflow.cpp
   object_ref.cpp
 )
 
