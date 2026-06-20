@@ -12,16 +12,23 @@ const external_allocator = struct {
     extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
     extern fn lean_alloc_small_object(sz: c_uint) callconv(.c) *anyopaque;
 };
-const mimalloc = if (!export_allocator_symbols) struct {
-    extern fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque;
-    extern fn mi_malloc(sz: usize) callconv(.c) ?*anyopaque;
-    extern fn mi_free_size(ptr: ?*anyopaque, sz: usize) callconv(.c) void;
-    extern fn mi_free(ptr: ?*anyopaque) callconv(.c) void;
-} else struct {
-    fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque { _ = sz; @panic("mi_malloc_small not available in zigrt mode"); }
-    fn mi_malloc(sz: usize) callconv(.c) ?*anyopaque { _ = sz; @panic("mi_malloc not available in zigrt mode"); }
-    fn mi_free_size(ptr: ?*anyopaque, sz: usize) callconv(.c) void { _ = ptr; _ = sz; @panic("mi_free_size not available in zigrt mode"); }
-    fn mi_free(ptr: ?*anyopaque) callconv(.c) void { _ = ptr; @panic("mi_free not available in zigrt mode"); }
+// mimalloc has been removed from the build. Use libc malloc/free directly.
+// The Zig mimalloc_compat.zig module exports mi_* symbols for C++ callers
+// (object.cpp, mpz.cpp, lean.h inline functions, mi_stl_allocator).
+const mimalloc = struct {
+    fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque {
+        return @ptrCast(std.c.malloc(sz));
+    }
+    fn mi_malloc(sz: usize) callconv(.c) ?*anyopaque {
+        return @ptrCast(std.c.malloc(sz));
+    }
+    fn mi_free_size(ptr: ?*anyopaque, sz: usize) callconv(.c) void {
+        _ = sz;
+        if (ptr) |p| std.c.free(@ptrCast(p));
+    }
+    fn mi_free(ptr: ?*anyopaque) callconv(.c) void {
+        if (ptr) |p| std.c.free(@ptrCast(p));
+    }
 };
 const task_runtime = if (builtin.is_test)
     struct {
