@@ -1104,20 +1104,19 @@ extern "C" LEAN_EXPORT void lean_finalize_task_manager() {
     }
 }
 
+// Use volatile function pointer to prevent the compiler from inlining
+// lean_init_task_manager_using/lean_finalize_task_manager, so that the
+// flipped Zig versions (strong symbols) are called instead of the
+// C++ versions being inlined.
+static void (*volatile p_init_task_manager_using)(unsigned) = lean_init_task_manager_using;
+static void (*volatile p_finalize_task_manager)() = lean_finalize_task_manager;
+
 scoped_task_manager::scoped_task_manager(unsigned num_workers) {
-    lean_assert(g_task_manager == nullptr);
-#if defined(LEAN_MULTI_THREAD)
-    if (num_workers > 0) {
-        g_task_manager = new task_manager(num_workers);
-    }
-#endif
+    p_init_task_manager_using(num_workers);
 }
 
 scoped_task_manager::~scoped_task_manager() {
-    if (g_task_manager) {
-        delete g_task_manager;
-        g_task_manager = nullptr;
-    }
+    p_finalize_task_manager();
 }
 
 extern "C" LEAN_EXPORT void lean_deactivate_task(lean_task_object * t) {

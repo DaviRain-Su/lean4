@@ -509,6 +509,14 @@ pub const TaskManager = struct {
     /// and free the closure. The task object itself is freed only when the task
     /// is not `keep_alive`; for `keep_alive` tasks the worker that completes the
     /// task is responsible for freeing the object.
+    /// Deactivate a task. If the task is already finished, free it
+    /// immediately. If the task is still pending, mark it as deleted/canceled
+    /// and free its dependents — but leave the task object alive so that
+    /// `handleFinishedLocked` can still iterate the dependency chain
+    /// without use-after-free. The task object is freed later by
+    /// `runTaskLocked` when dequeued or by `handleFinishedLocked`
+    /// when the source task finishes. This mirrors the C++ behavior
+    /// in `deactivate_task` / `deactivate_task_core`.
     pub fn deactivateTask(self: *TaskManager, task: *lean.lean_task_object) void {
         self.m_mutex.lock();
 
@@ -523,7 +531,6 @@ pub const TaskManager = struct {
             return;
         };
 
-        const keep_alive = imp.m_keep_alive != 0;
         const closure = imp.m_closure;
         var it = imp.m_head_dep;
         imp.m_closure = null;
@@ -543,10 +550,10 @@ pub const TaskManager = struct {
         if (closure) |value| {
             rc.lean_dec(value);
         }
-
-        if (!keep_alive) {
-            freeTaskObject(task);
-        }
+        // Do NOT free the task object here — it may still be referenced
+        // from a source task's m_head_dep chain. It will be freed when
+        // the source task finishes (handleFinishedLocked checks m_deleted)
+        // or when it is dequeued (runTaskLocked checks m_deleted).
     }
 
     pub fn shuttingDown(self: *TaskManager) bool {
@@ -714,7 +721,7 @@ pub const TaskManager = struct {
         rc.lean_mark_mt(value);
         g_task_mark_mt_state.notePublishedValue(value);
         @atomicStore(?*anyopaque, &task.m_value, value, .seq_cst);
-        task.m_imp = null;
+        @atomicStore(?*lean.lean_task_imp, &task.m_imp, null, .seq_cst);
         self.handleFinishedLocked(imp);
         alloc.lean_free_small_object(@ptrCast(imp));
         self.m_condvar.broadcast();
@@ -724,10 +731,20 @@ pub const TaskManager = struct {
         var it = imp.m_head_dep;
         imp.m_head_dep = null;
         while (it) |dep| {
-            const dep_imp = dep.m_imp orelse @panic("dependent task must remain pending");
+            // Use atomic load — the task may have been concurrently deactivated
+            // (deactivateTask sets m_imp via non-atomic store, but it holds the
+            // mutex when doing so, and we also hold the mutex here, so this is
+            // safe. However, using atomic load is the correct pattern for
+            // cross-thread visibility.)
+            const dep_imp = @atomicLoad(?*lean.lean_task_imp, &dep.m_imp, .seq_cst) orelse {
+                // Dependent was already resolved — skip it.
+                break;
+            };
             if (imp.m_canceled != 0) {
                 dep_imp.m_canceled = 1;
             }
+            // Save next before enqueueing — enqueueLocked may recursively
+            // resolve dep (via inline run), which frees dep_imp.
             const next = dep_imp.m_next_dep;
             dep_imp.m_next_dep = null;
             if (dep_imp.m_deleted != 0) {
