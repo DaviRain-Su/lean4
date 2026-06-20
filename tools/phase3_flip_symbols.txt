@@ -454,6 +454,10 @@ lean_isize_to_int32
 lean_isize_to_int64
 lean_isize_to_int8
 lean_isize_xor
+lean_kernel_cheap_beta_reduce
+lean_kernel_check_impl
+lean_kernel_is_def_eq_impl
+lean_kernel_whnf_impl
 lean_libuv_version
 lean_list_cons
 lean_manual_get_root
