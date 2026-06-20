@@ -1,18 +1,18 @@
-# Phase 3: Verified safe symbols to flip (30 symbols)
-# These symbols have been tested with 2997/3003 elab tests passing.
+# Phase 3: Verified safe symbols to flip (70 symbols)
+# These symbols have been tested with emitzig zigrt + stdlib tests passing.
 # 6 async failures are sporadic, same as Phase 2 baseline.
 
-# Platform info
+# Platform info (4)
 lean_system_platform_emscripten
 lean_system_platform_nbits
 lean_system_platform_osx
 lean_system_platform_windows
 
-# Internal info (read-only, compile-time constants that match C++)
+# Internal info (2)
 lean_internal_has_address_sanitizer
 lean_internal_has_llvm_backend
 
-# Pure computation / comparison
+# Pure computation / comparison (4)
 lean_name_eq
 lean_byteslice_beq
 lean_uint64_mix_hash
@@ -38,6 +38,52 @@ lean_float32_to_string
 lean_float_once_cold
 lean_float32_once_cold
 
-# UTF8
+# UTF8 (2)
 lean_utf8_n_strlen
 lean_utf8_strlen
+
+# String operations (15) — tested with zigrt String/StringHelpers/StringEscapes + stdlib StdlibString
+lean_string_push
+lean_string_append
+lean_string_lt
+lean_string_compare
+lean_string_hash
+lean_string_mk
+lean_string_data
+lean_string_of_usize
+lean_string_is_valid_pos
+lean_string_memcmp
+lean_string_from_utf
+lean_string_to_utf
+lean_string_validate_utf
+lean_string_eq_cold
+lean_string_utf8_byte_size
+
+# Array / sarray / slice operations (25) — tested with zigrt Array/FloatArray + stdlib StdlibArray
+lean_array_push
+lean_array_get
+lean_array_set
+lean_array_fget
+lean_array_fset
+lean_array_fget_borrowed
+lean_array_fswap
+lean_array_swap
+lean_array_pop
+lean_array_uset
+lean_copy_sarray
+lean_sarray_ensure_capacity
+lean_byte_array_copy_slice
+lean_byte_array_get
+lean_byte_array_set
+lean_byte_array_uget
+lean_byte_array_uset
+lean_byte_array_fset
+lean_byte_array_data
+lean_byte_array_hash
+lean_copy_byte_array
+lean_copy_expand_array
+lean_copy_expand_array_nonlinear
+lean_copy_float_array
+lean_float_array_data
+lean_slice_dec_lt
+lean_slice_hash
