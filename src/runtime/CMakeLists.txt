@@ -14,6 +14,7 @@ set(
   sharecommon.cpp
   object_ref.cpp
   githash.cpp
+  io_error_helpers.cpp
   byteslice.cpp
   uv/net_addr.cpp
   uv/zig_link_compat.cpp
