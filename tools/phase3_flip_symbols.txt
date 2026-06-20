@@ -26,6 +26,7 @@ lean_align
 lean_alloc_ctor_memory
 lean_alloc_external
 lean_alloc_mpz
+lean_alloc_object
 lean_alloc_sarray_would_overflow
 lean_alloc_small_object
 lean_alloc_string
@@ -233,6 +234,7 @@ lean_float32_to_uint32
 lean_float32_to_uint64
 lean_float32_to_uint8
 lean_float32_to_usize
+lean_free_object
 lean_free_small_object
 lean_get_allocated_memory
 lean_get_current_time
