@@ -578,10 +578,14 @@ comptime {
         @export(&lean_alloc_small, .{ .name = "lean_alloc_small" });
         @export(&lean_free_small, .{ .name = "lean_free_small" });
         @export(&lean_small_mem_size, .{ .name = "lean_small_mem_size" });
-        @export(&lean_inc_heartbeat, .{ .name = "lean_inc_heartbeat" });
+        // lean_inc_heartbeat moved outside export_allocator_symbols gate below
         @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
         @export(&lean_free_object, .{ .name = "lean_free_object" });
     }
+}
+
+comptime {
+    @export(&lean_inc_heartbeat, .{ .name = "lean_inc_heartbeat" });
 }
 
 test "lean_alloc_object returns aligned non-null pointers" {

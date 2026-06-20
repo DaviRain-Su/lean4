@@ -94,4 +94,43 @@ comptime {
     @export(&net_addr.lean_uv_pton_v6, .{ .name = "lean_uv_pton_v6" });
     @export(&net_addr.lean_uv_ntop_v6, .{ .name = "lean_uv_ntop_v6" });
     @export(&net_addr.lean_uv_interface_addresses, .{ .name = "lean_uv_interface_addresses" });
+
+    // Helper aliases: C++ zig_link_compat.cpp wrappers call *_helper variants.
+    // Export the same Zig implementations under the *_helper names so the
+    // C++ helpers can be flipped (weakened) and Zig provides them.
+    @export(&uv_system.lean_uv_random, .{ .name = "lean_uv_random_helper" });
+    @export(&uv_signal.lean_uv_signal_mk, .{ .name = "lean_uv_signal_mk_helper" });
+    @export(&uv_signal.lean_uv_signal_next, .{ .name = "lean_uv_signal_next_helper" });
+    @export(&uv_signal.lean_uv_signal_stop, .{ .name = "lean_uv_signal_stop_helper" });
+    @export(&uv_signal.lean_uv_signal_cancel, .{ .name = "lean_uv_signal_cancel_helper" });
+    @export(&uv_tcp.lean_uv_tcp_new, .{ .name = "lean_uv_tcp_new_helper" });
+    @export(&uv_tcp.lean_uv_tcp_connect, .{ .name = "lean_uv_tcp_connect_helper" });
+    @export(&uv_tcp.lean_uv_tcp_send, .{ .name = "lean_uv_tcp_send_helper" });
+    @export(&uv_tcp.lean_uv_tcp_recv, .{ .name = "lean_uv_tcp_recv_helper" });
+    @export(&uv_tcp.lean_uv_tcp_wait_readable, .{ .name = "lean_uv_tcp_wait_readable_helper" });
+    @export(&uv_tcp.lean_uv_tcp_cancel_recv, .{ .name = "lean_uv_tcp_cancel_recv_helper" });
+    @export(&uv_tcp.lean_uv_tcp_bind, .{ .name = "lean_uv_tcp_bind_helper" });
+    @export(&uv_tcp.lean_uv_tcp_listen, .{ .name = "lean_uv_tcp_listen_helper" });
+    @export(&uv_tcp.lean_uv_tcp_accept, .{ .name = "lean_uv_tcp_accept_helper" });
+    @export(&uv_tcp.lean_uv_tcp_cancel_accept, .{ .name = "lean_uv_tcp_cancel_accept_helper" });
+    @export(&uv_tcp.lean_uv_tcp_try_accept, .{ .name = "lean_uv_tcp_try_accept_helper" });
+    @export(&uv_tcp.lean_uv_tcp_shutdown, .{ .name = "lean_uv_tcp_shutdown_helper" });
+    @export(&uv_tcp.lean_uv_tcp_getpeername, .{ .name = "lean_uv_tcp_getpeername_helper" });
+    @export(&uv_tcp.lean_uv_tcp_getsockname, .{ .name = "lean_uv_tcp_getsockname_helper" });
+    @export(&uv_tcp.lean_uv_tcp_nodelay, .{ .name = "lean_uv_tcp_nodelay_helper" });
+    @export(&uv_tcp.lean_uv_tcp_keepalive, .{ .name = "lean_uv_tcp_keepalive_helper" });
+    @export(&uv_udp.lean_uv_udp_new, .{ .name = "lean_uv_udp_new_helper" });
+    @export(&uv_udp.lean_uv_udp_connect, .{ .name = "lean_uv_udp_connect_helper" });
+    @export(&uv_udp.lean_uv_udp_send, .{ .name = "lean_uv_udp_send_helper" });
+    @export(&uv_udp.lean_uv_udp_recv, .{ .name = "lean_uv_udp_recv_helper" });
+    @export(&uv_udp.lean_uv_udp_wait_readable, .{ .name = "lean_uv_udp_wait_readable_helper" });
+    @export(&uv_udp.lean_uv_udp_cancel_recv, .{ .name = "lean_uv_udp_cancel_recv_helper" });
+    @export(&uv_udp.lean_uv_udp_getpeername, .{ .name = "lean_uv_udp_getpeername_helper" });
+    @export(&uv_udp.lean_uv_udp_getsockname, .{ .name = "lean_uv_udp_getsockname_helper" });
+    @export(&uv_udp.lean_uv_udp_set_broadcast, .{ .name = "lean_uv_udp_set_broadcast_helper" });
+    @export(&uv_udp.lean_uv_udp_set_multicast_loop, .{ .name = "lean_uv_udp_set_multicast_loop_helper" });
+    @export(&uv_udp.lean_uv_udp_set_multicast_ttl, .{ .name = "lean_uv_udp_set_multicast_ttl_helper" });
+    @export(&uv_udp.lean_uv_udp_set_membership, .{ .name = "lean_uv_udp_set_membership_helper" });
+    @export(&uv_udp.lean_uv_udp_set_multicast_interface, .{ .name = "lean_uv_udp_set_multicast_interface_helper" });
+    @export(&uv_udp.lean_uv_udp_set_ttl, .{ .name = "lean_uv_udp_set_ttl_helper" });
 }
