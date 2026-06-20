@@ -1145,6 +1145,43 @@ fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) 
     ctor.lean_ctor_set(ok_ctor, 0, r);
     return ok_ctor;
 }
+// ── lean_run_init ───────────────────────────────────────────────────────────
+// Run the init function for a declaration and cache the result.
+// Mirrors C++ interpreter::run_init: call init_decl with no args, mark the
+// result persistent, and store it in the symbol cache for decl.
+fn leanRunInit(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *anyopaque) callconv(.c) *anyopaque {
+    const a = std.heap.page_allocator;
+    var interp = Interpreter.init(env, opts, a);
+    defer interp.deinit();
+
+    // Call init_decl with 0 arguments
+    const no_args: [*]*anyopaque = @ptrCast(&empty_args);
+    const r = interp.callBoxed(init_decl, 0, no_args);
+
+    if (io_min.lean_io_result_is_ok(r)) {
+        const o = io_min.lean_io_result_get_value(r) orelse {
+            rc.lean_dec(r);
+            return io_min.lean_io_result_mk_error(object.lean_box(0).?);
+        };
+        rc.lean_mark_persistent(o);
+        rc.lean_dec(r);
+
+        // Store the initialized value in the symbol cache for decl
+        const sym = interp.lookupSymbol(decl);
+        if (sym.native_addr) |addr| {
+            const slot: *?*anyopaque = @ptrCast(@alignCast(addr));
+            slot.* = o;
+        } else {
+            // No native address — hold a reference to keep it alive
+            rc.lean_inc(o);
+        }
+
+        return io_min.lean_io_result_mk_ok(object.lean_box(0).?);
+    } else {
+        // Error — return as-is
+        return r;
+    }
+}
 
 var empty_args: [*]u8 = undefined;
 
@@ -1152,5 +1189,6 @@ comptime {
     if (export_kernel_symbols) {
         @export(&leanEvalMain, .{ .name = "lean_eval_main", .linkage = .weak });
         @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .weak });
+        @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .weak });
     }
 }

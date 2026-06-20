@@ -1,28 +1,114 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wrapper for compiling Lean-generated Zig code into an executable.
-# Usage: zigc <input.zig> [output-name]
+# Wrapper for compiling Lean-generated Zig code into an executable or object.
+# Usage: zigc [options] <input.zig> [-o <output>]
 #
-# The script derives include/library paths from the in-tree leanc wrapper.
-# It links against the C++ Lean runtime and standard library.
+# Options:
+#   --print-cflags   Print compiler flags for building against the Lean runtime and exit
+#   --print-ldflags  Print linker flags for linking against the Lean runtime and exit
+#   -c               Compile only (produce .o, do not link)
+#   -shared          Produce a shared library
+#   -leanshared      Link against leanshared (dynamic Lean runtime)
+#   -v               Verbose: print the zig command before executing
+#   -O <mode>        Optimization mode: Debug, ReleaseSafe, ReleaseFast, ReleaseSmall
+#
+# Environment variables:
+#   LEAN_CC          Override the C compiler (for finding system includes)
+#   GMP_LIB_DIR      Custom libgmp library directory
+#   LIBUV_LIB_DIR    Custom libuv library directory
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LEANC="${LEANC:-$ROOT/build/release/stage1/bin/leanc}"
 
-if [[ ! -x "$LEANC" ]]; then
-  echo "zigc: leanc not found at $LEANC" >&2
+# Stage1 build directory
+BUILD_DIR="${LEAN_BUILD_DIR:-$ROOT/build/release/stage1}"
+INCLUDE_DIR="$BUILD_DIR/include"
+LIB_DIR="$BUILD_DIR/lib/lean"
+LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig"
+
+# ── Flag parsing ───────────────────────────────────────────────────────────
+
+COMPILE_ONLY=false
+SHARED=false
+LEANSHARED=false
+VERBOSE=false
+OPT_MODE="Debug"
+INPUT=""
+OUTPUT=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --print-cflags)
+      echo "-I $INCLUDE_DIR"
+      exit 0
+      ;;
+    --print-ldflags)
+      # Print both include and link flags
+      echo "-I $INCLUDE_DIR -L $LIB_DIR -lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread"
+      exit 0
+      ;;
+    -c)
+      COMPILE_ONLY=true
+      shift
+      ;;
+    -shared)
+      SHARED=true
+      shift
+      ;;
+    -leanshared)
+      LEANSHARED=true
+      shift
+      ;;
+    -v)
+      VERBOSE=true
+      shift
+      ;;
+    -O)
+      OPT_MODE="$2"
+      shift 2
+      ;;
+    -o)
+      OUTPUT="$2"
+      shift 2
+      ;;
+    -*)
+      # Pass through unknown flags
+      EXTRA_FLAGS+=("$1")
+      shift
+      ;;
+    *)
+      INPUT="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$INPUT" ]]; then
+  echo "zigc: no input file specified" >&2
+  echo "Usage: zigc [options] <input.zig> [-o <output>]" >&2
   exit 1
 fi
 
-INPUT="$1"
-OUTPUT="${2:-$(basename "$INPUT" .zig)}"
+if [[ ! -f "$INPUT" ]]; then
+  echo "zigc: input file not found: $INPUT" >&2
+  exit 1
+fi
+
+if [[ ! -f "$LEAN_RT_ZIG" ]]; then
+  echo "zigc: shared runtime module not found at $LEAN_RT_ZIG" >&2
+  exit 1
+fi
+
+# Derive output name if not specified
+if [[ -z "$OUTPUT" ]]; then
+  OUTPUT="$(basename "$INPUT" .zig)"
+fi
+
+# ── Library search paths ─────────────────────────────────────────────────────
 
 EXTRA_FLAGS=()
 
-# Discover library search paths for gmp and libuv. Environment variables
-# GMP_LIB_DIR / LIBUV_LIB_DIR take precedence; otherwise fall back to
-# pkg-config and then platform-specific defaults.
 add_lib_dir() {
   local dir="$1"
   if [[ -d "$dir" ]]; then
@@ -43,20 +129,39 @@ elif command -v pkg-config &>/dev/null && pkg-config --exists libuv 2>/dev/null;
 fi
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  # Homebrew on Apple Silicon vs Intel uses different prefixes.
   add_lib_dir /opt/homebrew/lib
   add_lib_dir /usr/local/lib
   EXTRA_FLAGS+=(-framework CoreFoundation)
 fi
-LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig"
-if [[ ! -f "$LEAN_RT_ZIG" ]]; then
-  echo "zigc: shared runtime module not found at $LEAN_RT_ZIG" >&2
-  exit 1
+
+# ── Build command ─────────────────────────────────────────────────────────────
+
+ZIG_CMD=(zig)
+
+if $COMPILE_ONLY; then
+  # Compile only: produce object file
+  ZIG_CMD+=(build-lib --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O "$OPT_MODE")
+  ZIG_CMD+=(-I "$INCLUDE_DIR" -L "$LIB_DIR")
+  ZIG_CMD+=("${EXTRA_FLAGS[@]}")
+  ZIG_CMD+=(-fno-emit-bin -femit-obj)
+elif $SHARED; then
+  # Shared library
+  ZIG_CMD+=(build-lib --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O "$OPT_MODE")
+  ZIG_CMD+=(-I "$INCLUDE_DIR" -L "$LIB_DIR")
+  ZIG_CMD+=("${EXTRA_FLAGS[@]}")
+  ZIG_CMD+=(-lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread)
+  ZIG_CMD+=(-femit-bin="$OUTPUT")
+else
+  # Executable (default)
+  ZIG_CMD+=(build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O "$OPT_MODE")
+  ZIG_CMD+=(-I "$INCLUDE_DIR" -L "$LIB_DIR")
+  ZIG_CMD+=("${EXTRA_FLAGS[@]}")
+  ZIG_CMD+=(-lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread)
+  ZIG_CMD+=(-femit-bin="$OUTPUT")
 fi
 
-zig build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O Debug \
-  -I "$ROOT/build/release/stage1/include" \
-  -L "$ROOT/build/release/stage1/lib/lean" \
-  -lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread \
-  "${EXTRA_FLAGS[@]}" \
-  -femit-bin="$OUTPUT"
+if $VERBOSE; then
+  echo "${ZIG_CMD[*]}" >&2
+fi
+
+exec "${ZIG_CMD[@]}"
