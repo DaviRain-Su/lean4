@@ -81,6 +81,7 @@ pub const uv_timer = @import("uv_timer.zig");
 pub const uv_signal = @import("uv_signal.zig");
 pub const uv_udp = @import("uv_udp.zig");
 pub const mimalloc_compat = @import("mimalloc_compat.zig");
+pub const gmp_alloc_compat = @import("gmp_alloc_compat.zig");
 
 comptime {
     _ = alloc;
@@ -155,5 +156,6 @@ comptime {
     _ = uv_udp.force_link;
     _ = inline_exports.force_link;
     _ = mimalloc_compat;
+    _ = gmp_alloc_compat;
     _ = dynlib.force_link;
 }
