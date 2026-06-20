@@ -78,13 +78,18 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 96 of ~436 C++ runtime symbols have been flipped
-   to Zig (22%). Flipped groups: platform info (4), internal info (2), pure
+2. **Phase 3 symbol flip**: 163 of ~436 C++ runtime symbols have been flipped
+   to Zig (37%). Flipped groups: platform info (4), internal info (2), pure
    computation (4), float (18), UTF8 (2), string operations (15),
-   array/sarray/slice (25), nat/int big arithmetic (23). All pass zigrt +
-   stdlib tests. Prior concerns about string/array "ABI incompatibility" and
-   nat/int "GMP semantic gap" were unfounded — the Zig layouts match C++
-   exactly and nat/int arithmetic uses GMP via `mpz_zig.zig`.
+   array/sarray/slice (25), nat/int big arithmetic (18 of 23 — 5 removed:
+   add/sub/mul/neg/div_exact cause SIGSEGV/SIGBUS), internal/debug/panic (25),
+   apply primitives (18), string_utf8 (10), nat/int conversion (17),
+   array_get_panic (1), max_small_nat (1). All pass zigrt + stdlib tests with
+   clean stdlib cache build. Two allocator fixes were needed: lean_alloc_mpz
+   now delegates to C++ lean_alloc_object when export_allocator_symbols is
+   false (C++ lean_alloc_mpz has a different signature), and
+   freeDelegatedCppObject routes through C++ lean_free_object for mimalloc
+   compatibility.
 3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.
