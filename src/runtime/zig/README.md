@@ -78,22 +78,25 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 193 of ~436 C++ runtime symbols have been flipped
-   to Zig (44%). Flipped groups: platform info (4), internal info (2), pure
+2. **Phase 3 symbol flip**: 197 of ~436 C++ runtime symbols have been flipped
+   to Zig (45%). Flipped groups: platform info (4), internal info (2), pure
    computation (4), float (18), UTF8 (2), string operations (15),
    array/sarray/slice (25), nat/int big arithmetic (23 — previously 5 caused
    SIGSEGV/SIGBUS but the root cause was a lean_alloc_mpz signature mismatch,
    now fixed), internal/debug/panic (25), apply primitives (18), string_utf8
    (10), nat/int conversion (17), array_get_panic (1), max_small_nat (1),
    ST.Ref (6), string constructors (5), array constructors (6), float array
-   (9). All 171 emitzig tests pass with clean stdlib cache build. Two allocator
-   fixes were needed: lean_alloc_mpz now delegates to C++ lean_alloc_object
-   when export_allocator_symbols is false (C++ lean_alloc_mpz has a different
-   signature), and freeDelegatedCppObject routes through C++ lean_free_object
-   for mimalloc compatibility. Sharecommon (4 symbols) remains in C++ due to
-   deep ABI mismatch: in mimalloc mode m_cs_sz stores total allocation size
-   (not scalar size), requiring coordinated fixes to setHeapHeader,
-   ctorScalarBytes, and lean_object_byte_size.
+   (9), sharecommon (4). All 171 emitzig tests pass with clean stdlib cache
+   build. Three allocator fixes were needed: (1) lean_alloc_mpz now delegates
+   to C++ lean_alloc_object when export_allocator_symbols is false (C++
+   lean_alloc_mpz has a different signature), (2) freeDelegatedCppObject
+   routes through C++ lean_free_object for mimalloc compatibility, (3)
+   allocSmallObject uses mi_malloc_small (not mi_malloc) and sets m_cs_sz to
+   the aligned allocation size in mimalloc mode, matching C++
+   lean_alloc_small_object. Additionally, setHeapHeader preserves m_cs_sz
+   in mimalloc mode (matching C++ lean_set_st_header), and ctorScalarBytes
+   subtracts the header+object_slots from m_cs_sz in mimalloc mode since
+   m_cs_sz stores the total allocation size (not scalar size).
 3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.

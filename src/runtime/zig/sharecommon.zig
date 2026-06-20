@@ -85,7 +85,7 @@ pub export fn lean_sharecommon_hash(o: *anyopaque) callconv(.c) u64 {
     const tag = ptrTag(o);
     if (tag == lean.LeanMPZ) {
         const value = mpz_object.mpzValue(o).getInt() catch 0;
-        const mpz_hash: u32 = @bitCast(@as(i32, @intCast(value)));
+        const mpz_hash: u32 = @truncate(@as(u64, @bitCast(value)));
         return leanHash(tag, mpz_hash);
     } else {
         const other = ptrOther(o);

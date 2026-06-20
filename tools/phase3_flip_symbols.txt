@@ -221,3 +221,11 @@ lean_float_array_set
 lean_float_array_size
 lean_float_array_uget
 lean_float_array_uset
+
+# Sharecommon (4) — hash/eq/quick/state for ShareCommon tactic
+# Requires lean_alloc_ctor to delegate to C++ lean_alloc_ctor_memory in mimalloc mode,
+# matching C++ m_cs_sz = aligned_total_size semantics.
+lean_sharecommon_eq
+lean_sharecommon_hash
+lean_sharecommon_quick
+lean_state_sharecommon

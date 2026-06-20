@@ -151,6 +151,9 @@ pub export fn lean_ctor_scalar_cptr(o: *anyopaque) callconv(.c) [*]u8 {
 }
 
 // ── Allocation helpers ───────────────────────────────────────────────────────
+// These are C++ static-inline helpers from lean.h that need exported symbols
+// for linkage. allocSmallObject delegates correctly in both modes (uses
+// mi_malloc_small + sets m_cs_sz in mimalloc mode).
 
 pub export fn lean_alloc_ctor_memory(sz: usize) callconv(.c) *anyopaque {
     return alloc.allocCtorMemory(sz);
