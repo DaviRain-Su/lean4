@@ -151,3 +151,12 @@ fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
 comptime {
     @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
 }
+
+// C++ mangled: lean::notify_assertion_violation(char const*, int, char const*)
+// Called from lean_assert/lean_verify/lean_unreachable macros in debug.h
+fn cpp_notify_assertion_violation(file_name: [*:0]const u8, line: c_int, condition: [*:0]const u8) callconv(.c) void {
+    notifyAssertionViolation(file_name, line, condition);
+}
+comptime {
+    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .strong });
+}

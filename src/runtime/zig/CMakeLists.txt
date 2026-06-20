@@ -55,6 +55,7 @@ if(ZIG)
     --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
     --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
     "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
+    "-Dcpp-build-type=${CMAKE_BUILD_TYPE}"
   )
 
   add_custom_command(
@@ -74,12 +75,10 @@ if(ZIG)
 
   # Helperless build: omits stdlib-overlapping exports so it can be linked
   # into libleanshared alongside the Lean stdlib without duplicate symbols.
-  # NOTE: The Zig helperless build uses Debug mode by default. When the C++
-  # build is Release, lean_internal_is_debug/build_type return different
-  # values. For Phase 3, these symbols must NOT be flipped unless the Zig
-  # optimize mode matches the C++ build type. Currently kept as Debug because
-  # ReleaseFast has a bug causing async IO test failures.
-  set(LEAN_ZIG_HELPERLESS_OPTIMIZE "Debug")
+  # Use ReleaseSafe to match C++ Release build while keeping safety checks.
+  # lean_internal_is_debug/get_build_type now use cpp-build-type option
+  # instead of builtin.mode, so the Zig optimize mode doesn't affect .olean compat.
+  set(LEAN_ZIG_HELPERLESS_OPTIMIZE "ReleaseFast")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zig-out-helperless")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libleanrt_zig.a")
   add_custom_command(
@@ -93,6 +92,7 @@ if(ZIG)
       -Dexport-allocator-symbols=false
       -Dexport-kernel-symbols=true
       -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
+      -Dcpp-build-type=${CMAKE_BUILD_TYPE}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
     DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

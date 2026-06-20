@@ -758,3 +758,26 @@ test "lean_small_mem_size accepts legacy small allocations" {
 
     try testing.expectEqual(@as(c_uint, @intCast(@sizeOf(lean.lean_ref_object))), lean_small_mem_size(ptr));
 }
+
+// C++ mangled: lean::add_heartbeats(unsigned long long)
+fn cpp_add_heartbeats(count: u64) callconv(.c) void {
+    g_heartbeat += count;
+}
+comptime {
+    @export(&cpp_add_heartbeats, .{ .name = "_ZN4lean14add_heartbeatsEy", .linkage = .strong });
+}
+
+// C++ mangled: lean::set_heartbeats(unsigned long long)
+fn cpp_set_heartbeats(count: u64) callconv(.c) void {
+    g_heartbeat = count;
+}
+
+// C++ mangled: lean::get_num_heartbeats()
+fn cpp_get_num_heartbeats() callconv(.c) u64 {
+    return g_heartbeat;
+}
+
+comptime {
+    @export(&cpp_set_heartbeats, .{ .name = "_ZN4lean14set_heartbeatsEy", .linkage = .strong });
+    @export(&cpp_get_num_heartbeats, .{ .name = "_ZN4lean18get_num_heartbeatsEv", .linkage = .strong });
+}

@@ -13,6 +13,7 @@ const int = @import("int.zig");
 const nat_arithmetic = @import("nat_arithmetic.zig");
 const uint = @import("uint.zig");
 const nat_constructors = @import("nat_constructors.zig");
+const runtime_options = @import("runtime_options");
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -337,16 +338,11 @@ pub export fn lean_internal_is_multi_thread(_: ?*anyopaque) callconv(.c) u8 {
 }
 
 pub export fn lean_internal_is_debug(_: ?*anyopaque) callconv(.c) u8 {
-    return @intFromBool(builtin.mode == .Debug);
+    return @intFromBool(std.mem.eql(u8, runtime_options.cpp_build_type, "Debug"));
 }
 
 pub export fn lean_internal_get_build_type(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes(switch (builtin.mode) {
-        .Debug => "Debug",
-        .ReleaseSafe => "RelWithDebInfo",
-        .ReleaseSmall => "MinSizeRel",
-        .ReleaseFast => "Release",
-    });
+    return string.mkAsciiStringBytes(runtime_options.cpp_build_type);
 }
 
 pub export fn lean_version_get_major(_: ?*anyopaque) callconv(.c) *anyopaque {
