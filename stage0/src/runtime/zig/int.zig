@@ -248,32 +248,32 @@ fn emodViaZig(a1: *anyopaque, a2: *anyopaque) *anyopaque {
     return foldIntResult(&result);
 }
 
-export fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque {
     return negViaZig(a);
 }
 
-export fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     return addViaZig(a1, a2);
 }
 
-export fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     return subViaZig(a1, a2);
 }
 
-export fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     return mulViaZig(a1, a2);
 }
 
-export fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     if (object.lean_is_scalar(a2) and scalarToInt64(a2) == 0) return a2;
     return divViaZig(a1, a2);
 }
 
-export fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     return divExactViaZig(a1, a2);
 }
 
-export fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     if (object.lean_is_scalar(a2) and scalarToInt64(a2) == 0) {
         if (!object.lean_is_scalar(a1)) rc.lean_inc(a1);
         return a1;
@@ -281,12 +281,12 @@ export fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaq
     return modViaZig(a1, a2);
 }
 
-export fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     if (object.lean_is_scalar(a2) and scalarToInt64(a2) == 0) return a2;
     return edivViaZig(a1, a2);
 }
 
-export fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
     if (object.lean_is_scalar(a2) and scalarToInt64(a2) == 0) {
         if (!object.lean_is_scalar(a1)) rc.lean_inc(a1);
         return a1;
@@ -294,19 +294,19 @@ export fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopa
     return emodViaZig(a1, a2);
 }
 
-export fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+pub fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
     return intEqViaZig(a1, a2);
 }
 
-export fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+pub fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
     return intCmpViaZig(a1, a2) <= 0;
 }
 
-export fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+pub fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
     return intCmpViaZig(a1, a2) < 0;
 }
 
-export fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool {
+pub fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool {
     if (object.lean_is_scalar(a)) return scalarToInt64(a) >= 0;
     return mpz_object.mpzValue(a).sgn() >= 0;
 }
@@ -322,16 +322,16 @@ export fn lean_big_int_to_int(n: c_int) callconv(.c) *anyopaque {
     return allocBigIntFromValue(n);
 }
 
-export fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque {
+pub fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque {
     return allocBigIntFromValue(n);
 }
 
-export fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque {
+pub fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque {
     if (min_small_int <= n and n <= max_small_int) return boxInt(n);
     return allocBigIntFromValue(n);
 }
 
-export fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque {
     return bigIntToNatViaZig(a);
 }
 

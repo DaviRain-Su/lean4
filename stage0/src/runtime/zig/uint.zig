@@ -22,19 +22,19 @@ fn uintLog2(comptime T: type, a0: T) T {
     return res;
 }
 
-export fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8 {
+pub fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8 {
     return @truncate(natLowWord(a));
 }
 
-export fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16 {
+pub fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16 {
     return @truncate(natLowWord(a));
 }
 
-export fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32 {
+pub fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32 {
     return @truncate(natLowWord(a));
 }
 
-export fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64 {
+pub fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64 {
     return natLowWord(a);
 }
 
@@ -72,7 +72,7 @@ export fn lean_usize_log2(a: usize) callconv(.c) usize {
     return uintLog2(usize, a);
 }
 
-export fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize {
+pub fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize {
     return @intCast(natLowWord(a));
 }
 

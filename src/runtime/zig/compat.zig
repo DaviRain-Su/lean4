@@ -9,6 +9,10 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const string = @import("string.zig");
+const int = @import("int.zig");
+const nat_arithmetic = @import("nat_arithmetic.zig");
+const uint = @import("uint.zig");
+const nat_constructors = @import("nat_constructors.zig");
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -16,39 +20,99 @@ pub const force_link = true;
 const max_small_int: i64 = if (@sizeOf(usize) == 8) std.math.maxInt(c_int) else std.math.maxInt(c_int) >> 1;
 const min_small_int: i64 = if (@sizeOf(usize) == 8) std.math.minInt(c_int) else std.math.minInt(c_int) >> 1;
 
-extern fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque;
-extern fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque;
-extern fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque;
+pub export fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque {
+    return int.lean_big_int64_to_int(n);
+}
+pub export fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque {
+    return int.lean_big_size_t_to_int(n);
+}
+pub export fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_big_int_to_nat(a);
+}
 
-extern fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool;
+pub export fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_neg(a);
+}
+pub export fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_add(a1, a2);
+}
+pub export fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_sub(a1, a2);
+}
+pub export fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_mul(a1, a2);
+}
+pub export fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_div(a1, a2);
+}
+pub export fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_div_exact(a1, a2);
+}
+pub export fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_mod(a1, a2);
+}
+pub export fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_ediv(a1, a2);
+}
+pub export fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_emod(a1, a2);
+}
+pub export fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_eq(a1, a2);
+}
+pub export fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_le(a1, a2);
+}
+pub export fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_lt(a1, a2);
+}
+pub export fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_nonneg(a);
+}
 
-extern fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque;
-extern fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque;
+pub export fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_succ(a);
+}
+pub export fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_div_exact(a1, a2);
+}
+pub export fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_land(a1, a2);
+}
+pub export fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_lor(a1, a2);
+}
+pub export fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_xor(a1, a2);
+}
+pub export fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_shiftr(a1, a2);
+}
+pub export fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_sub(a1, a2);
+}
+pub export fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque {
+    return nat_constructors.lean_big_usize_to_nat(n);
+}
+pub export fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque {
+    return nat_constructors.lean_big_uint64_to_nat(n);
+}
 
-extern fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8;
-extern fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16;
-extern fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32;
-extern fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64;
-extern fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize;
+pub export fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8 {
+    return uint.lean_uint8_of_big_nat(a);
+}
+pub export fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16 {
+    return uint.lean_uint16_of_big_nat(a);
+}
+pub export fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32 {
+    return uint.lean_uint32_of_big_nat(a);
+}
+pub export fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64 {
+    return uint.lean_uint64_of_big_nat(a);
+}
+pub export fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize {
+    return uint.lean_usize_of_big_nat(a);
+}
 
 extern fn lean_task_spawn_core(c: *anyopaque, prio: c_uint, keep_alive: bool) callconv(.c) *anyopaque;
 extern fn lean_task_bind_core(x: *anyopaque, f: *anyopaque, prio: c_uint, sync: bool, keep_alive: bool) callconv(.c) *anyopaque;

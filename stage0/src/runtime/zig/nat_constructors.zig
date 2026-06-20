@@ -102,12 +102,12 @@ pub export fn lean_cstr_to_nat(n: [*:0]const u8) callconv(.c) ?*anyopaque {
     return foldNatObject(obj);
 }
 
-pub export fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque {
+pub fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque {
     if (n <= max_small_nat) return object.lean_box(n);
     return allocNatFromZig(n);
 }
 
-pub export fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque {
+pub fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque {
     if (n <= max_small_nat) return object.lean_box(@intCast(n));
     return allocNatFromZig(n);
 }

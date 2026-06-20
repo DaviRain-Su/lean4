@@ -645,20 +645,23 @@ pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyo
     return @ptrCast(task);
 }
 
-extern fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void;
-extern fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void;
-
-pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+/// Task deactivation. Exported as `lean_deactivate_task` so that the C++
+/// runtime (which has `g_task_manager`) overrides it in `libleanshared`.
+/// In zigrt mode (no C++), this Zig version is used directly.
+pub export fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void {
     if (task_manager.runtimeManager()) |manager| {
-        manager.deactivateTask(task_obj);
+        manager.deactivateTask(task);
         return;
     }
-
-    // No Zig task manager — delegate to C++ which has its own g_task_manager.
-    lean_deactivate_task(task_obj);
+    // No task manager: match C++ deactivate_task — dec the value (if any)
+    // and free the task. freeTask handles null m_value safely.
+    freeTask(task);
 }
 
-pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
+/// Promise deactivation. Exported as `lean_deactivate_promise` so that the
+/// C++ runtime overrides it in `libleanshared`. In zigrt mode this Zig
+/// version is used directly.
+pub export fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void {
     if (task_manager.runtimeManager() != null) {
         const promise_obj = promisePtr(promise);
         const task = promise_obj.m_result orelse @panic("promise missing backing task");
@@ -667,8 +670,15 @@ pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(
         alloc.lean_free_small_object(promise);
         return;
     }
+    // No task manager: just free the promise object.
+    alloc.lean_free_small_object(promise);
+}
 
-    // No Zig task manager — delegate to C++ which has its own g_task_manager.
+pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+    lean_deactivate_task(task_obj);
+}
+
+pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
     lean_deactivate_promise(promise);
 }
 
