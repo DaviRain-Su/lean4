@@ -14,13 +14,10 @@ set(
   init_module.cpp
   io.cpp
   hash.cpp
-  platform.cpp
   alloc.cpp
   sharecommon.cpp
   stack_overflow.cpp
-  process.cpp
   object_ref.cpp
-  mpn.cpp
 )
 if(USE_MIMALLOC)
   list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)
