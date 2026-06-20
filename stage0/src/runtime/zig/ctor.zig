@@ -8,6 +8,8 @@ const box = @import("box.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
+const runtime_options = @import("runtime_options");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
 
 fn header(o: *anyopaque) *lean.lean_object {
     return @ptrCast(@alignCast(o));
@@ -31,7 +33,7 @@ fn ctorSlots(o: *anyopaque) [*]?*anyopaque {
     return @ptrCast(&asCtor(o).m_objs);
 }
 
-fn ctorNumObjs(o: *anyopaque) usize {
+pub fn ctorNumObjs(o: *anyopaque) usize {
     return header(o).m_other;
 }
 
@@ -42,6 +44,24 @@ fn ctorObjectBytes(o: *anyopaque) usize {
 fn ctorScalarBytes(o: *anyopaque) usize {
     const hdr = header(o);
     const object_bytes = ctorObjectBytes(o);
+    const scalar_start = @sizeOf(lean.lean_ctor_object) + object_bytes;
+
+    if (!export_allocator_symbols) {
+        // Mimalloc mode: m_cs_sz stores the aligned total allocation size
+        // (set by C++ lean_alloc_small_object). Scalar bytes = total - header - object_slots.
+        if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
+            std.debug.assert(hdr.m_cs_sz >= scalar_start);
+            return hdr.m_cs_sz - scalar_start;
+        }
+        // Non-heap object (m_rc == 0): m_cs_sz stores the actual object size.
+        if (hdr.m_rc == 0 and hdr.m_cs_sz != 0) {
+            std.debug.assert(hdr.m_cs_sz >= scalar_start);
+            return hdr.m_cs_sz - scalar_start;
+        }
+        return 0;
+    }
+
+    // Self-hosted mode: m_cs_sz stores scalar_sz directly for heap ctors.
     if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
         return hdr.m_cs_sz;
     }
@@ -50,7 +70,6 @@ fn ctorScalarBytes(o: *anyopaque) usize {
         @as(usize, hdr.m_cs_sz)
     else
         return 0;
-    const scalar_start = @sizeOf(lean.lean_ctor_object) + object_bytes;
     std.debug.assert(payload_size >= scalar_start);
     return payload_size - scalar_start;
 }

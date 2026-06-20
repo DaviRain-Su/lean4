@@ -170,6 +170,12 @@ pub export fn lean_initialize() callconv(.c) void {
     initializeThreadSubsystems();
 }
 
+/// Test helper mirroring `lean_initialize` without the C-linkage export.
+fn lean_initialize_impl() void {
+    initializeRuntimeSubsystems();
+    initializeThreadSubsystems();
+}
+
 pub export fn lean_setup_args(argc: c_int, argv: [*c][*c]u8) callconv(.c) [*c][*c]u8 {
     _ = argc;
     return argv;
@@ -191,7 +197,7 @@ test "runtime module and thread initialization enable allocation" {
 
 test "lean_initialize initializes runtime and thread" {
     resetTestState();
-    lean_initialize();
+    lean_initialize_impl();
     try testing.expect(runtimeInitialized());
     try testing.expect(threadInitialized());
 }
@@ -326,7 +332,7 @@ fn expectResultTag(result: *anyopaque, expected_ok: bool, expected_payload: usiz
 
 test "lean_run_main spawns a worker thread by default and propagates the IO result" {
     resetTestState();
-    lean_initialize();
+    lean_initialize_impl();
 
     const env = try RunMainEnvSnapshot.capture();
     defer env.restore() catch @panic("failed to restore lean_run_main environment");
@@ -348,7 +354,7 @@ test "lean_run_main spawns a worker thread by default and propagates the IO resu
 
 test "lean_run_main honors LEAN_MAIN_USE_THREAD=0 and returns error results unchanged" {
     resetTestState();
-    lean_initialize();
+    lean_initialize_impl();
 
     const env = try RunMainEnvSnapshot.capture();
     defer env.restore() catch @panic("failed to restore lean_run_main environment");
@@ -374,7 +380,7 @@ test "lean_run_main rounds LEAN_STACK_SIZE_KB for its worker thread and keeps th
     if (builtin.os.tag != .macos) return error.SkipZigTest;
 
     resetTestState();
-    lean_initialize();
+    lean_initialize_impl();
 
     const env = try RunMainEnvSnapshot.capture();
     defer env.restore() catch @panic("failed to restore lean_run_main environment");

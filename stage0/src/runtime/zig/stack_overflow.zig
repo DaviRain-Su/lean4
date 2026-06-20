@@ -3,13 +3,19 @@
 
 //! Zig port of the C++ stack overflow detection subsystem.
 //!
-//! First pass: POSIX (macOS/Linux). Windows is a no-op stub.
+//! POSIX (macOS/Linux) uses a SIGSEGV/SIGBUS handler on an alternate signal
+//! stack. Windows would need structured exception handling (SEH) via
+//! `__try/__except` with `EXCEPTION_STACK_OVERFLOW` — Zig does not expose SEH
+//! frame unwinding, so Windows remains a no-op stub until a Zig SEH story
+//! exists. The `lean_initialize_stack_overflow` / `lean_finalize_stack_overflow`
+//! exports are defined but return immediately on Windows.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 
 const c = @cImport({
+    @cDefine("_GNU_SOURCE", "1");
     @cInclude("signal.h");
     @cInclude("pthread.h");
     @cInclude("unistd.h");
@@ -19,9 +25,46 @@ const POSIX = builtin.os.tag != .windows;
 
 const SIG_DFL: ?*const fn (c_int) callconv(.c) void = @ptrFromInt(0);
 
-var g_stack_guard: ?*anyopaque = null;
+var g_stack_guard: ?*StackGuard = null;
 
 const msg = "\nStack overflow detected. Aborting.\n";
+const HandlerFn = ?*const fn (c_int) callconv(.c) void;
+
+fn getHandler(action: *const c.struct_sigaction) HandlerFn {
+    if (builtin.os.tag == .macos) {
+        return action.__sigaction_u.__sa_handler;
+    } else if (builtin.os.tag == .linux) {
+        return action.__sigaction_handler.sa_handler;
+    } else {
+        return SIG_DFL;
+    }
+}
+
+fn setHandler(action: *c.struct_sigaction, handler: HandlerFn) void {
+    if (builtin.os.tag == .macos) {
+        action.__sigaction_u.__sa_handler = handler;
+    } else if (builtin.os.tag == .linux) {
+        action.__sigaction_handler.sa_handler = handler;
+    }
+}
+
+fn setSigaction(action: *c.struct_sigaction) void {
+    if (builtin.os.tag == .macos) {
+        action.__sigaction_u.__sa_sigaction = &segvHandler;
+    } else if (builtin.os.tag == .linux) {
+        action.__sigaction_handler.sa_sigaction = &segvHandler;
+    }
+}
+
+fn faultAddress(info: [*c]c.siginfo_t) ?*anyopaque {
+    if (builtin.os.tag == .macos) {
+        return @ptrCast(info[0].si_addr);
+    } else if (builtin.os.tag == .linux) {
+        return info[0]._sifields._sigfault.si_addr;
+    } else {
+        return null;
+    }
+}
 
 fn isWithinStackGuard(addr: *anyopaque) bool {
     if (builtin.os.tag == .macos) {
@@ -49,14 +92,14 @@ fn isWithinStackGuard(addr: *anyopaque) bool {
 }
 
 fn segvHandler(signum: c_int, info: [*c]c.siginfo_t, _: ?*anyopaque) callconv(.c) void {
-    if (isWithinStackGuard(@ptrCast(info[0].si_addr))) {
-        _ = c.write(c.STDERR_FILENO, msg, msg.len - 1);
+    if (faultAddress(info)) |addr| if (isWithinStackGuard(addr)) {
+        _ = c.write(c.STDERR_FILENO, msg, msg.len);
         std.process.abort();
-    } else {
-        var action: c.struct_sigaction = std.mem.zeroes(c.struct_sigaction);
-        action.__sigaction_u.__sa_handler = SIG_DFL;
-        _ = c.sigaction(signum, &action, null);
-    }
+    };
+
+    var action: c.struct_sigaction = std.mem.zeroes(c.struct_sigaction);
+    setHandler(&action, SIG_DFL);
+    _ = c.sigaction(signum, &action, null);
 }
 
 fn setupSignalHandlers() void {
@@ -64,10 +107,10 @@ fn setupSignalHandlers() void {
     for (signals) |signum| {
         var old: c.struct_sigaction = std.mem.zeroes(c.struct_sigaction);
         if (c.sigaction(signum, null, &old) != 0) continue;
-        if (old.__sigaction_u.__sa_handler == SIG_DFL) {
+        if (getHandler(&old) == SIG_DFL) {
             var action = std.mem.zeroes(c.struct_sigaction);
             action.sa_flags = c.SA_SIGINFO | c.SA_ONSTACK;
-            action.__sigaction_u.__sa_sigaction = &segvHandler;
+            setSigaction(&action);
             _ = c.sigaction(signum, &action, null);
         }
     }
@@ -98,22 +141,37 @@ const SignalStack = struct {
     }
 };
 
+pub const StackGuard = struct {
+    signal_stack: ?SignalStack,
+
+    pub fn init() StackGuard {
+        if (!POSIX) return .{ .signal_stack = null };
+        return .{ .signal_stack = SignalStack.init() };
+    }
+
+    pub fn deinit(self: *StackGuard) void {
+        if (self.signal_stack) |*signal_stack| {
+            signal_stack.deinit();
+            self.signal_stack = null;
+        }
+    }
+};
+
 pub export fn lean_initialize_stack_overflow() callconv(.c) void {
     if (!POSIX) return;
     if (g_stack_guard != null) return;
-    const guard = std.heap.c_allocator.create(SignalStack) catch return;
-    guard.* = SignalStack.init() orelse {
-        std.heap.c_allocator.destroy(guard);
+    const guard = std.heap.c_allocator.create(StackGuard) catch {
+        setupSignalHandlers();
         return;
     };
+    guard.* = StackGuard.init();
     g_stack_guard = guard;
     setupSignalHandlers();
 }
 
 pub export fn lean_finalize_stack_overflow() callconv(.c) void {
     if (!POSIX) return;
-    if (g_stack_guard) |ptr| {
-        const guard: *SignalStack = @ptrCast(@alignCast(ptr));
+    if (g_stack_guard) |guard| {
         guard.deinit();
         std.heap.c_allocator.destroy(guard);
         g_stack_guard = null;

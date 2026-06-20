@@ -7,10 +7,13 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const ctor = @import("ctor.zig");
 const lean = @import("lean_object.zig");
+const mpz_object = @import("mpz_object.zig");
+const nat_constructors = @import("nat_constructors.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const rt_hash = @import("hash.zig");
 const string = @import("string.zig");
+const runtime_options = @import("runtime_options");
 
 const pointer_bytes: c_uint = @sizeOf(?*anyopaque);
 const murmur_hash_m: u64 = 0xc6a4a7935bd1e995;
@@ -133,20 +136,32 @@ fn appendBeforeBase(n: *anyopaque, prefix_str: *anyopaque) *anyopaque {
     return mkNameNumObj(mkNameStrObj(prefix, prefix_str), idx);
 }
 
-pub export fn lean_name_append_after(n: *anyopaque, suffix: *anyopaque) callconv(.c) *anyopaque {
+fn lean_name_append_after(n: *anyopaque, suffix: *anyopaque) callconv(.c) *anyopaque {
     return appendAfterBase(n, suffix);
 }
 
-pub export fn lean_name_append_before(n: *anyopaque, prefix_str: *anyopaque) callconv(.c) *anyopaque {
+fn lean_name_append_before(n: *anyopaque, prefix_str: *anyopaque) callconv(.c) *anyopaque {
     return appendBeforeBase(n, prefix_str);
 }
 
-pub export fn lean_name_append_index_after(n: *anyopaque, idx: ?*anyopaque) callconv(.c) *anyopaque {
-    if (!object.lean_is_scalar(idx)) @panic("lean_name_append_index_after: big Nat index not implemented");
-    const idx_bytes = std.fmt.allocPrint(std.heap.c_allocator, "_{}", .{object.lean_unbox(idx)}) catch @panic("out of memory");
+fn lean_name_append_index_after(n: *anyopaque, idx: ?*anyopaque) callconv(.c) *anyopaque {
+    const idx_bytes = if (object.lean_is_scalar(idx))
+        std.fmt.allocPrint(std.heap.c_allocator, "_{}", .{object.lean_unbox(idx)}) catch @panic("out of memory")
+    else blk: {
+        const digits = mpz_object.mpzValue(idx.?).toString(std.heap.c_allocator, 10) catch @panic("out of memory");
+        defer std.heap.c_allocator.free(digits);
+        break :blk std.fmt.allocPrint(std.heap.c_allocator, "_{s}", .{digits}) catch @panic("out of memory");
+    };
     defer std.heap.c_allocator.free(idx_bytes);
     const suffix = string.mkStringFromBytes(idx_bytes);
     return appendAfterBase(n, suffix);
+}
+comptime {
+    if (runtime_options.export_lean_helpers) {
+        @export(&lean_name_append_after, .{ .name = "lean_name_append_after" });
+        @export(&lean_name_append_before, .{ .name = "lean_name_append_before" });
+        @export(&lean_name_append_index_after, .{ .name = "lean_name_append_index_after" });
+    }
 }
 
 fn sliceBounds(slice: *anyopaque) struct { start: usize, end: usize } {
@@ -283,6 +298,18 @@ pub export fn lean_option_get_or_block(o_opt: *anyopaque) callconv(.c) *anyopaqu
         rc.lean_dec(o_opt);
     }
     return value;
+}
+
+test "lean_name_append_index_after supports big Nat indexes" {
+    const idx = nat_constructors.lean_cstr_to_nat("10000000000000000000000000000000000000000").?;
+    defer rc.lean_dec(idx);
+
+    const name = lean_name_append_index_after(object.lean_box(0).?, idx);
+    defer rc.lean_dec(name);
+
+    try testing.expectEqual(@as(u8, 1), object.lean_ptr_tag(name));
+    const suffix = ctor.lean_ctor_get(name, 1).?;
+    try testing.expectEqualStrings("_10000000000000000000000000000000000000000", stringBytes(suffix));
 }
 
 fn mkNameNum(prefix: *anyopaque, nat_value: usize, hash: u64) *anyopaque {

@@ -5,15 +5,25 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
+    const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse false;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
+    const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
 
-    const mpz_mod = b.addModule("mpz_zig", .{
-        .root_source_file = b.path("mpz_zig.zig"),
-    });
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
+    opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
     const opts_mod = opts.createModule();
+
+    const allocator_mod = b.addModule("lean_allocator", .{
+        .root_source_file = b.path("allocator.zig"),
+    });
+    allocator_mod.addImport("runtime_options", opts_mod);
+
+    const mpz_mod = b.addModule("mpz_zig", .{
+        .root_source_file = b.path(if (use_gmp) "mpz_zig.zig" else "big_int.zig"),
+    });
+    mpz_mod.addImport("lean_allocator", allocator_mod);
 
     const root_mod = b.createModule(.{
         .root_source_file = b.path("root.zig"),
@@ -22,56 +32,37 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     root_mod.addImport("mpz_zig", mpz_mod);
+    root_mod.addImport("lean_allocator", allocator_mod);
     root_mod.addImport("runtime_options", opts_mod);
-    root_mod.linkSystemLibrary("gmp", .{});
+    if (use_gmp) {
+        root_mod.linkSystemLibrary("gmp", .{});
+    } else {
+        // big_int.zig references GMP allocator symbols for binary
+        // compatibility with C++ mpz objects. Link libgmp when not
+        // using GMP so those symbols are available at link time.
+        root_mod.linkSystemLibrary("gmp", .{});
+    }
     root_mod.linkSystemLibrary("c++", .{});
 
-    // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
-    // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
-    // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
-    // test-only). A few small helpers live alongside the Zig sources.
-    const uv_cpp_sources = &.{
-        "../uv/dns.cpp",
-        "../uv/event_loop.cpp",
-        "../uv/net_addr.cpp",
-        "../uv/signal.cpp",
-        "../uv/system.cpp",
-        "../uv/tcp.cpp",
-        "../uv/timer.cpp",
-        "../uv/udp.cpp",
-        "uv_compat.cpp",
-        "uv_init.cpp",
-        "uv_loop_thread.cpp",
-        "uv_promise_bridge.cpp",
-    };
-    const uv_cpp_flags = &.{
-        "-std=c++17",
-        "-O2",
-        "-include", "uv_compat.h",
-        "-DLEAN_SMALL_ALLOCATOR",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-    };
-    root_mod.addCSourceFiles(.{
-        .files = uv_cpp_sources,
-        .flags = uv_cpp_flags,
-    });
+    // All UV subsystems (event_loop, timer, dns, signal, net_addr, tcp, udp,
+    // system) are now pure Zig. No C++ sources are compiled into libleanrt_zig.
 
-    // Weak exports that let C++ code call lean_mk_io_error_* while the real
-    // implementations live in the Zig runtime (io_error.zig).
-    const uv_c_sources = &.{
-        "io_error_weak_exports.c",
-    };
-    const uv_c_flags = &.{
-        "-std=c11",
-        "-O2",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-    };
-    root_mod.addCSourceFiles(.{
-        .files = uv_c_sources,
-        .flags = uv_c_flags,
-    });
+    // Weak C wrappers that bridge runtime C++ callers (uv_compat.cpp, dns.cpp)
+    // to the Zig io_error implementations. Only emit them when helper symbols
+    // are exported; in the helperless build (used for stdlib linking) the Lean
+    // stdlib's own @[export] definitions are the sole providers, so omitting
+    // these avoids duplicate-symbol collisions at link time.
+    if (export_lean_helpers) {
+        root_mod.addCSourceFiles(.{
+            .files = &.{"io_error_weak_exports.c"},
+            .flags = &.{
+                "-std=c11",
+                "-O2",
+                b.fmt("-I{s}", .{lean_include_dir}),
+                "-I../..",
+            },
+        });
+    }
 
     root_mod.linkSystemLibrary("uv", .{});
 

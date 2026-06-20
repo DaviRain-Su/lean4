@@ -87,6 +87,10 @@ pub fn invokeDebugger() noreturn {
     if (!g_debug_dialog) {
         exception.throwUnreachableException();
     }
+    if (builtin.os.tag == .windows) {
+        std.os.windows.kernel32.DebugBreak();
+        unreachable;
+    }
     // Interactive debugger prompt is not implemented in the first pass.
     std.debug.panic("interactive debugger invocation is not implemented in the Zig first pass", .{});
 }

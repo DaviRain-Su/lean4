@@ -15,6 +15,10 @@ const c = @cImport({
     @cInclude("pthread.h");
     @cInclude("sys/resource.h");
     @cInclude("unistd.h");
+    if (builtin.os.tag == .windows) {
+        @cInclude("windows.h");
+        @cInclude("processthreadsapi.h");
+    }
 });
 
 const POSIX = builtin.os.tag != .windows;
@@ -31,6 +35,16 @@ fn getStackPointer() *anyopaque {
 }
 
 fn getMainThreadStackSize() usize {
+    if (builtin.os.tag == .windows) {
+        // On Windows the main thread stack size comes from the PE header.
+        // `GetCurrentThreadStackLimits` gives the committed range for any thread;
+        // for the main thread the reserve size is in the image header. The
+        // committed limit is a safe lower bound for stack-overflow detection.
+        var low: usize = 0;
+        var high: usize = 0;
+        c.GetCurrentThreadStackLimits(&low, &high);
+        return high - low;
+    }
     if (!POSIX) return 8 * 1024 * 1024;
     var limit: c.struct_rlimit = undefined;
     if (c.getrlimit(c.RLIMIT_STACK, &limit) != 0) {
@@ -40,6 +54,12 @@ fn getMainThreadStackSize() usize {
 }
 
 fn getCurrentThreadStackSize() usize {
+    if (builtin.os.tag == .windows) {
+        var low: usize = 0;
+        var high: usize = 0;
+        c.GetCurrentThreadStackLimits(&low, &high);
+        return high - low;
+    }
     if (!POSIX) return 8 * 1024 * 1024;
     if (builtin.os.tag == .macos) {
         return c.pthread_get_stacksize_np(c.pthread_self());

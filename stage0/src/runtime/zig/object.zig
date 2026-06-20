@@ -3,6 +3,7 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_object = @import("mpz_object.zig");
+const allocprof = @import("allocprof.zig");
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -79,6 +80,7 @@ pub export fn lean_alloc_external(cls: *lean.lean_external_class, data: ?*anyopa
         .m_class = cls,
         .m_data = data,
     };
+    allocprof.recordAlloc(lean.LeanExternal);
     return ptr;
 }
 
@@ -270,8 +272,9 @@ test "pointer tag helpers read heap header tag" {
 }
 
 fn allocLegacySmallObject(payload_size: usize, tag: u8) *anyopaque {
-    const payload = std.c.malloc(payload_size) orelse @panic("out of memory");
-    @memset(@as([*]u8, @ptrCast(payload))[0..payload_size], 0);
+    const lean_alloc = @import("lean_allocator");
+    const payload = lean_alloc.leanAlloc(u8, payload_size) orelse @panic("out of memory");
+    @memset(payload[0..payload_size], 0);
 
     const hdr: *lean.lean_object = @ptrCast(@alignCast(payload));
     hdr.* = .{
@@ -289,7 +292,10 @@ fn noopForeach(_: *anyopaque, _: ?*anyopaque) callconv(.c) void {}
 
 test "lean_object byte sizes accept legacy small allocations" {
     const ptr = allocLegacySmallObject(@sizeOf(lean.lean_thunk_object), lean.LeanThunk);
-    defer std.c.free(ptr);
+    defer {
+        const lean_alloc = @import("lean_allocator");
+        lean_alloc.leanFree(u8, @ptrCast(ptr), @sizeOf(lean.lean_thunk_object));
+    }
 
     try testing.expectEqual(@as(usize, @sizeOf(lean.lean_thunk_object)), lean_object_byte_size(ptr));
     try testing.expectEqual(@as(usize, @sizeOf(lean.lean_thunk_object)), lean_object_data_byte_size(ptr));

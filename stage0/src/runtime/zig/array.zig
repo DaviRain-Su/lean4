@@ -208,7 +208,7 @@ fn copySArray(a: *anyopaque, cap: usize) *anyopaque {
     std.debug.assert(cap >= size);
 
     const result = alloc.lean_alloc_sarray(@intCast(elem_size), size, cap);
-    @memcpy(sarrayBytes(result)[0 .. checkedMul(elem_size, size)], sarrayBytes(a)[0 .. checkedMul(elem_size, size)]);
+    @memcpy(sarrayBytes(result)[0..checkedMul(elem_size, size)], sarrayBytes(a)[0..checkedMul(elem_size, size)]);
     rc.lean_dec(a);
     return result;
 }
@@ -423,6 +423,19 @@ pub export fn lean_array_push(a: *anyopaque, v: *anyopaque) callconv(.c) *anyopa
     std.debug.assert(lean_array_capacity(result) > size);
     arraySlots(result)[size] = v;
     lean_array_set_size(result, size + 1);
+    return result;
+}
+
+/// Build a Lean array from a slice of opaque object pointers.
+/// Each element gets its refcount incremented. The input slice is not consumed.
+pub fn mkArrayFromSlice(slice: []*anyopaque) *anyopaque {
+    const size = slice.len;
+    const result = allocObjectArray(size, size);
+    const slots = arraySlots(result);
+    for (0..size) |i| {
+        rc.lean_inc(slice[i]);
+        slots[i] = slice[i];
+    }
     return result;
 }
 

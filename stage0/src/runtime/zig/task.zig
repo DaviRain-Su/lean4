@@ -95,6 +95,16 @@ fn freeTaskImp(imp: *lean.lean_task_imp) void {
     alloc.lean_free_small_object(@ptrCast(imp));
 }
 
+/// Atomic load of m_imp (matches C++ std::atomic<lean_task_imp*> with memory_order_relaxed).
+inline fn loadImp(task: anytype) ?*lean.lean_task_imp {
+    return @atomicLoad(?*lean.lean_task_imp, &task.m_imp, .monotonic);
+}
+
+/// Atomic store of m_imp (matches C++ exchange/store with memory_order_relaxed).
+inline fn storeImp(task: anytype, imp: ?*lean.lean_task_imp) void {
+    @atomicStore(?*lean.lean_task_imp, &task.m_imp, imp, .monotonic);
+}
+
 fn allocTask(closure: *anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_task_object {
     rc.lean_mark_mt(closure);
     const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_task_object));
@@ -102,7 +112,7 @@ fn allocTask(closure: *anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_tas
     alloc.noteTaskObjectAllocation();
     setTaskHeader(task);
     @atomicStore(?*anyopaque, &task.m_value, null, .seq_cst);
-    task.m_imp = allocTaskImp(closure, prio, keep_alive);
+    storeImp(task, allocTaskImp(closure, prio, keep_alive));
     // keep_alive tasks carry an implicit reference that is released by the
     // worker after the task finishes executing, matching C++ alloc_task.
     if (keep_alive) {
@@ -112,9 +122,9 @@ fn allocTask(closure: *anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_tas
 }
 
 fn freeTask(task: *lean.lean_task_object) void {
-    if (task.m_imp) |imp| {
+    if (loadImp(task)) |imp| {
         freeTaskImp(imp);
-        task.m_imp = null;
+        storeImp(task, null);
     } else {
         rc.lean_dec(@atomicLoad(?*anyopaque, &task.m_value, .seq_cst));
     }
@@ -133,7 +143,7 @@ fn allocFinishedTask(value: *anyopaque) *lean.lean_task_object {
         .m_tag = lean.LeanTask,
     };
     task.m_value = value;
-    task.m_imp = null;
+    storeImp(task, null);
     return task;
 }
 
@@ -143,7 +153,7 @@ fn allocPromiseTask() *lean.lean_task_object {
     alloc.noteTaskObjectAllocation();
     setTaskHeader(task);
     @atomicStore(?*anyopaque, &task.m_value, null, .seq_cst);
-    task.m_imp = allocTaskImp(null, 0, false);
+    storeImp(task, allocTaskImp(null, 0, false));
     return task;
 }
 
@@ -198,7 +208,7 @@ fn resolvePromiseTask(task: *lean.lean_task_object, value: *anyopaque) void {
         return;
     }
 
-    const imp = task.m_imp orelse {
+    const imp = loadImp(task) orelse {
         rc.lean_dec(value);
         return;
     };
@@ -210,7 +220,7 @@ fn resolvePromiseTask(task: *lean.lean_task_object, value: *anyopaque) void {
     rc.lean_mark_mt(value);
     task_manager.notePublishedValue(value);
     @atomicStore(?*anyopaque, &task.m_value, value, .seq_cst);
-    task.m_imp = null;
+    storeImp(task, null);
     alloc.lean_free_small_object(@ptrCast(imp));
 }
 
@@ -498,7 +508,7 @@ fn taskBindFn1(x: *anyopaque, f: *anyopaque, _: *anyopaque) callconv(.c) ?*anyop
     }
 
     const current = task_tls.get() orelse @panic("task bind continuation requires current task tls");
-    const current_imp = current.m_imp orelse @panic("current bind task must still be pending");
+    const current_imp = loadImp(current) orelse @panic("current bind task must still be pending");
     if (current_imp.m_closure != null) @panic("current bind task already has a continuation closure");
     const closure = mkClosure2_1(opaqueFunPtr(&taskBindFn2), new_task_obj);
     rc.lean_mark_mt(closure);
@@ -557,7 +567,7 @@ pub export fn lean_task_get(t: *anyopaque) callconv(.c) *anyopaque {
 
 pub export fn lean_io_check_canceled_core() callconv(.c) bool {
     if (task_tls.get()) |current| {
-        const imp = current.m_imp orelse @panic("current task tls must point at a running task");
+        const imp = loadImp(current) orelse @panic("current task tls must point at a running task");
         return imp.m_canceled != 0 or (task_manager.runtimeManager() != null and task_manager.runtimeManager().?.shuttingDown());
     }
     return false;
@@ -572,20 +582,20 @@ pub export fn lean_io_cancel_core(t: *anyopaque) callconv(.c) void {
         manager.cancel(task);
         return;
     }
-    if (task.m_imp) |imp| {
+    if (loadImp(task)) |imp| {
         imp.m_canceled = 1;
     }
 }
 
 pub export fn lean_io_get_task_state_core(t: *anyopaque) callconv(.c) u8 {
     const task = taskPtr(t);
-    if (task.m_imp == null) {
+    if (loadImp(task) == null) {
         return 2;
     }
     if (task_manager.runtimeManager()) |manager| {
         return manager.getTaskState(task);
     }
-    return if (task.m_imp.?.m_closure != null) 0 else 1;
+    return if (loadImp(task).?.m_closure != null) 0 else 1;
 }
 
 pub export fn lean_io_wait_any_core(task_list: *anyopaque) callconv(.c) *anyopaque {
@@ -635,26 +645,31 @@ pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyo
     return @ptrCast(task);
 }
 
+extern fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void;
+extern fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void;
+
 pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
     if (task_manager.runtimeManager()) |manager| {
         manager.deactivateTask(task_obj);
         return;
     }
 
-    // No task manager is active; the task must already be finished.
-    if (taskValue(task_obj) != null) {
-        freeTask(task_obj);
-    } else {
-        @panic("leanrt_task_deactivate_task_impl called on pending task without task manager");
-    }
+    // No Zig task manager — delegate to C++ which has its own g_task_manager.
+    lean_deactivate_task(task_obj);
 }
 
 pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
-    const promise_obj = promisePtr(promise);
-    const task = promise_obj.m_result orelse @panic("promise missing backing task");
-    resolvePromiseTask(task, object.lean_box(0).?);
-    rc.lean_dec_ref(@ptrCast(task));
-    alloc.lean_free_small_object(promise);
+    if (task_manager.runtimeManager() != null) {
+        const promise_obj = promisePtr(promise);
+        const task = promise_obj.m_result orelse @panic("promise missing backing task");
+        resolvePromiseTask(task, object.lean_box(0).?);
+        rc.lean_dec_ref(@ptrCast(task));
+        alloc.lean_free_small_object(promise);
+        return;
+    }
+
+    // No Zig task manager — delegate to C++ which has its own g_task_manager.
+    lean_deactivate_promise(promise);
 }
 
 fn spawnReturnsFortyTwo(_: ?*anyopaque) callconv(.c) ?*anyopaque {

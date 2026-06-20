@@ -16,6 +16,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const runtime_alloc = @import("alloc.zig");
 const string = @import("string.zig");
+const allocprof = @import("allocprof.zig");
 
 pub const force_link = true;
 
@@ -153,6 +154,35 @@ fn mkPair(a: *anyopaque, b: *anyopaque) *anyopaque {
 
 fn mkUnitResult() *anyopaque {
     return io_result.lean_io_result_mk_ok(object.lean_box(0).?);
+}
+
+fn isInterruptedErrno() bool {
+    return c._errno().* == @intFromEnum(posix.E.INTR);
+}
+
+fn readRetry(fd: posix.fd_t, buf: [*]u8, len: usize) isize {
+    while (true) {
+        const got = c.read(fd, buf, len);
+        if (got < 0 and isInterruptedErrno()) continue;
+        return got;
+    }
+}
+
+fn writeAllRetry(fd: posix.fd_t, bytes: []const u8) c_int {
+    var written: usize = 0;
+    while (written < bytes.len) {
+        const n = c.write(fd, bytes[written..].ptr, bytes.len - written);
+        if (n > 0) {
+            written += @intCast(n);
+        } else if (n < 0 and isInterruptedErrno()) {
+            continue;
+        } else if (n < 0) {
+            return c._errno().*;
+        } else {
+            return @intFromEnum(posix.E.IO);
+        }
+    }
+    return 0;
 }
 
 fn mkStringResult(bytes: []const u8) *anyopaque {
@@ -322,7 +352,7 @@ pub export fn lean_io_prim_handle_read(h: *anyopaque, nbytes: usize) callconv(.c
     const res = alloc.lean_alloc_sarray(1, 0, nbytes);
     if (nbytes == 0) return io_result.lean_io_result_mk_ok(res);
     const buf: [*]u8 = @ptrCast(&(@as(*lean.lean_sarray_object, @ptrCast(@alignCast(res))).m_data));
-    const got = c.read(handleFd(h), buf, nbytes);
+    const got = readRetry(handleFd(h), buf, nbytes);
     if (got >= 0) {
         (@as(*lean.lean_sarray_object, @ptrCast(@alignCast(res)))).m_size = @intCast(got);
         return io_result.lean_io_result_mk_ok(res);
@@ -334,8 +364,8 @@ pub export fn lean_io_prim_handle_read(h: *anyopaque, nbytes: usize) callconv(.c
 pub export fn lean_io_prim_handle_write(h: *anyopaque, buf_obj: *anyopaque) callconv(.c) *anyopaque {
     const bytes: [*]const u8 = @ptrCast(&(@as(*lean.lean_sarray_object, @ptrCast(@alignCast(buf_obj))).m_data));
     const len = array.lean_sarray_size(buf_obj);
-    const wrote = c.write(handleFd(h), bytes, len);
-    return if (wrote == @as(isize, @intCast(len))) mkUnitResult() else io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, null));
+    const err = writeAllRetry(handleFd(h), bytes[0..len]);
+    return if (err == 0) mkUnitResult() else io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(err, null));
 }
 
 pub export fn lean_io_prim_handle_get_line(h: *anyopaque) callconv(.c) *anyopaque {
@@ -343,7 +373,7 @@ pub export fn lean_io_prim_handle_get_line(h: *anyopaque) callconv(.c) *anyopaqu
     defer out.deinit(gpa);
     var byte: [1]u8 = undefined;
     while (true) {
-        const got = c.read(handleFd(h), &byte, 1);
+        const got = readRetry(handleFd(h), &byte, 1);
         if (got == 0) break;
         if (got < 0) return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, null));
         out.append(gpa, byte[0]) catch return mkOtherIoError("out of memory");
@@ -354,8 +384,8 @@ pub export fn lean_io_prim_handle_get_line(h: *anyopaque) callconv(.c) *anyopaqu
 
 pub export fn lean_io_prim_handle_put_str(h: *anyopaque, s: *anyopaque) callconv(.c) *anyopaque {
     const bytes = stringBytes(s);
-    const wrote = c.write(handleFd(h), bytes.ptr, bytes.len);
-    return if (wrote == @as(isize, @intCast(bytes.len))) mkUnitResult() else io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, null));
+    const err = writeAllRetry(handleFd(h), bytes);
+    return if (err == 0) mkUnitResult() else io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(err, null));
 }
 pub export fn lean_io_mono_ms_now() callconv(.c) *anyopaque {
     const ts = std.Io.Clock.awake.now(std.Io.Threaded.global_single_threaded.io());
@@ -405,15 +435,28 @@ pub export fn lean_io_timeit(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *
 }
 
 pub export fn lean_io_allocprof(msg: *anyopaque, fn_obj: *anyopaque) callconv(.c) *anyopaque {
-    const before_alloc = runtime_alloc.testAllocCount();
-    const before_free = runtime_alloc.testFreeCount();
+    const before = allocprof.snapshot();
     const res = lean_apply_1(fn_obj, object.lean_box(0).?) orelse @panic("lean_io_allocprof: apply failed");
-    const after_alloc = runtime_alloc.testAllocCount();
-    const after_free = runtime_alloc.testFreeCount();
-    var buf: [256]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "{s} alloc={d} free={d}", .{ stringBytes(msg), after_alloc - before_alloc, after_free - before_free }) catch "allocprof";
-    _ = c.write(2, line.ptr, line.len);
-    _ = c.write(2, "\n".ptr, 1);
+    const after = allocprof.snapshot();
+    const ctor_n = after.ctor - before.ctor;
+    const closure_n = after.closure - before.closure;
+    const string_n = after.string - before.string;
+    const array_n = after.array - before.array;
+    const thunk_n = after.thunk - before.thunk;
+    const task_n = after.task - before.task;
+    const ext_n = after.ext - before.ext;
+    std.debug.print("{s}\n", .{stringBytes(msg)});
+    if (ctor_n > 0) std.debug.print("num. constructor: {d}\n", .{ctor_n});
+    if (closure_n > 0) std.debug.print("num. closure:     {d}\n", .{closure_n});
+    if (string_n > 0) std.debug.print("num. string:      {d}\n", .{string_n});
+    if (array_n > 0) std.debug.print("num. array:       {d}\n", .{array_n});
+    if (thunk_n > 0) std.debug.print("num. thunk:       {d}\n", .{thunk_n});
+    if (task_n > 0) std.debug.print("num. task:        {d}\n", .{task_n});
+    if (ext_n > 0) std.debug.print("num. external:    {d}\n", .{ext_n});
+    if (ctor_n == 0 and closure_n == 0 and string_n == 0 and array_n == 0 and thunk_n == 0 and task_n == 0 and ext_n == 0) {
+        std.debug.print("***no runtime object allocation has occurred**\n", .{});
+    }
+    std.debug.print("-------------\n", .{});
     return res;
 }
 
@@ -568,6 +611,8 @@ pub export fn lean_io_get_tid() callconv(.c) u64 {
         var tid: u64 = 0;
         _ = c.pthread_threadid_np(null, &tid);
         return tid;
+    } else if (builtin.target.os.tag == .linux) {
+        return @intCast(linux.gettid());
     }
     return @intCast(c.getpid());
 }
@@ -716,4 +761,19 @@ pub export fn lean_io_process_child_take_stdin(_: *anyopaque, lchild: *anyopaque
     rc.lean_inc(stderr_h);
     const child2 = mkChild(object.lean_box(0).?, stdout_h, stderr_h, @intCast(childPid(lchild)), childSetsid(lchild));
     return io_result.lean_io_result_mk_ok(mkPair(stdin_h, child2));
+}
+
+test "retrying POSIX read and write helpers round-trip pipe bytes" {
+    var fds: [2]c_int = undefined;
+    try std.testing.expectEqual(@as(c_int, 0), c.pipe(&fds));
+    defer _ = c.close(fds[0]);
+    defer _ = c.close(fds[1]);
+
+    const msg = "partial-safe";
+    try std.testing.expectEqual(@as(c_int, 0), writeAllRetry(@intCast(fds[1]), msg));
+
+    var buf: [msg.len]u8 = undefined;
+    const got = readRetry(@intCast(fds[0]), &buf, buf.len);
+    try std.testing.expectEqual(@as(isize, @intCast(msg.len)), got);
+    try std.testing.expectEqualStrings(msg, &buf);
 }

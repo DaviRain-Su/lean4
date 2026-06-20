@@ -1,8 +1,11 @@
 // Root module re-exporting all runtime submodules.
 
+const runtime_options = @import("runtime_options");
+
 pub const alloc = @import("alloc.zig");
 pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
+pub const allocator = @import("lean_allocator");
 pub const box = @import("box.zig");
 pub const byteslice = @import("byteslice.zig");
 pub const compact = @import("compact.zig");
@@ -12,11 +15,29 @@ pub const compat = @import("compat.zig");
 pub const debug = @import("debug.zig");
 pub const dbg = @import("dbg.zig");
 pub const exception = @import("exception.zig");
+pub const kernel = @import("kernel.zig");
+pub const kernel_accessors = @import("kernel_accessors.zig");
+pub const type_checker = @import("type_checker.zig");
+pub const inductive = @import("inductive.zig");
+pub const quot = @import("quot.zig");
+pub const elab_environment = @import("elab_environment.zig");
+pub const expr_lt = @import("expr_lt.zig");
+pub const expr_accessors = @import("expr_accessors.zig");
+pub const inline_exports = @import("inline_exports.zig");
+pub const ir_interpreter = @import("ir_interpreter.zig");
+pub const runtime_helpers = @import("runtime_helpers.zig");
+pub const dynlib = @import("dynlib.zig");
+pub const dynlib_lib = @import("dynlib_lib.zig");
+pub const init_attribute = @import("init_attribute.zig");
+pub const profiling = @import("profiling.zig");
+pub const time_task = @import("time_task.zig");
 pub const stack_overflow = @import("stack_overflow.zig");
 pub const float = @import("float.zig");
 pub const hash = @import("hash.zig");
 pub const allocprof = @import("allocprof.zig");
 pub const init = @import("init.zig");
+pub const instantiate_mvars = @import("instantiate_mvars.zig");
+pub const instantiate_expr_mvars = @import("instantiate_expr_mvars.zig");
 pub const int = @import("int.zig");
 pub const int_conv = @import("int_conv.zig");
 pub const io_error = @import("io_error.zig");
@@ -86,6 +107,17 @@ comptime {
     _ = io_min;
     _ = io_posix.force_link;
     _ = interrupt;
+    if (runtime_options.export_kernel_symbols) {
+        _ = kernel.force_link;
+        _ = kernel_accessors.force_link;
+        _ = type_checker.force_link;
+        _ = inductive.force_link;
+        _ = quot.force_link;
+        _ = elab_environment.force_link;
+        _ = instantiate_mvars.force_link;
+        _ = instantiate_expr_mvars.force_link;
+        _ = ir_interpreter.force_link;
+    }
     _ = list;
     _ = memory;
     _ = misc;
@@ -120,4 +152,6 @@ comptime {
     _ = uv_timer.force_link;
     _ = uv_signal.force_link;
     _ = uv_udp.force_link;
+    _ = inline_exports.force_link;
+    _ = dynlib.force_link;
 }

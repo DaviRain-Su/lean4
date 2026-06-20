@@ -95,32 +95,158 @@ fn ipv6AddrToBytes(ipv6_addr: *anyopaque, out: []u8) void {
     }
 }
 
-fn mkIPv4AddrFromInAddr(addr: *const c.struct_in_addr) *anyopaque {
-    const bytes = constByteSpan(addr, 4);
-    return mkBoxedArray(u8, bytes);
-}
-
-fn mkIPv6AddrFromIn6Addr(addr: *const c.struct_in6_addr) *anyopaque {
-    const bytes = constByteSpan(addr, 16);
-    var segments: [8]u16 = undefined;
-    for (0..8) |i| {
-        segments[i] = std.mem.readInt(u16, bytes[i * 2 ..][0..2], .big);
-    }
-    return mkBoxedArray(u16, &segments);
-}
-
 fn mkCtor1(tag: u16, obj: *anyopaque) *anyopaque {
     const result = alloc.lean_alloc_ctor(tag, 1, 0);
     ctor.lean_ctor_set(result, 0, obj);
     return result;
 }
 
-fn mkIpAddrFromInAddrStorage(family: c_int, addr: *anyopaque) *anyopaque {
-    if (family == c.AF_INET) {
-        return mkCtor1(0, mkIPv4AddrFromInAddr(@ptrCast(@alignCast(addr))));
-    } else {
-        return mkCtor1(1, mkIPv6AddrFromIn6Addr(@ptrCast(@alignCast(addr))));
+pub const InAddrStorage = extern union {
+    ipv4: c.struct_in_addr,
+    ipv6: c.struct_in6_addr,
+};
+
+fn ipv4AddrToInAddr(ipv4_addr: *anyopaque, out: *c.struct_in_addr) void {
+    out.s_addr = 0;
+    const slots = arraySlots(ipv4_addr);
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        const octet: u32 = @intCast(object.lean_unbox(slots[i]));
+        out.s_addr |= octet << @intCast((3 - i) * 8);
     }
+    out.s_addr = c.htonl(out.s_addr);
+}
+
+fn ipv6AddrToIn6Addr(ipv6_addr: *anyopaque, out: *c.struct_in6_addr) void {
+    var buf: [16]u8 = undefined;
+    const slots = arraySlots(ipv6_addr);
+    for (0..8) |i| {
+        const segment: u16 = @intCast(object.lean_unbox(slots[i]));
+        std.mem.writeInt(u16, buf[i * 2 ..][0..2], segment, .big);
+    }
+    @memcpy(@as([*]u8, @ptrCast(out))[0..16], &buf);
+}
+
+pub export fn lean_zig_ipv4_addr_to_in_addr(ipv4_addr: *anyopaque, out: *c.struct_in_addr) callconv(.c) void {
+    ipv4AddrToInAddr(ipv4_addr, out);
+}
+
+pub export fn lean_zig_ipv6_addr_to_in6_addr(ipv6_addr: *anyopaque, out: *c.struct_in6_addr) callconv(.c) void {
+    ipv6AddrToIn6Addr(ipv6_addr, out);
+}
+
+pub export fn lean_zig_ip_addr_to_in_addr_storage(ip_addr: *anyopaque, type_out: *c_int, out: *InAddrStorage) callconv(.c) void {
+    const ip_obj = ctor.lean_ctor_get(ip_addr, 0).?;
+    if (object.lean_ptr_tag(ip_addr) == 0) {
+        ipv4AddrToInAddr(ip_obj, &out.ipv4);
+        type_out.* = c.AF_INET;
+    } else {
+        ipv6AddrToIn6Addr(ip_obj, &out.ipv6);
+        type_out.* = c.AF_INET6;
+    }
+}
+
+pub export fn lean_zig_ip_addr_ntop(ip_addr: *anyopaque, buffer: [*]u8, buffer_size: usize) callconv(.c) void {
+    var ip_type: c_int = undefined;
+    var storage: InAddrStorage = undefined;
+    lean_zig_ip_addr_to_in_addr_storage(ip_addr, &ip_type, &storage);
+    const ret = c.uv_inet_ntop(ip_type, @ptrCast(&storage), buffer, buffer_size);
+    std.debug.assert(ret == 0);
+}
+
+fn mkSocketAddressInner(ip_addr: *anyopaque, port: u16) *anyopaque {
+    const socket_addr = alloc.lean_alloc_ctor(0, 1, @sizeOf(u16));
+    ctor.lean_ctor_set(socket_addr, 0, ip_addr);
+    ctor.lean_ctor_set_uint16(socket_addr, @sizeOf(?*anyopaque), port);
+    return socket_addr;
+}
+
+pub export fn lean_zig_socket_address_to_sockaddr_storage(ip_addr: *anyopaque, out: *c.sockaddr_storage) callconv(.c) void {
+    out.* = std.mem.zeroes(c.sockaddr_storage);
+
+    const socket_addr_obj = ctor.lean_ctor_get(ip_addr, 0).?;
+    const ip_addr_obj = ctor.lean_ctor_get(socket_addr_obj, 0).?;
+    const port_obj = ctor.lean_ctor_get_uint16(socket_addr_obj, @sizeOf(?*anyopaque));
+
+    if (object.lean_ptr_tag(ip_addr) == 0) {
+        const cast: *c.sockaddr_in = @ptrCast(@alignCast(out));
+        ipv4AddrToInAddr(ip_addr_obj, &cast.sin_addr);
+        cast.sin_family = c.AF_INET;
+        cast.sin_port = c.htons(port_obj);
+    } else {
+        const cast: *c.sockaddr_in6 = @ptrCast(@alignCast(out));
+        ipv6AddrToIn6Addr(ip_addr_obj, &cast.sin6_addr);
+        cast.sin6_family = c.AF_INET6;
+        cast.sin6_port = c.htons(port_obj);
+    }
+}
+
+pub export fn lean_zig_in_addr_to_ipv4_addr(ipv4_addr: *const c.struct_in_addr) callconv(.c) *anyopaque {
+    const hostaddr = c.ntohl(ipv4_addr.s_addr);
+    var octets: [4]u8 = undefined;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        octets[i] = @truncate(hostaddr >> @intCast((3 - i) * 8));
+    }
+    return mkBoxedArray(u8, &octets);
+}
+
+pub export fn lean_zig_in6_addr_to_ipv6_addr(ipv6_addr: *const c.struct_in6_addr) callconv(.c) *anyopaque {
+    const bytes = constByteSpan(ipv6_addr, 16);
+    var segments: [8]u16 = undefined;
+    var i: usize = 0;
+    while (i < 16) : (i += 2) {
+        const part1: u16 = bytes[i];
+        const part2: u16 = bytes[i + 1];
+        const combined = (part2 << 8) | part1;
+        segments[i / 2] = c.ntohs(combined);
+    }
+    return mkBoxedArray(u16, &segments);
+}
+
+pub export fn lean_zig_phys_addr_to_mac_addr(phys_addr: [*]u8) callconv(.c) *anyopaque {
+    return mkBoxedArray(u8, phys_addr[0..6]);
+}
+
+pub export fn lean_zig_in_addr_storage_to_ip_addr(family: c_short, ip_addr: *anyopaque) callconv(.c) *anyopaque {
+    const storage: *InAddrStorage = @ptrCast(@alignCast(ip_addr));
+    const part: *anyopaque = if (family == c.AF_INET)
+        lean_zig_in_addr_to_ipv4_addr(&storage.ipv4)
+    else if (family == c.AF_INET6)
+        lean_zig_in6_addr_to_ipv6_addr(&storage.ipv6)
+    else
+        @panic("unsupported address family");
+    const tag: u16 = if (family == c.AF_INET6) 1 else 0;
+    return mkCtor1(tag, part);
+}
+
+pub export fn lean_zig_sockaddr_to_socketaddress(sockaddr: *const c.sockaddr) callconv(.c) *anyopaque {
+    if (sockaddr.sa_family == c.AF_INET) {
+        const addr_in: *const c.sockaddr_in = @ptrCast(@alignCast(sockaddr));
+        const lean_ipv4 = lean_zig_in_addr_to_ipv4_addr(&addr_in.sin_addr);
+        const port = c.ntohs(addr_in.sin_port);
+        const part = mkSocketAddressInner(lean_ipv4, port);
+        return mkCtor1(0, part);
+    } else if (sockaddr.sa_family == c.AF_INET6) {
+        const addr_in6: *const c.sockaddr_in6 = @ptrCast(@alignCast(sockaddr));
+        const lean_ipv6 = lean_zig_in6_addr_to_ipv6_addr(&addr_in6.sin6_addr);
+        const port = c.ntohs(addr_in6.sin6_port);
+        const part = mkSocketAddressInner(lean_ipv6, port);
+        return mkCtor1(1, part);
+    }
+    @panic("unsupported sockaddr family");
+}
+
+fn mkIPv4AddrFromInAddr(addr: *const c.struct_in_addr) *anyopaque {
+    return lean_zig_in_addr_to_ipv4_addr(addr);
+}
+
+fn mkIPv6AddrFromIn6Addr(addr: *const c.struct_in6_addr) *anyopaque {
+    return lean_zig_in6_addr_to_ipv6_addr(addr);
+}
+
+fn mkIpAddrFromInAddrStorage(family: c_int, addr: *anyopaque) *anyopaque {
+    return lean_zig_in_addr_storage_to_ip_addr(@intCast(family), @ptrCast(@alignCast(addr)));
 }
 
 fn isStrictIPv4DottedDecimal(bytes: []const u8) bool {

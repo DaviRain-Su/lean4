@@ -133,6 +133,9 @@ lean_dbg_sleep
 lean_dbg_stack_trace
 lean_dbg_trace
 lean_dbg_trace_if_shared
+lean_dec_n
+lean_dec_ref
+lean_dec_ref_cold
 lean_float_add
 lean_float_array_cptr
 lean_float_array_data
@@ -200,6 +203,9 @@ lean_float32_to_uint32
 lean_float32_to_uint64
 lean_float32_to_uint8
 lean_float32_to_usize
+lean_inc_n
+lean_inc_ref
+lean_inc_ref_n
 lean_int_add
 lean_int_big_add
 lean_int_big_div
@@ -383,6 +389,8 @@ lean_isize_to_int64
 lean_isize_to_int8
 lean_isize_xor
 lean_libuv_version
+lean_mark_mt
+lean_mark_persistent
 lean_mk_array
 lean_mk_ascii_string_unchecked
 lean_mk_string
@@ -419,6 +427,8 @@ lean_nat_pred
 lean_nat_shiftl
 lean_nat_shiftr
 lean_nat_to_int
+lean_object_byte_size
+lean_object_data_byte_size
 lean_panic
 lean_panic_fn
 lean_panic_fn_borrowed

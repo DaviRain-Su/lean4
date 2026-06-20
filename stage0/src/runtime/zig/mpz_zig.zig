@@ -63,7 +63,7 @@ pub const Mpz = extern struct {
         }
     }
 
-    pub fn setStr(self: *Mpz, base: u8, str: []const u8) error{OutOfMemory, InvalidCharacter}!void {
+    pub fn setStr(self: *Mpz, base: u8, str: []const u8) error{ OutOfMemory, InvalidCharacter }!void {
         const zstr = std.heap.c_allocator.dupeZ(u8, str) catch return error.OutOfMemory;
         defer std.heap.c_allocator.free(zstr);
         if (__gmpz_set_str(self, zstr, @intCast(base)) != 0) {
@@ -71,7 +71,7 @@ pub const Mpz = extern struct {
         }
     }
 
-    pub fn toString(self: *const Mpz, allocator: std.mem.Allocator, base: u8) error{OutOfMemory, InvalidCharacter}![]u8 {
+    pub fn toString(self: *const Mpz, allocator: std.mem.Allocator, base: u8) error{ OutOfMemory, InvalidCharacter }![]u8 {
         const raw = __gmpz_get_str(null, @intCast(base), self);
         defer std.c.free(raw);
         const len = std.mem.len(raw);
@@ -207,6 +207,11 @@ pub const Mpz = extern struct {
         return @intCast(__gmpz_get_ui(self));
     }
 
+    /// Convert to f64 (double).
+    pub fn getDouble(self: *const Mpz) f64 {
+        return __gmpz_get_d(self);
+    }
+
     pub fn smodPow2(self: *Mpz, a: *const Mpz, k: usize) error{OutOfMemory}!void {
         __gmpz_fdiv_r_2exp(self, a, @intCast(k));
         if (k == 0) return;
@@ -236,6 +241,7 @@ extern fn __gmpz_set_str(x: *Mpz, str: [*:0]const u8, base: c_int) c_int;
 extern fn __gmpz_get_str(str: ?[*:0]u8, base: c_int, x: *const Mpz) [*:0]u8;
 extern fn __gmpz_get_ui(x: *const Mpz) c_ulong;
 extern fn __gmpz_get_si(x: *const Mpz) c_long;
+extern fn __gmpz_get_d(x: *const Mpz) f64;
 extern fn __gmpz_getlimbn(x: *const Mpz, n: usize) c_ulong;
 extern fn __gmpz_cmp(x: *const Mpz, y: *const Mpz) c_int;
 extern fn __gmpz_cmp_ui(x: *const Mpz, y: c_ulong) c_int;

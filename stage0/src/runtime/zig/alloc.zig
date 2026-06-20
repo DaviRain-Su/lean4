@@ -4,12 +4,15 @@ const testing = std.testing;
 const lean = @import("lean_object.zig");
 const mpz_zig = @import("mpz_zig");
 const runtime_options = @import("runtime_options");
+const allocprof = @import("allocprof.zig");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
 const external_allocator = struct {
     extern fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque;
     extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
+    extern fn lean_alloc_small_object(sz: c_uint) callconv(.c) *anyopaque;
 };
+extern fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque;
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -135,7 +138,8 @@ fn allocationKind(ptr: *anyopaque) ?u8 {
 
 pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, 0, kind);
     const payload = payloadFromMeta(meta);
@@ -145,7 +149,10 @@ pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
 }
 
 pub fn freeTrackedPayload(ptr: *anyopaque) void {
-    std.c.free(metaFromPayload(ptr));
+    const lean_alloc = @import("lean_allocator");
+    const meta = metaFromPayload(ptr);
+    const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+    lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
 }
 
 pub fn legacyPayloadSize(ptr: *anyopaque) usize {
@@ -170,19 +177,23 @@ fn zeroPayload(ptr: *anyopaque, len: usize) void {
 }
 
 fn setHeapHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
-    hdr.* = .{
-        .m_rc = 1,
-        .m_cs_sz = 0,
-        .m_other = other,
-        .m_tag = tag,
-    };
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    // Match C++ lean_set_st_header: in mimalloc mode (export_allocator_symbols=false),
+    // do NOT overwrite m_cs_sz — it was set by lean_alloc_small_object to the
+    // aligned total allocation size. In self-hosted mode, m_cs_sz is not used for
+    // heap objects (allocationPayloadSize tracks the size), so zeroing is fine.
+    if (export_allocator_symbols) {
+        hdr.m_cs_sz = 0;
+    }
 }
 
 fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const word_count = total_size / @sizeOf(usize);
-    const words = std.heap.page_allocator.alloc(usize, word_count) catch @panic("out of memory");
-    const meta: *AllocationMeta = @ptrCast(words.ptr);
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
+    const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, slot_idx, allocation_kind_small);
     const payload = payloadFromMeta(meta);
     zeroPayload(payload, payload_size);
@@ -191,7 +202,8 @@ fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
 
 fn allocLarge(sz: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), sz);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const lean_alloc = @import("lean_allocator");
+    const raw = lean_alloc.leanAlloc(u8, total_size) orelse @panic("out of memory");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(sz, 0, allocation_kind_large);
     const payload = payloadFromMeta(meta);
@@ -217,24 +229,29 @@ fn freeSmall(ptr: *anyopaque) void {
 fn freeLarge(ptr: *anyopaque) void {
     if (metaFromPayload(ptr).magic != allocation_magic) @panic("missing allocation record for large object");
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
-    std.c.free(metaFromPayload(ptr));
+    const lean_alloc = @import("lean_allocator");
+    const meta = metaFromPayload(ptr);
+    const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+    lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
 }
 
 fn freeLegacySmall(ptr: *anyopaque) void {
-    std.c.free(ptr);
+    const lean_alloc = @import("lean_allocator");
+    lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
 }
 
 fn freeLegacyRaw(ptr: *anyopaque) void {
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
-    std.c.free(ptr);
+    const lean_alloc = @import("lean_allocator");
+    lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
 }
 
 fn freeDelegatedCppObject(ptr: *anyopaque) void {
     // Objects reaching this path were allocated by the legacy C++ runtime
-    // (e.g., MPZ values produced by GMP callbacks). Until the Zig runtime
-    // owns those allocations end-to-end, route them through the same libc
-    // free path used for legacy small objects.
-    freeLegacySmall(ptr);
+    // (mimalloc). They must be freed through the C++ lean_free_object,
+    // not the Zig allocator (std.c.free), or mimalloc's internal state
+    // will be corrupted.
+    external_allocator.lean_free_object(ptr);
 }
 
 pub fn resetTestCounters() void {
@@ -453,6 +470,28 @@ pub fn lean_free_small_object(o: *anyopaque) void {
     }
 }
 
+pub fn allocCtorMemory(sz: usize) *anyopaque {
+    return lean_alloc_object(sz);
+}
+
+pub fn allocSmallObject(sz: usize) *anyopaque {
+    if (!export_allocator_symbols) {
+        // In mimalloc mode, use mi_malloc_small (not mi_malloc) and set m_cs_sz
+        // to the aligned allocation size, matching C++ lean_alloc_small_object.
+        const aligned = alignObjectSize(sz);
+        const mem = mi_malloc_small(aligned);
+        if (mem == null) @panic("out of memory");
+        const o: *lean.lean_object = @ptrCast(@alignCast(mem.?));
+        o.m_cs_sz = @intCast(aligned);
+        return @ptrCast(o);
+    }
+    return lean_alloc_object(sz);
+}
+
+pub fn freeSmallObject(o: *anyopaque) void {
+    lean_free_small_object(o);
+}
+
 pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopaque {
     if (tag > lean.LeanMaxCtorTag) @panic("constructor tag out of range");
     if (num_objs > std.math.maxInt(u8)) @panic("constructor object slot overflow");
@@ -460,10 +499,33 @@ pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopa
 
     const object_bytes = checkedMul(@sizeOf(?*anyopaque), num_objs);
     const total_size = checkedAdd(checkedAdd(@sizeOf(lean.lean_ctor_object), object_bytes), scalar_sz);
+
+    if (!export_allocator_symbols) {
+        // In mimalloc mode, use C++ lean_alloc_small_object (not lean_alloc_object)
+        // because lean_alloc_small_object calls mi_malloc_small and sets m_cs_sz to
+        // the aligned allocation size. This matches C++ lean_alloc_ctor_memory behavior.
+        // setHeapHeader preserves m_cs_sz in mimalloc mode.
+        const aligned = alignObjectSize(total_size);
+        if (aligned > std.math.maxInt(c_uint)) @panic("constructor size overflow");
+        const ptr = external_allocator.lean_alloc_small_object(@intCast(aligned));
+        const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
+        setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
+        // C++ lean_alloc_ctor_memory zeroes the last word of padding when aligned > sz.
+        // We replicate that behavior to match C++ semantics for sharecommon.
+        if (aligned > total_size) {
+            const end = @as([*]usize, @ptrCast(@alignCast(ptr)));
+            const end_idx = (aligned / @sizeOf(usize)) - 1;
+            end[end_idx] = 0;
+        }
+        allocprof.recordAlloc(@intCast(tag));
+        return ptr;
+    }
+
     const ptr = lean_alloc_object(total_size);
     const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
     setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
     ctor.m_header.m_cs_sz = @intCast(scalar_sz);
+    allocprof.recordAlloc(@intCast(tag));
     return ptr;
 }
 
@@ -479,6 +541,7 @@ pub fn lean_alloc_closure(fun: ?*anyopaque, arity: c_uint, num_fixed: c_uint) *a
     closure.m_fun = fun;
     closure.m_arity = @intCast(arity);
     closure.m_num_fixed = @intCast(num_fixed);
+    allocprof.recordAlloc(lean.LeanClosure);
     return ptr;
 }
 
@@ -491,6 +554,7 @@ pub fn lean_alloc_array(size: usize, capacity: usize) *anyopaque {
     const array: *lean.lean_array_object = @ptrCast(@alignCast(ptr));
     setHeapHeader(&array.m_header, lean.LeanArray, 0);
     array.m_size = size;
+    allocprof.recordAlloc(lean.LeanArray);
     array.m_capacity = capacity;
     return ptr;
 }

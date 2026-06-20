@@ -9,9 +9,6 @@ const rc = @import("rc.zig");
 const mpz_zig = @import("mpz_zig");
 const runtime_options = @import("runtime_options");
 
-const gmp = struct {
-    extern fn __gmpz_get_d(op: *const mpz_zig.Mpz) callconv(.c) f64;
-};
 var g_exit_on_panic = false;
 var g_panic_messages = true;
 var g_stdout: ?*anyopaque = null;
@@ -103,7 +100,6 @@ pub export fn lean_internal_panic_overflow() callconv(.c) void {
     internalPanicMessage("integer overflow in runtime computation");
     exitWithCodeOne();
 }
-
 
 pub const lean_io_initializing = io_result.lean_io_initializing;
 pub const lean_io_mark_end_initialization = io_result.lean_io_mark_end_initialization;
@@ -211,7 +207,6 @@ fn lean_mk_io_error_unsupported_operation(os_code: u32, details: *anyopaque) *an
     return io_error.lean_mk_io_error_unsupported_operation(os_code, details);
 }
 
-
 // Minimal IO implementation for programs that link the Zig runtime without the
 // Lean standard library. `initialize_Init` creates the standard streams; the
 // getters return cached objects and the setters swap them, matching the C++
@@ -284,11 +279,11 @@ fn streamIsTtyFalse(_: *anyopaque) callconv(.c) *anyopaque {
 }
 
 fn makeStreamClosure(comptime fun: anytype) *anyopaque {
-    return alloc.lean_alloc_closure(@constCast(@ptrCast(&fun)), 1, 0);
+    return alloc.lean_alloc_closure(@ptrCast(@constCast(&fun)), 1, 0);
 }
 
 fn makeStreamClosure2(comptime fun: anytype) *anyopaque {
-    return alloc.lean_alloc_closure(@constCast(@ptrCast(&fun)), 2, 0);
+    return alloc.lean_alloc_closure(@ptrCast(@constCast(&fun)), 2, 0);
 }
 
 fn makeOutputStream(put_str: anytype, write_fn: anytype) *anyopaque {
@@ -358,7 +353,7 @@ fn natToF64(n: *anyopaque) f64 {
     } else {
         const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(n));
         const mpz: *mpz_zig.Mpz = @ptrCast(@alignCast(&mpz_obj.m_value));
-        return gmp.__gmpz_get_d(mpz);
+        return mpz.getDouble();
     }
 }
 
@@ -379,12 +374,17 @@ comptime {
     }
 }
 
-export fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
+fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
     _ = builtin;
     if (g_stdout == null) g_stdout = makeOutputStream(stdoutPutStr, stdoutWrite);
     if (g_stderr == null) g_stderr = makeOutputStream(stderrPutStr, stderrWrite);
     if (g_stdin == null) g_stdin = makeInputStream();
     return io_result.lean_io_result_mk_ok(object.lean_box(0).?);
+}
+comptime {
+    if (runtime_options.export_lean_helpers) {
+        @export(&initialize_Init, .{ .name = "initialize_Init" });
+    }
 }
 
 fn getStreamOrInit(current: *?*anyopaque, make: *const fn () callconv(.c) *anyopaque) *anyopaque {

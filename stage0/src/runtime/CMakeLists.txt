@@ -34,6 +34,7 @@ set(
   uv/system.cpp
   uv/signal.cpp
   uv/zig_link_compat.cpp
+  zig/uv_init.cpp
   openssl.cpp
 )
 if(USE_MIMALLOC)
@@ -56,6 +57,13 @@ endif()
 
 add_library(leanrt_initial-exec STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt_initial-exec PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+# Phase 2 cutover strategy: instead of weakening C++ symbols (which caused
+# 414 behavioral mismatches), we keep C++ strong and weaken only Zig symbols
+# that duplicate C++ definitions.  Zig-only symbols stay strong and fill gaps.
+# The weakening happens in src/runtime/zig/CMakeLists.txt after the Zig
+# helperless archive is built, using weaken_zig_symbols.py.
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
 
 # The above library, like all other C++ code, is built using `-ftls-model=initial-exec`, which is necessary for linking it into `leanshared`,
 # but introduces a measurable overhead while accessing the thread-local variable `g_heap` when allocating and deallocating. Therefore we compile

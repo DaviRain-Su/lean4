@@ -7,6 +7,7 @@ const rc = @import("rc.zig");
 const utf8 = @import("utf8.zig");
 const ctor = @import("ctor.zig");
 const hash = @import("hash.zig");
+const allocprof = @import("allocprof.zig");
 
 fn asString(o: *anyopaque) *lean.lean_string_object {
     return @ptrCast(@alignCast(o));
@@ -58,6 +59,9 @@ fn checkedAdd(a: usize, b: usize) usize {
     return result[0];
 }
 
+pub fn allocStringExport(size: usize, capacity: usize, len: usize) *anyopaque {
+    return allocString(size, capacity, len);
+}
 fn allocString(size: usize, capacity: usize, len: usize) *anyopaque {
     if (size == 0) @panic("Lean strings must include a trailing NUL");
     if (capacity < size) @panic("string capacity must cover string size");
@@ -83,6 +87,7 @@ fn mkStringUncheckedBytes(bytes: [*]const u8, sz: usize, len: usize) *anyopaque 
     const dest = stringDataMut(ptr);
     @memcpy(dest[0..sz], bytes[0..sz]);
     dest[sz] = 0;
+    allocprof.recordAlloc(lean.LeanString);
     return ptr;
 }
 

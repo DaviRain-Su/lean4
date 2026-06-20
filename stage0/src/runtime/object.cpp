@@ -376,8 +376,8 @@ extern "C" LEAN_EXPORT lean_object * lean_alloc_object(size_t sz) {
 #endif
 }
 
-static void deactivate_task(lean_task_object * t);
-static void deactivate_promise(lean_promise_object * t);
+extern "C" LEAN_EXPORT void lean_deactivate_task(lean_task_object * t);
+extern "C" LEAN_EXPORT void lean_deactivate_promise(lean_promise_object * promise);
 
 static void lean_del_core_other(object * o, uint8 tag, object * & todo) {
     switch (tag) {
@@ -415,10 +415,10 @@ static void lean_del_core_other(object * o, uint8 tag, object * & todo) {
         lean_free_small_object(o);
         break;
     case LeanTask:
-        deactivate_task(lean_to_task(o));
+        lean_deactivate_task(lean_to_task(o));
         break;
     case LeanPromise:
-        deactivate_promise(lean_to_promise(o));
+        lean_deactivate_promise(lean_to_promise(o));
         break;
     case LeanExternal:
         lean_to_external(o)->m_class->m_finalize(lean_to_external(o)->m_data);
@@ -1120,7 +1120,7 @@ scoped_task_manager::~scoped_task_manager() {
     }
 }
 
-void deactivate_task(lean_task_object * t) {
+extern "C" LEAN_EXPORT void lean_deactivate_task(lean_task_object * t) {
     if (g_task_manager) {
         g_task_manager->deactivate_task(t);
     } else {
@@ -1327,7 +1327,7 @@ extern "C" LEAN_EXPORT obj_res lean_io_promise_result_opt(b_obj_arg promise) {
     return t;
 }
 
-void deactivate_promise(lean_promise_object * promise) {
+extern "C" LEAN_EXPORT void lean_deactivate_promise(lean_promise_object * promise) {
     g_task_manager->resolve(promise->m_result, mk_option_none());
     lean_dec_ref((lean_object *)promise->m_result);
     lean_free_small_object((lean_object *)promise);

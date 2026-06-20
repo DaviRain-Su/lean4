@@ -19,6 +19,10 @@ const c = @cImport({
     if (builtin.os.tag == .macos) {
         @cInclude("mach/mach.h");
     }
+    if (builtin.os.tag == .windows) {
+        @cInclude("windows.h");
+        @cInclude("psapi.h");
+    }
 });
 
 const POSIX = builtin.os.tag != .windows;
@@ -29,6 +33,12 @@ var g_max_memory: usize = 0;
 threadlocal var g_counter: usize = 0;
 
 fn getPeakRss() usize {
+    if (builtin.os.tag == .windows) {
+        var counters: c.PROCESS_MEMORY_COUNTERS = undefined;
+        counters.cb = @sizeOf(c.PROCESS_MEMORY_COUNTERS);
+        if (c.GetProcessMemoryInfo(c.GetCurrentProcess(), &counters, @sizeOf(c.PROCESS_MEMORY_COUNTERS)) == 0) return 0;
+        return counters.PeakWorkingSetSize;
+    }
     if (!POSIX) return 0;
     var rusage: c.struct_rusage = undefined;
     if (c.getrusage(c.RUSAGE_SELF, &rusage) != 0) return 0;
@@ -40,6 +50,12 @@ fn getPeakRss() usize {
 }
 
 fn getCurrentRss() usize {
+    if (builtin.os.tag == .windows) {
+        var counters: c.PROCESS_MEMORY_COUNTERS = undefined;
+        counters.cb = @sizeOf(c.PROCESS_MEMORY_COUNTERS);
+        if (c.GetProcessMemoryInfo(c.GetCurrentProcess(), &counters, @sizeOf(c.PROCESS_MEMORY_COUNTERS)) == 0) return 0;
+        return counters.WorkingSetSize;
+    }
     if (!POSIX) return 0;
     if (builtin.os.tag == .macos) {
         var info: c.mach_task_basic_info = undefined;

@@ -110,7 +110,21 @@ option(RUNTIME_STATS "RUNTIME_STATS" OFF)
 option(BSYMBOLIC "Link with -Bsymbolic to reduce call overhead in shared libraries (Linux)" ON)
 option(USE_GMP "USE_GMP" ON)
 option(USE_MIMALLOC "use mimalloc" ON)
-option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" OFF)
+option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
+# Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
+# The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
+# Phase 2 cutover: when LEAN_ZIG_RT_CUTOVER is also ON, the Zig helperless archive
+# is linked into leanshared alongside the C++ runtime.  C++ symbols stay strong;
+# Zig symbols that duplicate C++ are weakened (via weaken_zig_symbols.py) so only
+# Zig-only symbols fill gaps in the C++ runtime.
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
+if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
+else()
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_ZIG_RT_DEPS)
+endif()
 set(LEAN_MI_SECURE 0 CACHE STRING "Configure mimalloc memory safety mitigations (https://github.com/microsoft/mimalloc/blob/v2.2.7/include/mimalloc/types.h#L56-L60)")
 
 # development-specific options
@@ -915,7 +929,7 @@ else()
     Init_shared
     ALL
     WORKING_DIRECTORY ${LEAN_SOURCE_DIR}
-    DEPENDS make_stdlib leanrt_initial-exec
+    DEPENDS make_stdlib leanrt_initial-exec ${LEAN_ZIG_RT_DEPS}
     COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make Init_shared
     VERBATIM
   )

@@ -645,26 +645,41 @@ pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyo
     return @ptrCast(task);
 }
 
-pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+/// Task deactivation. Exported as `lean_deactivate_task` so that the C++
+/// runtime (which has `g_task_manager`) overrides it in `libleanshared`.
+/// In zigrt mode (no C++), this Zig version is used directly.
+pub export fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void {
     if (task_manager.runtimeManager()) |manager| {
-        manager.deactivateTask(task_obj);
+        manager.deactivateTask(task);
         return;
     }
+    // No task manager: match C++ deactivate_task — dec the value (if any)
+    // and free the task. freeTask handles null m_value safely.
+    freeTask(task);
+}
 
-    // No task manager is active; the task must already be finished.
-    if (taskValue(task_obj) != null) {
-        freeTask(task_obj);
-    } else {
-        @panic("leanrt_task_deactivate_task_impl called on pending task without task manager");
+/// Promise deactivation. Exported as `lean_deactivate_promise` so that the
+/// C++ runtime overrides it in `libleanshared`. In zigrt mode this Zig
+/// version is used directly.
+pub export fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void {
+    if (task_manager.runtimeManager() != null) {
+        const promise_obj = promisePtr(promise);
+        const task = promise_obj.m_result orelse @panic("promise missing backing task");
+        resolvePromiseTask(task, object.lean_box(0).?);
+        rc.lean_dec_ref(@ptrCast(task));
+        alloc.lean_free_small_object(promise);
+        return;
     }
+    // No task manager: just free the promise object.
+    alloc.lean_free_small_object(promise);
+}
+
+pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+    lean_deactivate_task(task_obj);
 }
 
 pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
-    const promise_obj = promisePtr(promise);
-    const task = promise_obj.m_result orelse @panic("promise missing backing task");
-    resolvePromiseTask(task, object.lean_box(0).?);
-    rc.lean_dec_ref(@ptrCast(task));
-    alloc.lean_free_small_object(promise);
+    lean_deactivate_promise(promise);
 }
 
 fn spawnReturnsFortyTwo(_: ?*anyopaque) callconv(.c) ?*anyopaque {

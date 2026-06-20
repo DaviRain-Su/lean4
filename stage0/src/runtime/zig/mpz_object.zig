@@ -3,6 +3,8 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_zig = @import("mpz_zig");
+const runtime_options = @import("runtime_options");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
 
 fn asMpzObject(o: *anyopaque) *lean.MpzObject {
     return @ptrCast(@alignCast(o));
@@ -25,7 +27,25 @@ pub fn mpzValue(o: *anyopaque) *mpz_zig.Mpz {
     return @ptrCast(@alignCast(&asMpzObject(o).m_value));
 }
 
-pub export fn lean_alloc_mpz() callconv(.c) *anyopaque {
+const external_allocator_fns = struct {
+    extern fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque;
+    extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
+};
+
+pub fn lean_alloc_mpz() callconv(.c) *anyopaque {
+    if (!export_allocator_symbols) {
+        // C++ lean_alloc_mpz has a different signature (takes mpz_t v).
+        // Allocate via lean_alloc_object and initialize the header ourselves.
+        // The C++ lean_free_object will handle freeing via mimalloc.
+        const obj: *lean.MpzObject = @ptrCast(@alignCast(external_allocator_fns.lean_alloc_object(@sizeOf(lean.MpzObject))));
+        initMpzHeader(obj);
+        mpzValue(obj).* = mpz_zig.Mpz.init(std.heap.c_allocator) catch {
+            external_allocator_fns.lean_free_object(obj);
+            @panic("lean_alloc_mpz: alloc");
+        };
+        return obj;
+    }
+
     const obj: *lean.MpzObject = @ptrCast(@alignCast(alloc.allocTrackedPayload(@sizeOf(lean.MpzObject), alloc.allocation_kind_mpz)));
     initMpzHeader(obj);
     mpzValue(obj).* = mpz_zig.Mpz.init(std.heap.c_allocator) catch {
@@ -35,8 +55,15 @@ pub export fn lean_alloc_mpz() callconv(.c) *anyopaque {
     return obj;
 }
 
-pub export fn lean_extract_mpz_value(o: *anyopaque) callconv(.c) *mpz_zig.Mpz {
+pub fn lean_extract_mpz_value(o: *anyopaque) callconv(.c) *mpz_zig.Mpz {
     return mpzValue(o);
+}
+
+comptime {
+    if (export_allocator_symbols) {
+        @export(&lean_alloc_mpz, .{ .name = "lean_alloc_mpz" });
+        @export(&lean_extract_mpz_value, .{ .name = "lean_extract_mpz_value" });
+    }
 }
 
 pub export fn leanrt_test_alloc_mpz_from_cstr(value: [*:0]const u8) callconv(.c) *anyopaque {
