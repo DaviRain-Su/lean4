@@ -15,6 +15,7 @@ const rc = @import("rc.zig");
 const string = @import("string.zig");
 const uv_event_loop = @import("uv_event_loop.zig");
 const net_addr = @import("net_addr.zig");
+const lean_alloc = @import("lean_allocator");
 
 const uv = @cImport({
     @cInclude("uv.h");
@@ -42,8 +43,8 @@ const TcpSendData = struct {
     data: *anyopaque,
     socket: *anyopaque,
     bufs: [*]uv.uv_buf_t,
+    buf_count: usize,
 };
-
 var g_uv_tcp_socket_external_class: ?*lean.lean_external_class = null;
 var g_tcp_class_initialized = false;
 
@@ -114,8 +115,8 @@ fn arrayGetCore(a: *anyopaque, i: usize) ?*anyopaque {
 
 fn uvCloseFreeTcpHandle(handle: ?*uv.uv_handle_t) callconv(.c) void {
     const tcp_sock: *LeanUvTcpSocketObject = @ptrCast(@alignCast(handle.?.data));
-    std.c.free(tcp_sock.m_uv_tcp);
-    std.c.free(tcp_sock);
+    lean_alloc.vtable.free(@ptrCast(tcp_sock.m_uv_tcp), @sizeOf(uv.uv_tcp_t), @alignOf(uv.uv_tcp_t));
+    lean_alloc.leanFree(LeanUvTcpSocketObject, @ptrCast(tcp_sock), 1);
 }
 
 fn leanUvTcpSocketFinalizer(ptr: *anyopaque) callconv(.c) void {
@@ -170,7 +171,7 @@ fn leanUvTcpSocketNew(sock: *LeanUvTcpSocketObject) *anyopaque {
 fn leanUvTcpNewHelper() *anyopaque {
     ensureTcpExternalClass();
 
-    const tcp_socket: *LeanUvTcpSocketObject = @ptrCast(@alignCast(std.c.malloc(@sizeOf(LeanUvTcpSocketObject)) orelse {
+    const tcp_socket: *LeanUvTcpSocketObject = @ptrCast(@alignCast(lean_alloc.leanAlloc(LeanUvTcpSocketObject, 1) orelse {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
     tcp_socket.* = .{
@@ -182,8 +183,8 @@ fn leanUvTcpNewHelper() *anyopaque {
         .m_byte_array = null,
     };
 
-    const uv_tcp: *uv.uv_tcp_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_tcp_t)) orelse {
-        std.c.free(tcp_socket);
+    const uv_tcp: *uv.uv_tcp_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_tcp_t), @alignOf(uv.uv_tcp_t)) orelse {
+        lean_alloc.leanFree(LeanUvTcpSocketObject, @ptrCast(tcp_socket), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -193,9 +194,8 @@ fn leanUvTcpNewHelper() *anyopaque {
     uv_event_loop.lean_event_loop_unlock();
 
     if (init_result != 0) {
-        std.c.free(uv_tcp);
-        std.c.free(tcp_socket);
-        return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(init_result, null));
+        lean_alloc.vtable.free(@ptrCast(uv_tcp), @sizeOf(uv.uv_tcp_t), @alignOf(uv.uv_tcp_t));
+        lean_alloc.leanFree(LeanUvTcpSocketObject, @ptrCast(tcp_socket), 1);
     }
 
     tcp_socket.m_uv_tcp = uv_tcp;
@@ -212,8 +212,8 @@ fn tcpConnectCallback(req: [*c]uv.uv_connect_t, status: c_int) callconv(.c) void
     uv_event_loop.lean_zig_promise_resolve_with_code(status, tup.promise);
     rc.lean_dec(tup.socket);
     rc.lean_dec(tup.promise);
-    std.c.free(tup);
-    std.c.free(req);
+    lean_alloc.leanFree(TcpConnectData, @ptrCast(tup), 1);
+    lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_connect_t), @alignOf(uv.uv_connect_t));
 }
 
 fn leanUvTcpConnectHelper(socket: *anyopaque, addr: *anyopaque) *anyopaque {
@@ -222,11 +222,11 @@ fn leanUvTcpConnectHelper(socket: *anyopaque, addr: *anyopaque) *anyopaque {
     var addr_struct: uv.sockaddr_storage = std.mem.zeroes(uv.sockaddr_storage);
     net_addr.lean_zig_socket_address_to_sockaddr_storage(addr, @ptrCast(&addr_struct));
 
-    const uv_connect: [*c]uv.uv_connect_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_connect_t)) orelse {
+    const uv_connect: [*c]uv.uv_connect_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_connect_t), @alignOf(uv.uv_connect_t)) orelse {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
-    const connect_data: *TcpConnectData = @ptrCast(@alignCast(std.c.malloc(@sizeOf(TcpConnectData)) orelse {
-        std.c.free(uv_connect);
+    const connect_data: *TcpConnectData = @ptrCast(@alignCast(lean_alloc.leanAlloc(TcpConnectData, 1) orelse {
+        lean_alloc.vtable.free(@ptrCast(uv_connect), @sizeOf(uv.uv_connect_t), @alignOf(uv.uv_connect_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -247,8 +247,8 @@ fn leanUvTcpConnectHelper(socket: *anyopaque, addr: *anyopaque) *anyopaque {
         rc.lean_dec(promise);
         rc.lean_dec(promise);
         rc.lean_dec(socket);
-        std.c.free(connect_data);
-        std.c.free(uv_connect);
+        lean_alloc.leanFree(TcpConnectData, @ptrCast(connect_data), 1);
+        lean_alloc.vtable.free(@ptrCast(uv_connect), @sizeOf(uv.uv_connect_t), @alignOf(uv.uv_connect_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
     }
 
@@ -261,9 +261,9 @@ fn tcpWriteCallback(req: [*c]uv.uv_write_t, status: c_int) callconv(.c) void {
     rc.lean_dec(tup.promise);
     rc.lean_dec(tup.data);
     rc.lean_dec(tup.socket);
-    std.c.free(tup.bufs);
-    std.c.free(tup);
-    std.c.free(req);
+    lean_alloc.vtable.free(@ptrCast(tup.bufs), tup.buf_count * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+    lean_alloc.leanFree(TcpSendData, @ptrCast(tup), 1);
+    lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_write_t), @alignOf(uv.uv_write_t));
 }
 
 fn leanUvTcpSendHelper(socket: *anyopaque, data_array: *anyopaque) *anyopaque {
@@ -283,7 +283,7 @@ fn leanUvTcpSendHelper(socket: *anyopaque, data_array: *anyopaque) *anyopaque {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }
 
-    const bufs: [*]uv.uv_buf_t = @ptrCast(@alignCast(std.c.malloc(array_len * @sizeOf(uv.uv_buf_t)) orelse {
+    const bufs: [*]uv.uv_buf_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t)) orelse {
         rc.lean_dec(data_array);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
@@ -296,15 +296,15 @@ fn leanUvTcpSendHelper(socket: *anyopaque, data_array: *anyopaque) *anyopaque {
         bufs[i] = uv.uv_buf_init(@ptrCast(data_str), @intCast(data_len));
     }
 
-    const write_uv: [*c]uv.uv_write_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_write_t)) orelse {
+    const write_uv: [*c]uv.uv_write_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_write_t), @alignOf(uv.uv_write_t)) orelse {
         rc.lean_dec(data_array);
-        std.c.free(bufs);
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
-    const send_data: *TcpSendData = @ptrCast(@alignCast(std.c.malloc(@sizeOf(TcpSendData)) orelse {
+    const send_data: *TcpSendData = @ptrCast(@alignCast(lean_alloc.leanAlloc(TcpSendData, 1) orelse {
         rc.lean_dec(data_array);
-        std.c.free(bufs);
-        std.c.free(write_uv);
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+        lean_alloc.vtable.free(@ptrCast(write_uv), @sizeOf(uv.uv_write_t), @alignOf(uv.uv_write_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -316,6 +316,7 @@ fn leanUvTcpSendHelper(socket: *anyopaque, data_array: *anyopaque) *anyopaque {
         .data = data_array,
         .socket = socket,
         .bufs = bufs,
+        .buf_count = array_len,
     };
     write_uv.*.data = send_data;
 
@@ -331,10 +332,9 @@ fn leanUvTcpSendHelper(socket: *anyopaque, data_array: *anyopaque) *anyopaque {
         rc.lean_dec(promise);
         rc.lean_dec(socket);
         rc.lean_dec(data_array);
-        std.c.free(bufs);
-        std.c.free(send_data);
-        std.c.free(write_uv);
-        return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+        lean_alloc.leanFree(TcpSendData, @ptrCast(send_data), 1);
+        lean_alloc.vtable.free(@ptrCast(write_uv), @sizeOf(uv.uv_write_t), @alignOf(uv.uv_write_t));
     }
 
     return io_result.lean_io_result_mk_ok(promise);
@@ -698,7 +698,7 @@ fn tcpShutdownCallback(req: [*c]uv.uv_shutdown_t, status: c_int) callconv(.c) vo
     rc.lean_dec(tcp_socket.m_promise_shutdown.?);
     tcp_socket.m_promise_shutdown = null;
     rc.lean_dec(obj);
-    std.c.free(req);
+    lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_shutdown_t), @alignOf(uv.uv_shutdown_t));
 }
 
 fn leanUvTcpShutdownHelper(socket: *anyopaque) *anyopaque {
@@ -712,7 +712,7 @@ fn leanUvTcpShutdownHelper(socket: *anyopaque) *anyopaque {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(uv.UV_EALREADY, msg));
     }
 
-    const shutdown_req: [*c]uv.uv_shutdown_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_shutdown_t)) orelse {
+    const shutdown_req: [*c]uv.uv_shutdown_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_shutdown_t), @alignOf(uv.uv_shutdown_t)) orelse {
         uv_event_loop.lean_event_loop_unlock();
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
@@ -727,7 +727,7 @@ fn leanUvTcpShutdownHelper(socket: *anyopaque) *anyopaque {
     const result = uv.uv_shutdown(shutdown_req, @ptrCast(tcp_socket.m_uv_tcp), tcpShutdownCallback);
 
     if (result < 0) {
-        std.c.free(shutdown_req);
+        lean_alloc.vtable.free(@ptrCast(shutdown_req), @sizeOf(uv.uv_shutdown_t), @alignOf(uv.uv_shutdown_t));
         rc.lean_dec(tcp_socket.m_promise_shutdown.?);
         tcp_socket.m_promise_shutdown = null;
         uv_event_loop.lean_event_loop_unlock();

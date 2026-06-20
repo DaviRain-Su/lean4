@@ -17,6 +17,7 @@ const string = @import("string.zig");
 const uv_event_loop = @import("uv_event_loop.zig");
 const net_addr = @import("net_addr.zig");
 
+const lean_alloc = @import("lean_allocator");
 const uv = @cImport({
     @cInclude("uv.h");
     @cInclude("sys/socket.h");
@@ -87,7 +88,7 @@ fn getAddrInfoCallback(
     if (status != 0) {
         uv_event_loop.lean_zig_promise_resolve_with_code(status, promise);
         rc.lean_dec(promise);
-        std.c.free(req);
+        lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_getaddrinfo_t), @alignOf(uv.uv_getaddrinfo_t));
         return;
     }
 
@@ -118,7 +119,7 @@ fn getAddrInfoCallback(
 
     if (res != null) uv.uv_freeaddrinfo(res);
     rc.lean_dec(promise);
-    std.c.free(req);
+    lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_getaddrinfo_t), @alignOf(uv.uv_getaddrinfo_t));
 }
 
 fn getNameInfoCallback(
@@ -132,7 +133,7 @@ fn getNameInfoCallback(
     if (status != 0) {
         uv_event_loop.lean_zig_promise_resolve_with_code(status, promise);
         rc.lean_dec(promise);
-        std.c.free(req);
+        lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_getnameinfo_t), @alignOf(uv.uv_getnameinfo_t));
         return;
     }
 
@@ -143,7 +144,7 @@ fn getNameInfoCallback(
     const except_ok = mkExceptOk(r);
     lean_promise_resolve(except_ok, promise);
     rc.lean_dec(promise);
-    std.c.free(req);
+    lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_getnameinfo_t), @alignOf(uv.uv_getnameinfo_t));
 }
 
 pub export fn lean_uv_dns_get_info_helper(name: *anyopaque, service: *anyopaque, family: u8) callconv(.c) *anyopaque {
@@ -156,7 +157,7 @@ pub export fn lean_uv_dns_get_info_helper(name: *anyopaque, service: *anyopaque,
     if (!isSafeAsciiStr(service_cstr, leanStringPayloadLen(service))) {
         return io_result.lean_io_result_mk_error(mkInvalidAsciiError("service is not ASCII"));
     }
-    const resolver: [*c]uv.uv_getaddrinfo_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_getaddrinfo_t))));
+    const resolver: [*c]uv.uv_getaddrinfo_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_getaddrinfo_t), @alignOf(uv.uv_getaddrinfo_t))));
     if (resolver == null) {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }
@@ -183,7 +184,7 @@ pub export fn lean_uv_dns_get_info_helper(name: *anyopaque, service: *anyopaque,
     if (result != 0) {
         rc.lean_dec(promise);
         rc.lean_dec(promise);
-        std.c.free(resolver);
+        lean_alloc.vtable.free(@ptrCast(resolver), @sizeOf(uv.uv_getaddrinfo_t), @alignOf(uv.uv_getaddrinfo_t));
         uv_event_loop.lean_event_loop_unlock();
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
     }
@@ -193,7 +194,7 @@ pub export fn lean_uv_dns_get_info_helper(name: *anyopaque, service: *anyopaque,
 }
 
 pub export fn lean_uv_dns_get_name_helper(addr: *anyopaque) callconv(.c) *anyopaque {
-    const req: [*c]uv.uv_getnameinfo_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_getnameinfo_t))));
+    const req: [*c]uv.uv_getnameinfo_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_getnameinfo_t), @alignOf(uv.uv_getnameinfo_t))));
     if (req == null) {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }
@@ -220,7 +221,7 @@ pub export fn lean_uv_dns_get_name_helper(addr: *anyopaque) callconv(.c) *anyopa
     if (result != 0) {
         rc.lean_dec(promise);
         rc.lean_dec(promise);
-        std.c.free(req);
+        lean_alloc.vtable.free(@ptrCast(req), @sizeOf(uv.uv_getnameinfo_t), @alignOf(uv.uv_getnameinfo_t));
         uv_event_loop.lean_event_loop_unlock();
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
     }

@@ -14,6 +14,7 @@ const net_addr = @import("net_addr.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const uv_event_loop = @import("uv_event_loop.zig");
+const lean_alloc = @import("lean_allocator");
 
 const uv = @cImport({
     @cInclude("uv.h");
@@ -114,8 +115,8 @@ fn usizeMulWouldOverflow(a: usize, b: usize) bool {
 
 fn uvCloseUdpCallback(handle: ?*uv.uv_handle_t) callconv(.c) void {
     const udp_socket: *LeanUvUdpSocketObject = @ptrCast(@alignCast(handle.?.data));
-    std.c.free(udp_socket.m_uv_udp);
-    std.c.free(udp_socket);
+    lean_alloc.vtable.free(@ptrCast(udp_socket.m_uv_udp), @sizeOf(uv.uv_udp_t), @alignOf(uv.uv_udp_t));
+    lean_alloc.leanFree(LeanUvUdpSocketObject, @ptrCast(udp_socket), 1);
 }
 
 fn leanUvUdpSocketFinalizer(ptr: *anyopaque) callconv(.c) void {
@@ -169,13 +170,14 @@ fn udpSendCallback(req: ?*uv.uv_udp_send_t, status: c_int) callconv(.c) void {
     const tup: *UdpSendData = @ptrCast(@alignCast(send_req.data));
     uv_event_loop.lean_zig_promise_resolve_with_code(status, tup.promise);
 
+    const buf_count = array.lean_array_size(tup.data);
     rc.lean_dec(tup.promise);
     rc.lean_dec(tup.socket);
     rc.lean_dec(tup.data);
 
-    std.c.free(tup.bufs);
-    std.c.free(send_req.data);
-    std.c.free(send_req);
+    lean_alloc.vtable.free(@ptrCast(tup.bufs), buf_count * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+    lean_alloc.leanFree(UdpSendData, @ptrCast(@alignCast(send_req.data)), 1);
+    lean_alloc.vtable.free(@ptrCast(send_req), @sizeOf(uv.uv_udp_send_t), @alignOf(uv.uv_udp_send_t));
 }
 
 fn udpRecvAllocCallback(handle: [*c]uv.uv_handle_t, suggested_size: usize, buf: [*c]uv.uv_buf_t) callconv(.c) void {
@@ -268,7 +270,7 @@ fn udpWaitReadableRecvCallback(
 fn leanUvUdpNewHelper() *anyopaque {
     ensureUdpExternalClass();
 
-    const udp_socket: *LeanUvUdpSocketObject = @ptrCast(@alignCast(std.c.malloc(@sizeOf(LeanUvUdpSocketObject)) orelse {
+    const udp_socket: *LeanUvUdpSocketObject = @ptrCast(@alignCast(lean_alloc.leanAlloc(LeanUvUdpSocketObject, 1) orelse {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
     udp_socket.* = .{
@@ -277,8 +279,8 @@ fn leanUvUdpNewHelper() *anyopaque {
         .m_byte_array = null,
     };
 
-    const uv_udp: *uv.uv_udp_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_udp_t)) orelse {
-        std.c.free(udp_socket);
+    const uv_udp: *uv.uv_udp_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_udp_t), @alignOf(uv.uv_udp_t)) orelse {
+        lean_alloc.leanFree(LeanUvUdpSocketObject, @ptrCast(udp_socket), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -288,8 +290,8 @@ fn leanUvUdpNewHelper() *anyopaque {
     lean_event_loop_unlock();
 
     if (init_result != 0) {
-        std.c.free(uv_udp);
-        std.c.free(udp_socket);
+        lean_alloc.vtable.free(@ptrCast(uv_udp), @sizeOf(uv.uv_udp_t), @alignOf(uv.uv_udp_t));
+        lean_alloc.leanFree(LeanUvUdpSocketObject, @ptrCast(udp_socket), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(init_result, null));
     }
 
@@ -351,7 +353,7 @@ fn leanUvUdpSendHelper(socket: *anyopaque, data_array: *anyopaque, opt_addr: *an
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }
 
-    const bufs: [*]uv.uv_buf_t = @ptrCast(@alignCast(std.c.malloc(array_len * @sizeOf(uv.uv_buf_t)) orelse {
+    const bufs: [*]uv.uv_buf_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t)) orelse {
         rc.lean_dec(data_array);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
@@ -366,18 +368,18 @@ fn leanUvUdpSendHelper(socket: *anyopaque, data_array: *anyopaque, opt_addr: *an
     const promise = lean_promise_new();
     rc.lean_mark_mt(promise);
 
-    const send_uv: *uv.uv_udp_send_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_udp_send_t)) orelse {
+    const send_uv: *uv.uv_udp_send_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_udp_send_t), @alignOf(uv.uv_udp_send_t)) orelse {
         rc.lean_dec(data_array);
         rc.lean_dec(promise);
-        std.c.free(bufs);
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
-    const send_data: *UdpSendData = @ptrCast(@alignCast(std.c.malloc(@sizeOf(UdpSendData)) orelse {
+    const send_data: *UdpSendData = @ptrCast(@alignCast(lean_alloc.leanAlloc(UdpSendData, 1) orelse {
         rc.lean_dec(data_array);
         rc.lean_dec(promise);
-        std.c.free(bufs);
-        std.c.free(send_uv);
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+        lean_alloc.vtable.free(@ptrCast(send_uv), @sizeOf(uv.uv_udp_send_t), @alignOf(uv.uv_udp_send_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -395,14 +397,14 @@ fn leanUvUdpSendHelper(socket: *anyopaque, data_array: *anyopaque, opt_addr: *an
     var addr_ptr: ?*uv.sockaddr_storage = null;
     if (object.lean_ptr_tag(opt_addr) == 1) {
         const addr = ctor.lean_ctor_get(opt_addr, 0).?;
-        addr_ptr = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.sockaddr_storage)) orelse {
+        addr_ptr = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.sockaddr_storage), @alignOf(uv.sockaddr_storage)) orelse {
             rc.lean_dec(promise);
             rc.lean_dec(promise);
             rc.lean_dec(socket);
             rc.lean_dec(data_array);
-            std.c.free(bufs);
-            std.c.free(send_data);
-            std.c.free(send_uv);
+            lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+            lean_alloc.leanFree(UdpSendData, @ptrCast(send_data), 1);
+            lean_alloc.vtable.free(@ptrCast(send_uv), @sizeOf(uv.uv_udp_send_t), @alignOf(uv.uv_udp_send_t));
             return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
         }));
         addr_ptr.?.* = std.mem.zeroes(uv.sockaddr_storage);
@@ -421,7 +423,7 @@ fn leanUvUdpSendHelper(socket: *anyopaque, data_array: *anyopaque, opt_addr: *an
     lean_event_loop_unlock();
 
     if (addr_ptr) |ap| {
-        std.c.free(ap);
+        lean_alloc.vtable.free(@ptrCast(ap), @sizeOf(uv.sockaddr_storage), @alignOf(uv.sockaddr_storage));
     }
 
     if (result < 0) {
@@ -429,9 +431,9 @@ fn leanUvUdpSendHelper(socket: *anyopaque, data_array: *anyopaque, opt_addr: *an
         rc.lean_dec(promise);
         rc.lean_dec(socket);
         rc.lean_dec(data_array);
-        std.c.free(bufs);
-        std.c.free(send_data);
-        std.c.free(send_uv);
+        lean_alloc.vtable.free(@ptrCast(bufs), array_len * @sizeOf(uv.uv_buf_t), @alignOf(uv.uv_buf_t));
+        lean_alloc.leanFree(UdpSendData, @ptrCast(send_data), 1);
+        lean_alloc.vtable.free(@ptrCast(send_uv), @sizeOf(uv.uv_udp_send_t), @alignOf(uv.uv_udp_send_t));
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(result, null));
     }
 

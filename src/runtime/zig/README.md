@@ -42,14 +42,18 @@ ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/(zigrt|stdlib|zig-
 - All seven libuv subsystems are pure Zig (event loop, timer, DNS, signal,
   net_addr, TCP, UDP, system) — zero C++ compiled into the runtime
 - Stack overflow detection via SIGSEGV/SIGBUS alternate signal stack
+  (POSIX) or Vectored Exception Handling via `RtlAddVectoredExceptionHandler`
+  (Windows) — matching the C++ implementation.
 
 ### Windows
 
 - Memory RSS queries via `GetProcessMemoryInfo`
 - Stack info via `GetCurrentThreadStackLimits`
 - Sleep via `kernel32.Sleep`, debug break via `kernel32.DebugBreak`
-- Stack overflow detection is a no-op: Zig does not expose SEH frame
-  unwinding. Requires upstream Zig SEH support.
+- Stack overflow detection via Vectored Exception Handling (VEH) using
+  `RtlAddVectoredExceptionHandler` with `EXCEPTION_STACK_OVERFLOW` — the same
+  mechanism the C++ version uses (not SEH `__try/__except`). Zig 0.16.0
+  exposes all required VEH APIs via `std.os.windows.ntdll`.
 
 ### Kernel C-linkage exports
 
@@ -121,8 +125,9 @@ catch compiler bugs that violate the LCNF purity invariant.
    functions from libgmp (linked at final binary level, not in Zig library).
 6. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly.
    Functionally correct (default vtable is libc malloc) but architecturally
-   inconsistent with the pluggable allocator in `allocator.zig`.
-7. **Windows SEH**: stack overflow detection not available (upstream Zig).
+4. **Windows SEH**: resolved — VEH-based stack overflow detection implemented
+   in `stack_overflow.zig` using `RtlAddVectoredExceptionHandler` (no
+   upstream Zig changes needed).
 
 ### External dependencies
 
