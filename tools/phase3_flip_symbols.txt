@@ -196,3 +196,10 @@ lean_int_big_sub
 lean_int_big_mul
 lean_int_big_neg
 lean_int_big_div_exact
+lean_st_mk_ref
+lean_st_ref_get
+lean_st_ref_ptr_eq
+lean_st_ref_set
+lean_st_ref_swap
+lean_st_ref_take
+lean_mk_string
