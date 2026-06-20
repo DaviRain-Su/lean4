@@ -14,7 +14,6 @@ set(
   init_module.cpp
   io.cpp
   hash.cpp
-  byteslice.cpp
   platform.cpp
   alloc.cpp
   allocprof.cpp
@@ -35,7 +34,6 @@ set(
   uv/signal.cpp
   uv/zig_link_compat.cpp
   zig/uv_init.cpp
-  openssl.cpp
 )
 if(USE_MIMALLOC)
   list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)
