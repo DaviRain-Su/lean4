@@ -11,9 +11,7 @@ Author: Leonardo de Moura
 #include "runtime/io.h"
 #include "runtime/stack_overflow.h"
 #include "runtime/process.h"
-#include "runtime/mutex.h"
 #include "runtime/init_module.h"
-#include "runtime/libuv.h"
 
 namespace lean {
 extern "C" LEAN_EXPORT void lean_initialize_runtime_module() {
@@ -22,10 +20,8 @@ extern "C" LEAN_EXPORT void lean_initialize_runtime_module() {
     initialize_object();
     initialize_io();
     initialize_thread();
-    initialize_mutex();
     initialize_process();
     initialize_stack_overflow();
-    initialize_libuv();
 }
 void initialize_runtime_module() {
     lean_initialize_runtime_module();
@@ -33,7 +29,6 @@ void initialize_runtime_module() {
 void finalize_runtime_module() {
     finalize_stack_overflow();
     finalize_process();
-    finalize_mutex();
     finalize_thread();
     finalize_io();
     finalize_object();
