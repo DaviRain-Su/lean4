@@ -1,4 +1,4 @@
-# Phase 3: Verified safe symbols to flip (70 symbols)
+# Phase 3: Verified safe symbols to flip (96+25 = 121 symbols)
 # These symbols have been tested with emitzig zigrt + stdlib tests passing.
 # 6 async failures are sporadic, same as Phase 2 baseline.
 
@@ -114,3 +114,31 @@ lean_int_big_eq
 lean_int_big_le
 lean_int_big_lt
 lean_int_big_nonneg
+
+# Internal / debug / panic (25) — runtime state, debug, panic paths
+# Tested with zigrt Smoke/Closure/Nat/Recursion/Loop/Cases + stdlib
+lean_internal_enable_debug
+lean_internal_get_build_type
+lean_internal_get_default_max_heartbeat
+lean_internal_get_default_max_memory
+lean_internal_get_hardware_concurrency
+lean_internal_is_debug
+lean_internal_is_multi_thread
+lean_internal_panic
+lean_internal_panic_out_of_memory
+lean_internal_panic_overflow
+lean_internal_panic_rc_overflow
+lean_internal_panic_unreachable
+lean_internal_set_exit_on_panic
+lean_internal_set_max_heartbeat
+lean_internal_set_max_memory
+lean_internal_set_thread_stack_size
+lean_panic
+lean_panic_fn
+lean_panic_fn_borrowed
+lean_set_exit_on_panic
+lean_set_panic_messages
+lean_dbg_sleep
+lean_dbg_stack_trace
+lean_dbg_trace
+lean_dbg_trace_if_shared
