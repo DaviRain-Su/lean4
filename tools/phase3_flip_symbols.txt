@@ -1,6 +1,10 @@
-# Phase 3 Batch 1b: Verified safe symbols to flip (12 symbols)
+# Phase 3 Batch 1b: Verified safe symbols to flip (10 symbols)
 # These symbols have been tested with 2997/3003 elab tests passing
 # (6 async failures are sporadic, same as Phase 2 baseline).
+#
+# NOTE: lean_internal_is_debug and lean_internal_get_build_type are excluded
+# because the Zig helperless build uses Debug mode while the C++ build is
+# Release, causing mismatched return values.
 
 # Platform info
 lean_system_platform_emscripten
@@ -8,11 +12,9 @@ lean_system_platform_nbits
 lean_system_platform_osx
 lean_system_platform_windows
 
-# Internal info (read-only, compile-time constants)
-lean_internal_get_build_type
+# Internal info (read-only, compile-time constants that match C++)
 lean_internal_has_address_sanitizer
 lean_internal_has_llvm_backend
-lean_internal_is_debug
 
 # Pure computation / comparison
 lean_name_eq

@@ -74,6 +74,12 @@ if(ZIG)
 
   # Helperless build: omits stdlib-overlapping exports so it can be linked
   # into libleanshared alongside the Lean stdlib without duplicate symbols.
+  # NOTE: The Zig helperless build uses Debug mode by default. When the C++
+  # build is Release, lean_internal_is_debug/build_type return different
+  # values. For Phase 3, these symbols must NOT be flipped unless the Zig
+  # optimize mode matches the C++ build type. Currently kept as Debug because
+  # ReleaseFast has a bug causing async IO test failures.
+  set(LEAN_ZIG_HELPERLESS_OPTIMIZE "Debug")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zig-out-helperless")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libleanrt_zig.a")
   add_custom_command(
@@ -86,6 +92,7 @@ if(ZIG)
       -Dexport-lean-helpers=false
       -Dexport-allocator-symbols=false
       -Dexport-kernel-symbols=true
+      -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
     DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

@@ -186,8 +186,8 @@ if __name__ == "__main__":
 
     flip_syms = read_symbol_list(sym_file)
     if not flip_syms:
-        print("error: no symbols to flip", file=sys.stderr)
-        sys.exit(1)
+        print("No symbols to flip (Phase 2 baseline)")
+        sys.exit(0)
 
     print(f"Flipping {len(flip_syms)} symbols to Zig:")
 
