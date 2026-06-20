@@ -16,7 +16,6 @@ set(
   hash.cpp
   platform.cpp
   alloc.cpp
-  allocprof.cpp
   sharecommon.cpp
   stack_overflow.cpp
   process.cpp
