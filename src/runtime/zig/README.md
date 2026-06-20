@@ -104,11 +104,20 @@ catch compiler bugs that violate the LCNF purity invariant.
   C ABI, not callable from Lean code directly. The only unflipped lean_*
   symbol is lean_demangle_bt_line_cstr, which is @[export] from Lean source
   (not a C++ symbol) and is already covered by the Zig weak stub.
-3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
+3. **C++ file removal**: 19 of 37 C++ runtime source files have been removed
+   from the stage1 build. Removed files: byteslice.cpp, openssl.cpp,
+   allocprof.cpp, platform.cpp, process.cpp, mpn.cpp, mutex.cpp, libuv.cpp,
+   and all 10 uv/*.cpp + zig/uv_*.cpp files. Their lean_* C ABI exports are
+   all provided by Zig, and their C++ internal symbols are not needed by
+   libleancpp. Remaining 18 C++ files have real cross-file dependencies
+   (lean::throwable, lean::mpz, lean::stack_guard, etc.) used by libleancpp
+   directly — removing them requires Zig reimplementing the C++ class
+   hierarchy.
+4. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.
-4. **Windows SEH**: stack overflow detection not available (upstream Zig).
-5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
+5. **Windows SEH**: stack overflow detection not available (upstream Zig).
+6. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
 
 ### External dependencies
 
