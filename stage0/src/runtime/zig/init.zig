@@ -168,6 +168,26 @@ pub export fn lean_initialize_runtime_module() callconv(.c) void {
     initializeRuntimeSubsystems();
 }
 
+// C++ mangled shims: lean::initialize_runtime_module() and
+// lean::finalize_runtime_module() — called by libleancpp's
+// util/init_module.cpp. These replace init_module.cpp entirely.
+fn cpp_initialize_runtime_module() callconv(.c) void {
+    initializeRuntimeSubsystems();
+}
+
+fn cpp_finalize_runtime_module() callconv(.c) void {
+    // C++ finalize_runtime_module calls finalize_* for each subsystem.
+    // Zig runtime doesn't require explicit finalization (resources are
+    // cleaned up at process exit). This is a no-op shim.
+}
+
+comptime {
+    // Itanium C++ ABI: _ZN4lean25initialize_runtime_moduleEv
+    // Zig adds platform leading underscore (_ on macOS) → __ZN4lean...
+    @export(&cpp_initialize_runtime_module, .{ .name = "_ZN4lean25initialize_runtime_moduleEv", .linkage = .strong });
+    @export(&cpp_finalize_runtime_module, .{ .name = "_ZN4lean23finalize_runtime_moduleEv", .linkage = .strong });
+}
+
 pub export fn lean_initialize() callconv(.c) void {
     initializeRuntimeSubsystems();
     initializeThreadSubsystems();

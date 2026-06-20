@@ -102,12 +102,15 @@ catch compiler bugs that violate the LCNF purity invariant.
   C ABI, not callable from Lean code directly. The only unflipped lean_*
   symbol is lean_demangle_bt_line_cstr, which is @[export] from Lean source
   (not a C++ symbol) and is already covered by the Zig weak stub.
-3. **C++ file removal**: 19 of 37 C++ runtime source files removed from the
-   stage1 build (byteslice, openssl, allocprof, platform, process, mpn,
-   mutex, libuv, 10 uv/*.cpp + zig/uv_*.cpp). Remaining 18 files have real
-   cross-file dependencies (lean::throwable, lean::mpz, lean::stack_guard)
-   used by libleancpp directly — removing them requires Zig reimplementing
-   the C++ class hierarchy.
+3. **C++ file removal**: 23 of 37 C++ runtime source files removed from the
+   stage1 build. Removed: byteslice, openssl, allocprof, platform, process,
+   mpn, mutex, libuv, 10 uv/*.cpp + zig/uv_*.cpp, init_module, hash,
+   memory, stack_overflow. Zig provides C++ mangled shims via cpp_compat.zig
+   (lean::hash_str, lean::check_memory, lean::stack_guard ctor/dtor) and
+   init.zig (lean::initialize/finalize_runtime_module). Remaining 14 files
+   have deep C++ ABI dependencies (lean::throwable inherits std::exception,
+   lean::mpz uses GMP mpz_t, lean::object_compactor uses std::vector) —
+   removing them requires matching the Itanium C++ ABI layout in Zig.
 4. **Mimalloc eliminated**: mimalloc's static.c (~100KB, 323 symbols) removed
    from the build. mimalloc_compat.zig provides 5 mi_* C ABI shims
    (mi_malloc, mi_free, mi_free_size, mi_malloc_small, mi_new_n) backed by
