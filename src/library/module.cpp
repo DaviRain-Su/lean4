@@ -114,7 +114,12 @@ struct olean_header {
     // 1 byte of flags:
     // * bit 0: whether persisted bignums use GMP or Lean-native encoding
     // * bit 1-7: reserved
-    uint8_t flags = 0b1;
+    uint8_t flags =
+#ifdef LEAN_USE_GMP
+        0b1;
+#else
+        0b0;
+#endif
     // 33 bytes: Lean version string, padded with '\0' to the right
     // e.g. "4.12.0-nightly-2024-10-18". Other suffixes after the version
     // triple currently in use are `-rcN` for some `N` and `-pre` for any
