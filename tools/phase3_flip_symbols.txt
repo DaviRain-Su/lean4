@@ -1,4 +1,6 @@
-# Phase 3 Batch 2: Float symbols (after format fix)
+# Phase 3 Batch 2: Float + utf8 only
+
+# Platform info
 lean_system_platform_emscripten
 lean_system_platform_nbits
 lean_system_platform_osx
@@ -9,6 +11,8 @@ lean_name_eq
 lean_byteslice_beq
 lean_uint64_mix_hash
 lean_libuv_version
+
+# Float (18)
 lean_float_frexp
 lean_float_isfinite
 lean_float_isinf
@@ -27,3 +31,7 @@ lean_float32_to_bits
 lean_float32_to_string
 lean_float_once_cold
 lean_float32_once_cold
+
+# UTF8
+lean_utf8_n_strlen
+lean_utf8_strlen
