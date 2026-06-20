@@ -406,7 +406,6 @@ bool object_compactor::insert_promise(object * o) {
 }
 
 void object_compactor::insert_mpz(object * o) {
-#ifdef LEAN_USE_GMP
     size_t nlimbs = mpz_size(to_mpz(o)->m_value.m_val);
     size_t data_sz = lean_usize_mul_checked(sizeof(mp_limb_t), nlimbs);
     size_t sz = lean_usize_add_checked(sizeof(mpz_object), data_sz);
@@ -420,22 +419,6 @@ void object_compactor::insert_mpz(object * o) {
     m._mp_d = reinterpret_cast<mp_limb_t *>(reinterpret_cast<char *>(data) - reinterpret_cast<char *>(m_begin) + reinterpret_cast<ptrdiff_t>(m_base_addr));
     m._mp_alloc = nlimbs;
     save(o, (lean_object*)new_o);
-#else
-    size_t data_sz = lean_usize_mul_checked(sizeof(mpn_digit), to_mpz(o)->m_value.m_size);
-    size_t sz      = lean_usize_add_checked(sizeof(mpz_object), data_sz);
-    mpz_object * new_o = (mpz_object *)alloc(sz);
-    // Manually copy the `mpz_object` to ensure `mpz` struct padding is left as
-    // zero as prepared by `object_compactor::alloc`. `memcpy` would copy the
-    // padding and lead to non-deterministic outputs.
-    new_o->m_header = to_mpz(o)->m_header;
-    new_o->m_value.m_sign = to_mpz(o)->m_value.m_sign;
-    new_o->m_value.m_size = to_mpz(o)->m_value.m_size;
-    lean_set_non_heap_header((lean_object*)new_o, sz, LeanMPZ, 0);
-    void * data = reinterpret_cast<char*>(new_o) + sizeof(mpz_object);
-    memcpy(data, to_mpz(o)->m_value.m_digits, data_sz);
-    new_o->m_value.m_digits = reinterpret_cast<mpn_digit *>(reinterpret_cast<char *>(data) - reinterpret_cast<char *>(m_begin) + reinterpret_cast<ptrdiff_t>(m_base_addr));
-    save(o, (lean_object*)new_o);
-#endif
 }
 
 #ifdef LEAN_TAG_COUNTERS
@@ -641,14 +624,9 @@ inline void region_reader::fix_promise(object * o) {
 }
 
 void region_reader::fix_mpz(object * o) {
-#ifdef LEAN_USE_GMP
     __mpz_struct & m = to_mpz(o)->m_value.m_val[0];
     m._mp_d = reinterpret_cast<mp_limb_t *>(static_cast<char *>(m_begin) + reinterpret_cast<size_t>(m._mp_d) - reinterpret_cast<size_t>(m_base_addr));
     move(sizeof(mpz_object) + sizeof(mp_limb_t) * mpz_size(to_mpz(o)->m_value.m_val));
-#else
-    to_mpz(o)->m_value.m_digits = reinterpret_cast<mpn_digit*>(reinterpret_cast<char*>(o) + sizeof(mpz_object));
-    move(sizeof(mpz_object) + sizeof(mpn_digit) * to_mpz(o)->m_value.m_size);
-#endif
 }
 
 void region_reader::fix_closure(object * o) {

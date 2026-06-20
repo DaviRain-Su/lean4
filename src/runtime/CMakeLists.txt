@@ -14,6 +14,11 @@ set(
   alloc.cpp
   sharecommon.cpp
   object_ref.cpp
+  platform.cpp
+  process.cpp
+  byteslice.cpp
+  uv/net_addr.cpp
+  uv/zig_link_compat.cpp
 )
 
 add_library(leanrt_initial-exec STATIC ${RUNTIME_OBJS})
