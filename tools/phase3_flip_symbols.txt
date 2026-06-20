@@ -87,3 +87,30 @@ lean_copy_float_array
 lean_float_array_data
 lean_slice_dec_lt
 lean_slice_hash
+
+# Nat/int big arithmetic (23) — tested with zigrt Nat/Recursion + stdlib StdlibNatBig
+# Uses mpz_zig.zig (GMP wrapper), so arithmetic semantics match exactly.
+lean_nat_big_add
+lean_nat_big_sub
+lean_nat_big_mul
+lean_nat_big_div
+lean_nat_big_div_exact
+lean_nat_big_mod
+lean_nat_big_eq
+lean_nat_big_le
+lean_nat_big_lt
+lean_nat_big_succ
+lean_nat_big_land
+lean_nat_big_lor
+lean_nat_big_lxor
+lean_int_big_add
+lean_int_big_sub
+lean_int_big_mul
+lean_int_big_div
+lean_int_big_div_exact
+lean_int_big_mod
+lean_int_big_neg
+lean_int_big_eq
+lean_int_big_le
+lean_int_big_lt
+lean_int_big_nonneg
