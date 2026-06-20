@@ -78,8 +78,8 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 604 of ~1360 C++ runtime symbols have been flipped
-   to Zig (44%). Flipped groups: platform info (4), internal info (2), pure
+2. **Phase 3 symbol flip**: 614 of ~1360 C++ runtime symbols have been flipped
+   to Zig (45%). Flipped groups: platform info (4), internal info (2), pure
    computation (4), float (18), UTF8 (2), string operations (15),
    array/sarray/slice (25), nat/int big arithmetic (23 — previously 5 caused
    SIGSEGV/SIGBUS but the root cause was a lean_alloc_mpz signature mismatch,
@@ -89,19 +89,17 @@ catch compiler bugs that violate the LCNF purity invariant.
    (9), sharecommon (4), unsigned int fixed-width arithmetic (158), signed
    int fixed-width arithmetic (126), float→int conversions (10), uint
    log2/once_cold (10), bool→int (5), box/unbox (14), nat arithmetic (6),
-   int_big ediv/emod (2). All 171 emitzig tests pass with clean stdlib cache
-   build. Three allocator fixes were needed: (1) lean_alloc_mpz now delegates
-   to C++ lean_alloc_object when export_allocator_symbols is false (C++
-   lean_alloc_mpz has a different signature), (2) freeDelegatedCppObject
-   routes through C++ lean_free_object for mimalloc compatibility, (3)
-   allocSmallObject uses mi_malloc_small (not mi_malloc) and sets m_cs_sz to
-   the aligned allocation size in mimalloc mode, matching C++
-   lean_alloc_small_object. Additionally, setHeapHeader preserves m_cs_sz
-   in mimalloc mode (matching C++ lean_set_st_header), and ctorScalarBytes
-   subtracts the header+object_slots from m_cs_sz in mimalloc mode since
-   m_cs_sz stores the total allocation size (not scalar size). RC symbols
-   (lean_inc/dec/mark_mt/mark_persistent) were tested but caused test
-   failures due to RC semantics mismatches and remain in C++ for now.
+   int_big ediv/emod (2), RC operations (10: lean_inc/dec/n/mark_mt/
+   mark_persistent and their _ref variants), object size (2). All 171 emitzig
+   tests pass with clean stdlib cache build. Key fixes: (1) lean_alloc_mpz
+   delegates to C++ lean_alloc_object when export_allocator_symbols is false,
+   (2) freeDelegatedCppObject routes through C++ lean_free_object for mimalloc
+   compatibility, (3) allocSmallObject uses mi_malloc_small and sets m_cs_sz
+   in mimalloc mode, (4) setHeapHeader preserves m_cs_sz in mimalloc mode,
+   (5) ctorScalarBytes subtracts header from m_cs_sz, (6) task/promise
+   deactivation: lean_deactivate_task/lean_deactivate_promise are exported
+   from both C++ (strong) and Zig (weak) — C++ overrides in libleanshared,
+   Zig handles deactivation in zigrt mode where no C++ runtime is linked.
 3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
    (75 call sites). Functionally correct (default vtable is libc malloc) but
    architecturally inconsistent with the pluggable allocator in `allocator.zig`.
