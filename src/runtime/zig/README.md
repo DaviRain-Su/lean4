@@ -72,7 +72,9 @@ catch compiler bugs that violate the LCNF purity invariant.
 1. **Kernel cutover**: C++ still owns the kernel entrypoints used by
    `libleanshared`; the Zig kernel exports are gated behind
    `-Dexport-kernel-symbols=true`. The `instantiate_lparams` bridge in
-   `inductive.zig` is a placeholder (returns expr unchanged).
+   `runtime_helpers.zig` is now implemented (walks expr trees, replaces
+   level params in const/sort nodes). The `instantiateLparams` in
+   `inductive.zig` remains a placeholder for recursor reduction.
 2. **Allocator unification**: Zig internal functions use Zig's own allocator
    while C++ kernel/library code expects mimalloc. Until all Zig internal
    allocation goes through the external `lean_alloc_object`/`lean_free_object`,
