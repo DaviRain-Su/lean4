@@ -131,3 +131,4 @@ catch compiler bugs that violate the LCNF purity invariant.
 - **libuv**: async IO — called directly from Zig via `@cImport`, no C++ bridge
 - **libc/libc++**: standard C runtime
 - **mimalloc**: eliminated — replaced by libc malloc via mimalloc_compat.zig
+- **openssl**: eliminated — only used for version number (compile-time constant)
