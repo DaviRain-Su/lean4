@@ -11,7 +11,6 @@ set(
   memory.cpp
   stackinfo.cpp
   compact.cpp
-  init_module.cpp
   io.cpp
   hash.cpp
   alloc.cpp
