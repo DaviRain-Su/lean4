@@ -121,6 +121,7 @@ export fn lean_float_of_bits(u: u64) callconv(.c) f64 {
 }
 
 export fn lean_float_to_bits(d: f64) callconv(.c) u64 {
+    if (std.math.isNan(d)) return 0x7ff8000000000000;
     return @bitCast(d);
 }
 
@@ -129,6 +130,7 @@ export fn lean_float32_of_bits(u: u32) callconv(.c) f32 {
 }
 
 export fn lean_float32_to_bits(d: f32) callconv(.c) u32 {
+    if (std.math.isNan(d)) return 0x7fc00000;
     return @bitCast(d);
 }
 

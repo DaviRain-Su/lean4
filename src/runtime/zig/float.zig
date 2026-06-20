@@ -13,6 +13,9 @@ const string = @import("string.zig");
 const lean_fmt_allocator_state: u8 = 0;
 
 extern fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool;
+extern fn snprintf(buf: [*]u8, len: usize, fmt: [*:0]const u8, ...) callconv(.c) c_int;
+
+const c_snprintf = snprintf;
 
 const LeanFmtAllocator = struct {
     const vtable = std.mem.Allocator.VTable{
@@ -64,10 +67,13 @@ fn formatFloat(comptime T: type, value: T) *anyopaque {
     if (std.math.isNan(value)) {
         return string.mkAsciiStringBytes("NaN");
     }
-
-    const gpa = leanFmtAllocator();
-    const bytes = std.fmt.allocPrint(gpa, "{}", .{value}) catch @panic("out of memory");
-    defer gpa.free(bytes);
+    // Match C++ std::to_string which uses printf("%.6f") internally.
+    // Using C's snprintf ensures identical formatting for large numbers
+    // where Zig's {d:.6} format truncates the integer part differently.
+    var buf: [512]u8 = undefined;
+    const n = c_snprintf(&buf, buf.len, "%.6f", @as(f64, value));
+    if (n <= 0) @panic("snprintf failed");
+    const bytes = buf[0..@intCast(n)];
     return string.mkAsciiStringBytes(bytes);
 }
 
