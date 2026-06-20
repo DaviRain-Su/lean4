@@ -383,30 +383,6 @@ pub export fn lean_runtime_hold(_: *anyopaque) callconv(.c) *anyopaque {
     return object.lean_box(0).?;
 }
 
-pub export fn lean_internal_get_default_verbose(_: ?*anyopaque) callconv(.c) u8 {
-    return 0;
-}
-
-pub export fn lean_internal_get_default_options(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return object.lean_box(0).?;
-}
-
-
-pub export fn lean_get_leanc_extra_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_leanc_internal_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_linker_flags(_: u8) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_internal_linker_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
 
 pub export fn lean_expr_dbg_to_string(e: *anyopaque) callconv(.c) *anyopaque {
     var fbs = std.Io.Writer.Allocating.init(std.heap.page_allocator);
