@@ -53,10 +53,14 @@ ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/(zigrt|stdlib|zig-
 
 ### Kernel C-linkage exports
 
-`kernel.zig` contains experimental Zig implementations for C++-owned kernel
-entrypoints. They are not exported by default; pass `-Dexport-kernel-symbols=true`
-only for a pure-Zig kernel link that also provides the `lean_kernel_*_impl`
-type-checker bridge symbols.
+`kernel.zig` contains Zig implementations of all 22 C++-owned kernel
+C-linkage functions (expr_eq, for_each, replace, instantiate, abstract,
+level_eq, etc.). They are not exported by default; pass
+`-Dexport-kernel-symbols=true` for a pure-Zig kernel link that also
+provides the `lean_kernel_*_impl` type-checker bridge symbols.
+`ir_interpreter.zig` exports `lean_eval_main`, `lean_eval_const`, and
+`lean_run_init` — all three IR interpreter entry points are now
+Zig-implemented.
 
 ### EmitZig code generator
 
