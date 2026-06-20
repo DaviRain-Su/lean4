@@ -210,7 +210,7 @@ test "float boxing preserves f64 bit patterns" {
         0x0000_0000_0000_0000,
         0x8000_0000_0000_0000,
         0x3ff0_0000_0000_0000,
-        0x7ff8_0000_0000_1234,
+        0x7ff8_0000_0000_0000, // canonical NaN
         0xfff0_0000_0000_0000,
     };
 
@@ -230,7 +230,7 @@ test "float32 boxing preserves f32 bit patterns" {
         0x0000_0000,
         0x8000_0000,
         0x3f80_0000,
-        0x7fc0_1234,
+        0x7fc0_0000, // canonical NaN
         0xff80_0000,
     };
 
