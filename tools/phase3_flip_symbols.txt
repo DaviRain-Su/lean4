@@ -1,6 +1,12 @@
-# Phase 3: Verified safe symbols to flip (121+18 = 139 symbols)
-# These symbols have been tested with emitzig zigrt + stdlib tests passing.
-# 6 async failures are sporadic, same as Phase 2 baseline.
+# Phase 3: Verified safe symbols to flip (134 symbols)
+# Tested with emitzig zigrt (clean stdlib cache) + all 15 core tests passing.
+# 5 int_big symbols REMOVED: lean_int_big_add, lean_int_big_sub, lean_int_big_mul,
+#   lean_int_big_neg, lean_int_big_div_exact — these cause SIGSEGV/SIGBUS in the
+#   lean compiler when generating Zig code for certain stdlib modules
+#   (Init.Data.SInt.Lemmas, Init.Data.UInt.Bitwise, Init.Data.String.Decode,
+#   Init.Data.OfScientific, Init.Data.Char.Ordinal). Root cause: bug in the
+#   Zig runtime's int_big implementations (subViaZig, addViaZig, mulViaZig,
+#   negViaZig, divExactViaZig).
 
 # Platform info (4)
 lean_system_platform_emscripten
@@ -103,13 +109,8 @@ lean_nat_big_succ
 lean_nat_big_land
 lean_nat_big_lor
 lean_nat_big_lxor
-lean_int_big_add
-lean_int_big_sub
-lean_int_big_mul
 lean_int_big_div
-lean_int_big_div_exact
 lean_int_big_mod
-lean_int_big_neg
 lean_int_big_eq
 lean_int_big_le
 lean_int_big_lt
