@@ -1,12 +1,10 @@
-# Phase 3: Verified safe symbols to flip (134 symbols)
+# Phase 3: Verified safe symbols to flip (168 symbols)
 # Tested with emitzig zigrt (clean stdlib cache) + all 15 core tests passing.
-# 5 int_big symbols REMOVED: lean_int_big_add, lean_int_big_sub, lean_int_big_mul,
-#   lean_int_big_neg, lean_int_big_div_exact — these cause SIGSEGV/SIGBUS in the
-#   lean compiler when generating Zig code for certain stdlib modules
-#   (Init.Data.SInt.Lemmas, Init.Data.UInt.Bitwise, Init.Data.String.Decode,
-#   Init.Data.OfScientific, Init.Data.Char.Ordinal). Root cause: bug in the
-#   Zig runtime's int_big implementations (subViaZig, addViaZig, mulViaZig,
-#   negViaZig, divExactViaZig).
+# The 5 int_big symbols (add/sub/mul/neg/div_exact) were previously removed
+# due to SIGSEGV/SIGBUS crashes. The root cause was a signature mismatch in
+# lean_alloc_mpz (C++ takes mpz_t v, Zig takes no args). Fixed by delegating
+# to C++ lean_alloc_object when export_allocator_symbols is false. All 5
+# int_big symbols now work correctly.
 
 # Platform info (4)
 lean_system_platform_emscripten
@@ -193,3 +191,8 @@ lean_uint32_of_big_nat
 lean_uint64_of_big_nat
 lean_usize_of_big_nat
 lean_array_mk
+lean_int_big_add
+lean_int_big_sub
+lean_int_big_mul
+lean_int_big_neg
+lean_int_big_div_exact
