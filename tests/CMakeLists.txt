@@ -415,6 +415,9 @@ if(LEAN_ZIG_RUNTIME)
     StdlibTreeSet.lean
     StdlibUInt.lean
     StdlibVector.lean
+    ReuseClosedTerm.lean
+    UvAlive.lean
+    UvTimer.lean
   )
   # Pre-warm: build the largest stdlib closure into the shared cache so all
   # subsequent tests find their .o files cached. This fixture runs once;

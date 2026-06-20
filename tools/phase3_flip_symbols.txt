@@ -1,6 +1,6 @@
-# Phase 3 Batch 2: Float + utf8 only
+# Phase 3 Batch 4: nat/int math symbols (no mpz allocation, pure arithmetic on existing objects)
 
-# Platform info
+# Previous batches (30 symbols): platform/internal/float/utf8
 lean_system_platform_emscripten
 lean_system_platform_nbits
 lean_system_platform_osx
@@ -11,8 +11,6 @@ lean_name_eq
 lean_byteslice_beq
 lean_uint64_mix_hash
 lean_libuv_version
-
-# Float (18)
 lean_float_frexp
 lean_float_isfinite
 lean_float_isinf
@@ -31,7 +29,53 @@ lean_float32_to_bits
 lean_float32_to_string
 lean_float_once_cold
 lean_float32_once_cold
-
-# UTF8
 lean_utf8_n_strlen
 lean_utf8_strlen
+
+# Nat/int arithmetic (operates on existing mpz objects, no allocation)
+lean_nat_big_add
+lean_nat_big_sub
+lean_nat_big_mul
+lean_nat_big_div
+lean_nat_big_div_exact
+lean_nat_big_mod
+lean_nat_big_eq
+lean_nat_big_le
+lean_nat_big_lt
+lean_nat_big_land
+lean_nat_big_lor
+lean_nat_big_xor
+lean_nat_big_shiftr
+lean_nat_big_succ
+lean_int_big_add
+lean_int_big_sub
+lean_int_big_mul
+lean_int_big_div
+lean_int_big_div_exact
+lean_int_big_mod
+lean_int_big_eq
+lean_int_big_le
+lean_int_big_lt
+lean_int_big_neg
+lean_int_big_ediv
+lean_int_big_emod
+lean_int_big_nonneg
+
+# Nat helpers
+lean_nat_gcd
+lean_nat_log2
+lean_nat_pow
+lean_nat_shiftl
+lean_nat_overflow_mul
+
+# Uint conversions
+lean_uint8_of_big_nat
+lean_uint16_of_big_nat
+lean_uint32_of_big_nat
+lean_uint64_of_big_nat
+lean_usize_of_big_nat
+lean_uint8_once_cold
+lean_uint16_once_cold
+lean_uint32_once_cold
+lean_uint64_once_cold
+lean_usize_once_cold
