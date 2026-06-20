@@ -10,12 +10,10 @@ set(
   interrupt.cpp
   stackinfo.cpp
   compact.cpp
-  io.cpp
   alloc.cpp
   sharecommon.cpp
   object_ref.cpp
-  platform.cpp
-  process.cpp
+  githash.cpp
   byteslice.cpp
   uv/net_addr.cpp
   uv/zig_link_compat.cpp
@@ -29,7 +27,7 @@ set_target_properties(leanrt_initial-exec PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${
 # that duplicate C++ definitions.  Zig-only symbols stay strong and fill gaps.
 # The weakening happens in src/runtime/zig/CMakeLists.txt after the Zig
 # helperless archive is built, using weaken_zig_symbols.py.
-option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 
 # The above library, like all other C++ code, is built using `-ftls-model=initial-exec`, which is necessary for linking it into `leanshared`,
 # but introduces a measurable overhead while accessing the thread-local variable `g_heap` when allocating and deallocating. Therefore we compile

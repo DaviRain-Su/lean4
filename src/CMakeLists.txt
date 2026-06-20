@@ -117,7 +117,7 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # is linked into leanshared alongside the C++ runtime.  C++ symbols stay strong;
 # Zig symbols that duplicate C++ are weakened (via weaken_zig_symbols.py) so only
 # Zig-only symbols fill gaps in the C++ runtime.
-option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")

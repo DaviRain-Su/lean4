@@ -25,6 +25,7 @@ const interrupt = @import("interrupt.zig");
 const ea = @import("expr_accessors.zig");
 const ka = @import("kernel_accessors.zig");
 const kernel = @import("kernel.zig");
+const equiv_manager = @import("equiv_manager.zig");
 
 const runtime_options = @import("runtime_options");
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
@@ -256,8 +257,7 @@ const State = struct {
     infer_type_cache: std.AutoHashMap(*anyopaque, *anyopaque),
     infer_type_only_cache: std.AutoHashMap(*anyopaque, *anyopaque),
     unfold_cache: std.AutoHashMap(*anyopaque, *anyopaque),
-    equiv_set: std.AutoHashMap(*anyopaque, void), // simplified equiv tracking
-    failure_set: std.AutoHashMap(*anyopaque, void), // pair tracking simplified
+    equiv: equiv_manager.EquivManager,
     allocator: std.mem.Allocator,
 };
 
@@ -796,6 +796,7 @@ const TypeChecker = struct {
 
         const r = self.quickIsDefEq(t, s);
         if (r != .lundef) return lboolToBool(r);
+        if (self.st.equiv.isEquiv(t, s, false)) return true;
 
         // whnf_core without delta/proj reduction
         const t_n = self.whnfCore(t, false, true);
@@ -900,8 +901,7 @@ fn leanKernelWhnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c)
         .infer_type_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .infer_type_only_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .unfold_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
-        .equiv_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
-        .failure_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
+        .equiv = equiv_manager.EquivManager.init(page_alloc),
         .allocator = page_alloc,
     };
     defer {
@@ -910,8 +910,7 @@ fn leanKernelWhnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c)
         st.infer_type_cache.deinit();
         st.infer_type_only_cache.deinit();
         st.unfold_cache.deinit();
-        st.equiv_set.deinit();
-        st.failure_set.deinit();
+        st.equiv.deinit();
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;
@@ -929,8 +928,7 @@ fn leanKernelIsDefEq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyop
         .infer_type_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .infer_type_only_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .unfold_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
-        .equiv_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
-        .failure_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
+        .equiv = equiv_manager.EquivManager.init(page_alloc),
         .allocator = page_alloc,
     };
     defer {
@@ -939,8 +937,7 @@ fn leanKernelIsDefEq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyop
         st.infer_type_cache.deinit();
         st.infer_type_only_cache.deinit();
         st.unfold_cache.deinit();
-        st.equiv_set.deinit();
-        st.failure_set.deinit();
+        st.equiv.deinit();
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;
@@ -958,8 +955,7 @@ fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c
         .infer_type_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .infer_type_only_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
         .unfold_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
-        .equiv_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
-        .failure_set = std.AutoHashMap(*anyopaque, void).init(page_alloc),
+        .equiv = equiv_manager.EquivManager.init(page_alloc),
         .allocator = page_alloc,
     };
     defer {
@@ -968,8 +964,7 @@ fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c
         st.infer_type_cache.deinit();
         st.infer_type_only_cache.deinit();
         st.unfold_cache.deinit();
-        st.equiv_set.deinit();
-        st.failure_set.deinit();
+        st.equiv.deinit();
     }
     var tc = TypeChecker.init(env, lctx, page_alloc);
     tc.st = &st;

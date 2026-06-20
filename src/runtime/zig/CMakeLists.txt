@@ -57,6 +57,9 @@ if(ZIG)
     "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
     "-Dcpp-build-type=${CMAKE_BUILD_TYPE}"
   )
+  if(LEAN_ZIG_RT_CUTOVER)
+    list(APPEND LEAN_ZIG_RUNTIME_BUILD_OPTIONS "-Dexport-kernel-symbols=true")
+  endif()
 
   add_custom_command(
     OUTPUT "${LEAN_ZIG_RUNTIME_LIB}"
