@@ -1,4 +1,4 @@
-# Phase 3: Verified safe symbols to flip (96+25 = 121 symbols)
+# Phase 3: Verified safe symbols to flip (121+18 = 139 symbols)
 # These symbols have been tested with emitzig zigrt + stdlib tests passing.
 # 6 async failures are sporadic, same as Phase 2 baseline.
 
@@ -142,3 +142,24 @@ lean_dbg_sleep
 lean_dbg_stack_trace
 lean_dbg_trace
 lean_dbg_trace_if_shared
+
+# Function application primitives (18) — lean_apply_1..16, lean_apply_m, lean_apply_n
+# Core hot-path call convention. Tested with zigrt Closure/Cases + stdlib
+lean_apply_1
+lean_apply_2
+lean_apply_3
+lean_apply_4
+lean_apply_5
+lean_apply_6
+lean_apply_7
+lean_apply_8
+lean_apply_9
+lean_apply_10
+lean_apply_11
+lean_apply_12
+lean_apply_13
+lean_apply_14
+lean_apply_15
+lean_apply_16
+lean_apply_m
+lean_apply_n
