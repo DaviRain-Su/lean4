@@ -75,16 +75,21 @@ catch compiler bugs that violate the LCNF purity invariant.
 
 1. **Kernel cutover**: C++ still owns the kernel entrypoints used by
    `libleanshared`; the Zig kernel exports are gated behind
-   `-Dexport-kernel-symbols=true`. The `instantiate_lparams` bridge in
-   `runtime_helpers.zig` and the `instantiateLparams` in `inductive.zig`
-   (used by recursor reduction) are both now implemented — they walk expr
-   trees and replace level params in const/sort nodes.
-2. **Allocator unification**: Zig internal functions use Zig's own allocator
-   while C++ kernel/library code expects mimalloc. Until all Zig internal
-   allocation goes through the external `lean_alloc_object`/`lean_free_object`,
-   linking both runtimes causes crashes.
-3. **Windows SEH**: stack overflow detection not available (upstream Zig).
-4. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
+   `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
+   3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
+   `lean_run_init`) have Zig implementations.
+2. **Phase 3 symbol flip**: 96 of ~436 C++ runtime symbols have been flipped
+   to Zig (22%). Flipped groups: platform info (4), internal info (2), pure
+   computation (4), float (18), UTF8 (2), string operations (15),
+   array/sarray/slice (25), nat/int big arithmetic (23). All pass zigrt +
+   stdlib tests. Prior concerns about string/array "ABI incompatibility" and
+   nat/int "GMP semantic gap" were unfounded — the Zig layouts match C++
+   exactly and nat/int arithmetic uses GMP via `mpz_zig.zig`.
+3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
+   (75 call sites). Functionally correct (default vtable is libc malloc) but
+   architecturally inconsistent with the pluggable allocator in `allocator.zig`.
+4. **Windows SEH**: stack overflow detection not available (upstream Zig).
+5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
 
 ### External dependencies
 
