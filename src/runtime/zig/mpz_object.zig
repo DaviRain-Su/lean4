@@ -27,7 +27,25 @@ pub fn mpzValue(o: *anyopaque) *mpz_zig.Mpz {
     return @ptrCast(@alignCast(&asMpzObject(o).m_value));
 }
 
+const external_allocator_fns = struct {
+    extern fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque;
+    extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
+};
+
 pub fn lean_alloc_mpz() callconv(.c) *anyopaque {
+    if (!export_allocator_symbols) {
+        // C++ lean_alloc_mpz has a different signature (takes mpz_t v).
+        // Allocate via lean_alloc_object and initialize the header ourselves.
+        // The C++ lean_free_object will handle freeing via mimalloc.
+        const obj: *lean.MpzObject = @ptrCast(@alignCast(external_allocator_fns.lean_alloc_object(@sizeOf(lean.MpzObject))));
+        initMpzHeader(obj);
+        mpzValue(obj).* = mpz_zig.Mpz.init(std.heap.c_allocator) catch {
+            external_allocator_fns.lean_free_object(obj);
+            @panic("lean_alloc_mpz: alloc");
+        };
+        return obj;
+    }
+
     const obj: *lean.MpzObject = @ptrCast(@alignCast(alloc.allocTrackedPayload(@sizeOf(lean.MpzObject), alloc.allocation_kind_mpz)));
     initMpzHeader(obj);
     mpzValue(obj).* = mpz_zig.Mpz.init(std.heap.c_allocator) catch {

@@ -242,10 +242,10 @@ fn freeLegacyRaw(ptr: *anyopaque) void {
 
 fn freeDelegatedCppObject(ptr: *anyopaque) void {
     // Objects reaching this path were allocated by the legacy C++ runtime
-    // (e.g., MPZ values produced by GMP callbacks). Until the Zig runtime
-    // owns those allocations end-to-end, route them through the same libc
-    // free path used for legacy small objects.
-    freeLegacySmall(ptr);
+    // (mimalloc). They must be freed through the C++ lean_free_object,
+    // not the Zig allocator (std.c.free), or mimalloc's internal state
+    // will be corrupted.
+    external_allocator.lean_free_object(ptr);
 }
 
 pub fn resetTestCounters() void {
