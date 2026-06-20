@@ -166,6 +166,12 @@ pub inline fn hasExprMVar(e: *anyopaque) bool {
 pub inline fn hasFVar(e: *anyopaque) bool {
     return ((dataField(e) >> 40) & 1) == 1;
 }
+pub inline fn hasLevelMVar(e: *anyopaque) bool {
+    return ((dataField(e) >> 42) & 1) == 1;
+}
+pub inline fn hasLevelParam(e: *anyopaque) bool {
+    return ((dataField(e) >> 43) & 1) == 1;
+}
 
 // ── App spine helpers ────────────────────────────────────────────────────────
 

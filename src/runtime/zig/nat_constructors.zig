@@ -51,12 +51,46 @@ fn allocNatFromZig(value: anytype) ?*anyopaque {
     };
     return foldNatObject(obj);
 }
+fn allocNatFromMpz(value: *const mpz_zig.Mpz) ?*anyopaque {
+    if (value.fitsUint()) {
+        const u = value.getUint() catch unreachable;
+        if (u <= max_small_nat) return object.lean_box(@intCast(u));
+    }
+    const text = value.toString(std.heap.c_allocator, 10) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    defer std.heap.c_allocator.free(text);
+    const ztext = std.heap.c_allocator.dupeZ(u8, text) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    defer std.heap.c_allocator.free(ztext);
+    return lean_cstr_to_nat(ztext);
+}
 
-pub export fn lean_nat_overflow_mul(_a1: usize, _a2: usize) callconv(.c) ?*anyopaque {
-    _ = _a1;
-    _ = _a2;
-    io_min.lean_internal_panic(overflow_message);
-    unreachable;
+pub export fn lean_nat_overflow_mul(a1: usize, a2: usize) callconv(.c) ?*anyopaque {
+    // C++ computes mpz::of_size_t(a1) * mpz::of_size_t(a2) and returns bignum.
+    var lhs = mpz_zig.Mpz.initSet(std.heap.c_allocator, @as(u64, a1)) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    defer lhs.deinit();
+    var rhs = mpz_zig.Mpz.initSet(std.heap.c_allocator, @as(u64, a2)) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    defer rhs.deinit();
+    var result = mpz_zig.Mpz.init(std.heap.c_allocator) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    defer result.deinit();
+    result.mul(&lhs, &rhs) catch {
+        io_min.lean_internal_panic(overflow_message);
+        unreachable;
+    };
+    return allocNatFromMpz(&result);
 }
 
 pub export fn lean_cstr_to_nat(n: [*:0]const u8) callconv(.c) ?*anyopaque {

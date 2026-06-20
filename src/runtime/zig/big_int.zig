@@ -20,8 +20,33 @@ const BigInt = std.math.big.int;
 const lean_alloc = @import("lean_allocator");
 
 /// Allocator used for all big-integer limb allocations.
-/// Routes through the pluggable allocator interface (allocator.zig)
-/// so limbs are allocated by the same backend as all other runtime memory.
+/// When linked with GMP (USE_GMP), limbs MUST be allocated via GMP's
+/// allocator so that C++ code can free/realloc them with GMP functions.
+/// When not using GMP, we use the pluggable allocator interface.
+const builtin = @import("builtin");
+
+extern fn __gmp_default_allocate(size: usize) callconv(.c) ?*anyopaque;
+extern fn __gmp_default_reallocate(ptr: ?*anyopaque, old_size: usize, new_size: usize) callconv(.c) ?*anyopaque;
+extern fn __gmp_default_free(ptr: ?*anyopaque, size: usize) callconv(.c) void;
+
+/// GMP-compatible limb allocator. Uses GMP's default allocator so that
+/// mpz objects created by Zig can be freed/realloced by C++ GMP code.
+const gmp_limb_allocator = struct {
+    fn alloc(comptime T: type, n: usize) []T {
+        const ptr = __gmp_default_allocate(n * @sizeOf(T));
+        return @as([*]T, @ptrCast(@alignCast(ptr.?)))[0..n];
+    }
+    fn realloc(comptime T: type, old: []T, new_n: usize) []T {
+        const ptr = __gmp_default_reallocate(@ptrCast(old.ptr), old.len * @sizeOf(T), new_n * @sizeOf(T));
+        return @as([*]T, @ptrCast(@alignCast(ptr.?)))[0..new_n];
+    }
+    fn free(comptime T: type, buf: []T) void {
+        __gmp_default_free(@ptrCast(buf.ptr), buf.len * @sizeOf(T));
+    }
+};
+
+/// Allocator for internal BigInt.Managed temporary calculations.
+/// These are NOT stored in the mpz object, so any allocator works.
 const bigint_allocator = lean_alloc.lean_allocator;
 
 /// Limb type matching GMP's `mp_limb_t` on 64-bit platforms.
@@ -41,7 +66,7 @@ pub const Mpz = extern struct {
 
     pub fn deinit(self: *Mpz) void {
         if (self._mp_d != null and self._mp_alloc > 0) {
-            bigint_allocator.free(self._mp_d[0..@intCast(self._mp_alloc)]);
+            gmp_limb_allocator.free(Limb, self._mp_d[0..@intCast(self._mp_alloc)]);
             self._mp_d = null;
             self._mp_alloc = 0;
             self._mp_size = 0;
@@ -76,7 +101,7 @@ pub const Mpz = extern struct {
             ._mp_d = null,
         };
         if (value == 0) return self;
-        const limbs = bigint_allocator.alloc(Limb, 1) catch return error.OutOfMemory;
+        const limbs = gmp_limb_allocator.alloc(Limb, 1);
         limbs[0] = value;
         self._mp_d = limbs.ptr;
         self._mp_alloc = 1;
@@ -509,11 +534,11 @@ fn ensureCapacity(self: *Mpz, needed: usize) error{OutOfMemory}!void {
     if (current >= needed) return;
     const new_cap = if (needed > 0) @max(needed, current * 2) else 1;
     if (self._mp_d == null or self._mp_alloc == 0) {
-        const new_buf = bigint_allocator.alloc(Limb, new_cap) catch return error.OutOfMemory;
+        const new_buf = gmp_limb_allocator.alloc(Limb, new_cap);
         self._mp_d = new_buf.ptr;
     } else {
         const old_buf = self._mp_d[0..current];
-        const new_buf = bigint_allocator.realloc(old_buf, new_cap) catch return error.OutOfMemory;
+        const new_buf = gmp_limb_allocator.realloc(Limb, old_buf, new_cap);
         self._mp_d = new_buf.ptr;
     }
     self._mp_alloc = @intCast(new_cap);
