@@ -77,11 +77,14 @@ pub fn markEndInitialization() void {
 
 pub fn initializeRuntimeSubsystems() void {
     if (g_runtime_initialized) return;
-    if (export_allocator_symbols) {
-        alloc.initializeRuntimeAllocator();
-        initializeRcSubsystem();
-        io_errno.initializeDecodeCache();
-    }
+    // Always initialize Zig subsystems — even when export_allocator_symbols
+    // is false (libleanshared mode), the Zig runtime provides all lean_*
+    // C ABI symbols after flipping. C++ initialization functions are no
+    // longer called (init_module.cpp's lean_initialize_runtime_module is
+    // flipped to this Zig version).
+    alloc.initializeRuntimeAllocator();
+    initializeRcSubsystem();
+    io_errno.initializeDecodeCache();
     initializeLibuv();
     stack_overflow.lean_initialize_stack_overflow();
     stackinfo.saveStackInfo(true);
