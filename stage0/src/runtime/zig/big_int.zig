@@ -20,22 +20,28 @@ const BigInt = std.math.big.int;
 const lean_alloc = @import("lean_allocator");
 
 /// Allocator used for all big-integer limb allocations.
-/// GMP's default allocator is libc malloc. We use std.c.malloc directly
-/// since nobody calls gmp_set_alloc_functions to customize it.
-/// This removes the link-time dependency on __gmp_default_* symbols.
+/// When linked with GMP (USE_GMP), limbs MUST be allocated via GMP's
+/// allocator so that C++ code can free/realloc them with GMP functions.
+/// When not using GMP, we use the pluggable allocator interface.
 const builtin = @import("builtin");
 
+extern fn __gmp_default_allocate(size: usize) callconv(.c) ?*anyopaque;
+extern fn __gmp_default_reallocate(ptr: ?*anyopaque, old_size: usize, new_size: usize) callconv(.c) ?*anyopaque;
+extern fn __gmp_default_free(ptr: ?*anyopaque, size: usize) callconv(.c) void;
+
+/// GMP-compatible limb allocator. Uses GMP's default allocator so that
+/// mpz objects created by Zig can be freed/realloced by C++ GMP code.
 const gmp_limb_allocator = struct {
     fn alloc(comptime T: type, n: usize) []T {
-        const ptr = std.c.malloc(n * @sizeOf(T));
+        const ptr = __gmp_default_allocate(n * @sizeOf(T));
         return @as([*]T, @ptrCast(@alignCast(ptr.?)))[0..n];
     }
     fn realloc(comptime T: type, old: []T, new_n: usize) []T {
-        const ptr = std.c.realloc(@ptrCast(old.ptr), new_n * @sizeOf(T));
+        const ptr = __gmp_default_reallocate(@ptrCast(old.ptr), old.len * @sizeOf(T), new_n * @sizeOf(T));
         return @as([*]T, @ptrCast(@alignCast(ptr.?)))[0..new_n];
     }
     fn free(comptime T: type, buf: []T) void {
-        std.c.free(@ptrCast(buf.ptr));
+        __gmp_default_free(@ptrCast(buf.ptr), buf.len * @sizeOf(T));
     }
 };
 

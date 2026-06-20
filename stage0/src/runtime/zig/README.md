@@ -78,57 +78,38 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 1028 of ~1360 C++ runtime symbols have been flipped
-  to Zig (76%). All 106 non-stdlib emitzig tests and 21/21 zigrt tests pass.
-  All lean_* C ABI symbols exported from the C++ runtime are now provided by
-  Zig. Key fixes: (1) lean_alloc_mpz and lean_extract_mpz_value — C++ GMP-
-  signature versions marked weak, Zig versions always exported (EmitZig
-  codegen uses the Zig signature); lean_gmp.h is never included by any file,
-  and C++ code uses internal alloc_mpz() instead, (2) lean_alloc_object and
-  mimalloc behavior) instead of recursing through external_allocator;
-  alloc.zig now calls libc malloc/free directly (mimalloc removed).
-  (3) lean_demangle_bt_line_cstr — Zig weak stub in debug.zig, overridden
-  by Lean's @[export] in libleanshared mode, provides empty-string
-  fallback in zigrt mode, (4) lean_inc_heartbeat independently exported
-  (not gated by export_allocator_symbols), (5) 36 UV helper symbols
-  exported as aliases from uv_exports.zig, (6) 30 GMP externs replaced
-  with pure-Zig big_int implementations, (7) task manager:
-  scoped_task_manager uses volatile function pointers, deactivateTask
-  matches C++ non-eager-free behavior, resolveTaskLocked/handleFinishedLocked
-  use atomic stores/loads, (8) allocSmallObject uses mi_malloc_small and
-  sets m_cs_sz, setHeapHeader preserves m_cs_sz, ctorScalarBytes
-  subtracts header. Remaining unflipped symbols: ~540 mangled C++ names
-  (namespace lean, C++ STL) — internal C++ implementation detail without
-  C ABI, not callable from Lean code directly. The only unflipped lean_*
-  symbol is lean_demangle_bt_line_cstr, which is @[export] from Lean source
-  (not a C++ symbol) and is already covered by the Zig weak stub.
-3. **C++ file removal**: 23 of 37 C++ runtime source files removed from the
-   stage1 build. Removed: byteslice, openssl, allocprof, platform, process,
-   mpn, mutex, libuv, 10 uv/*.cpp + zig/uv_*.cpp, init_module, hash,
-   memory, stack_overflow. Zig provides C++ mangled shims via cpp_compat.zig
-   (lean::hash_str, lean::check_memory, lean::stack_guard ctor/dtor) and
-   init.zig (lean::initialize/finalize_runtime_module). Remaining 14 files
-   have deep C++ ABI dependencies (lean::throwable inherits std::exception,
-   lean::mpz uses GMP mpz_t, lean::object_compactor uses std::vector) —
-   removing them requires matching the Itanium C++ ABI layout in Zig.
-4. **Mimalloc eliminated**: mimalloc's static.c (~100KB, 323 symbols) removed
-   from the build. mimalloc_compat.zig provides 5 mi_* C ABI shims
-   (mi_malloc, mi_free, mi_free_size, mi_malloc_small, mi_new_n) backed by
-   libc malloc/free. alloc.zig uses std.c.malloc/free directly.
-5. **GMP reduced**: Zig runtime no longer links libgmp. big_int.zig uses
-   std.math.big.int with libc malloc for limb allocation. gmp_alloc_compat.zig
-   provides __gmp_default_* shims. C++ mpz.cpp still uses 37 __gmpz_*
-   functions from libgmp (linked at final binary level, not in Zig library).
-6. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly.
-   Functionally correct (default vtable is libc malloc) but architecturally
-   inconsistent with the pluggable allocator in `allocator.zig`.
-7. **Windows SEH**: stack overflow detection not available (upstream Zig).
+2. **Phase 3 symbol flip**: 604 of ~1360 C++ runtime symbols have been flipped
+   to Zig (44%). Flipped groups: platform info (4), internal info (2), pure
+   computation (4), float (18), UTF8 (2), string operations (15),
+   array/sarray/slice (25), nat/int big arithmetic (23 — previously 5 caused
+   SIGSEGV/SIGBUS but the root cause was a lean_alloc_mpz signature mismatch,
+   now fixed), internal/debug/panic (25), apply primitives (18), string_utf8
+   (10), nat/int conversion (17), array_get_panic (1), max_small_nat (1),
+   ST.Ref (6), string constructors (5), array constructors (6), float array
+   (9), sharecommon (4), unsigned int fixed-width arithmetic (158), signed
+   int fixed-width arithmetic (126), float→int conversions (10), uint
+   log2/once_cold (10), bool→int (5), box/unbox (14), nat arithmetic (6),
+   int_big ediv/emod (2). All 171 emitzig tests pass with clean stdlib cache
+   build. Three allocator fixes were needed: (1) lean_alloc_mpz now delegates
+   to C++ lean_alloc_object when export_allocator_symbols is false (C++
+   lean_alloc_mpz has a different signature), (2) freeDelegatedCppObject
+   routes through C++ lean_free_object for mimalloc compatibility, (3)
+   allocSmallObject uses mi_malloc_small (not mi_malloc) and sets m_cs_sz to
+   the aligned allocation size in mimalloc mode, matching C++
+   lean_alloc_small_object. Additionally, setHeapHeader preserves m_cs_sz
+   in mimalloc mode (matching C++ lean_set_st_header), and ctorScalarBytes
+   subtracts the header+object_slots from m_cs_sz in mimalloc mode since
+   m_cs_sz stores the total allocation size (not scalar size). RC symbols
+   (lean_inc/dec/mark_mt/mark_persistent) were tested but caused test
+   failures due to RC semantics mismatches and remain in C++ for now.
+3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
+   (75 call sites). Functionally correct (default vtable is libc malloc) but
+   architecturally inconsistent with the pluggable allocator in `allocator.zig`.
+4. **Windows SEH**: stack overflow detection not available (upstream Zig).
+5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
 
 ### External dependencies
 
-- **libgmp**: used by C++ mpz.cpp only (37 __gmpz_* functions). Zig runtime
-  uses std.math.big.int (big_int.zig) and libc malloc for limb allocation.
+- **libgmp**: big-number arithmetic (`mpz_zig.zig`, 95 C API calls)
 - **libuv**: async IO — called directly from Zig via `@cImport`, no C++ bridge
 - **libc/libc++**: standard C runtime
-- **mimalloc**: eliminated — replaced by libc malloc via mimalloc_compat.zig
-- **openssl**: eliminated — only used for version number (compile-time constant)

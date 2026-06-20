@@ -60,8 +60,10 @@ pub fn lean_extract_mpz_value(o: *anyopaque) callconv(.c) *mpz_zig.Mpz {
 }
 
 comptime {
-    @export(&lean_alloc_mpz, .{ .name = "lean_alloc_mpz" });
-    @export(&lean_extract_mpz_value, .{ .name = "lean_extract_mpz_value" });
+    if (export_allocator_symbols) {
+        @export(&lean_alloc_mpz, .{ .name = "lean_alloc_mpz" });
+        @export(&lean_extract_mpz_value, .{ .name = "lean_extract_mpz_value" });
+    }
 }
 
 pub export fn leanrt_test_alloc_mpz_from_cstr(value: [*:0]const u8) callconv(.c) *anyopaque {

@@ -14,8 +14,6 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const sync = @import("sync.zig");
 const exception = @import("exception.zig");
-const rc = @import("rc.zig");
-const string = @import("string.zig");
 
 const POSIX = builtin.os.tag != .windows;
 
@@ -138,16 +136,4 @@ test "hasViolations tracks debugger invocation" {
     g_has_violations = true;
     try testing.expect(hasViolations());
     g_has_violations = false;
-}
-
-// Weak stub for lean_demangle_bt_line_cstr.
-// The real implementation is @[export] from Lean.Compiler.NameDemangling.
-// When the Lean demangler is linked (libleanshared), it overrides this stub.
-// In zigrt mode (no Lean linked), this stub returns an empty string.
-fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
-    rc.lean_dec(s);
-    return string.lean_mk_string("");
-}
-comptime {
-    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
 }

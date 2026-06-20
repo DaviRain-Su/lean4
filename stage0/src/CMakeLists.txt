@@ -383,14 +383,14 @@ if(NOT LEAN_STANDALONE)
   string(APPEND LEAN_EXTRA_LINKER_FLAGS " ${LIBUV_LDFLAGS}")
 endif()
 
-# OpenSSL: only used for version number via lean_openssl_version().
-# The Zig runtime (openssl.zig) reads OPENSSL_VERSION_NUMBER at compile time
-# via @cInclude("openssl/opensslv.h"). We find the header for the include path
-# but do NOT link the libraries — no SSL/crypto functions are called.
+# OpenSSL
 if(NOT "${CMAKE_SYSTEM_NAME}" MATCHES "Emscripten")
-  find_package(OpenSSL 3 COMPONENTS Crypto SSL)
-  if(OpenSSL_FOUND)
-    include_directories(${OPENSSL_INCLUDE_DIR})
+  find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
+  set(OPENSSL_LIBRARIES ${OPENSSL_SSL_LIBRARY} ${OPENSSL_CRYPTO_LIBRARY})
+  include_directories(${OPENSSL_INCLUDE_DIR})
+  string(JOIN " " OPENSSL_LIBRARIES_STR ${OPENSSL_LIBRARIES})
+  if(NOT LEAN_STANDALONE)
+    string(APPEND LEAN_EXTRA_LINKER_FLAGS " ${OPENSSL_LIBRARIES_STR}")
   endif()
 endif()
 

@@ -77,14 +77,11 @@ pub fn markEndInitialization() void {
 
 pub fn initializeRuntimeSubsystems() void {
     if (g_runtime_initialized) return;
-    // Always initialize Zig subsystems — even when export_allocator_symbols
-    // is false (libleanshared mode), the Zig runtime provides all lean_*
-    // C ABI symbols after flipping. C++ initialization functions are no
-    // longer called (init_module.cpp's lean_initialize_runtime_module is
-    // flipped to this Zig version).
-    alloc.initializeRuntimeAllocator();
-    initializeRcSubsystem();
-    io_errno.initializeDecodeCache();
+    if (export_allocator_symbols) {
+        alloc.initializeRuntimeAllocator();
+        initializeRcSubsystem();
+        io_errno.initializeDecodeCache();
+    }
     initializeLibuv();
     stack_overflow.lean_initialize_stack_overflow();
     stackinfo.saveStackInfo(true);
@@ -166,26 +163,6 @@ pub export fn lean_run_main(main_fn: MainFn, argc: c_int, argv: [*c][*c]u8) call
 
 pub export fn lean_initialize_runtime_module() callconv(.c) void {
     initializeRuntimeSubsystems();
-}
-
-// C++ mangled shims: lean::initialize_runtime_module() and
-// lean::finalize_runtime_module() — called by libleancpp's
-// util/init_module.cpp. These replace init_module.cpp entirely.
-fn cpp_initialize_runtime_module() callconv(.c) void {
-    initializeRuntimeSubsystems();
-}
-
-fn cpp_finalize_runtime_module() callconv(.c) void {
-    // C++ finalize_runtime_module calls finalize_* for each subsystem.
-    // Zig runtime doesn't require explicit finalization (resources are
-    // cleaned up at process exit). This is a no-op shim.
-}
-
-comptime {
-    // Itanium C++ ABI: _ZN4lean25initialize_runtime_moduleEv
-    // Zig adds platform leading underscore (_ on macOS) → __ZN4lean...
-    @export(&cpp_initialize_runtime_module, .{ .name = "_ZN4lean25initialize_runtime_moduleEv", .linkage = .strong });
-    @export(&cpp_finalize_runtime_module, .{ .name = "_ZN4lean23finalize_runtime_moduleEv", .linkage = .strong });
 }
 
 pub export fn lean_initialize() callconv(.c) void {

@@ -12,24 +12,7 @@ const external_allocator = struct {
     extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
     extern fn lean_alloc_small_object(sz: c_uint) callconv(.c) *anyopaque;
 };
-// mimalloc has been removed from the build. Use libc malloc/free directly.
-// The Zig mimalloc_compat.zig module exports mi_* symbols for C++ callers
-// (object.cpp, mpz.cpp, lean.h inline functions, mi_stl_allocator).
-const mimalloc = struct {
-    fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque {
-        return @ptrCast(std.c.malloc(sz));
-    }
-    fn mi_malloc(sz: usize) callconv(.c) ?*anyopaque {
-        return @ptrCast(std.c.malloc(sz));
-    }
-    fn mi_free_size(ptr: ?*anyopaque, sz: usize) callconv(.c) void {
-        _ = sz;
-        if (ptr) |p| std.c.free(@ptrCast(p));
-    }
-    fn mi_free(ptr: ?*anyopaque) callconv(.c) void {
-        if (ptr) |p| std.c.free(@ptrCast(p));
-    }
-};
+extern fn mi_malloc_small(sz: usize) callconv(.c) ?*anyopaque;
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -265,10 +248,10 @@ fn freeLegacyRaw(ptr: *anyopaque) void {
 
 fn freeDelegatedCppObject(ptr: *anyopaque) void {
     // Objects reaching this path were allocated by the legacy C++ runtime
-    // (mimalloc). Free directly via mi_free to avoid recursion through
-    // external_allocator.lean_free_object (which would resolve to the
-    // Zig strong symbol after flipping).
-    mimalloc.mi_free(ptr);
+    // (mimalloc). They must be freed through the C++ lean_free_object,
+    // not the Zig allocator (std.c.free), or mimalloc's internal state
+    // will be corrupted.
+    external_allocator.lean_free_object(ptr);
 }
 
 pub fn resetTestCounters() void {
@@ -403,34 +386,23 @@ pub fn lean_inc_heartbeat() callconv(.c) void {
 }
 
 pub fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque {
-    if (export_allocator_symbols) {
-        const aligned = alignObjectSize(sz);
-        if (aligned <= LEAN_MAX_SMALL_OBJECT_SIZE) {
-            return lean_alloc_small(@intCast(aligned), @intCast(slotIndexForSize(aligned)));
-        }
-        bumpHeartbeat();
-        _ = g_test_alloc_count.fetchAdd(1, .acq_rel);
-        return allocLarge(sz);
+    if (!export_allocator_symbols) {
+        return external_allocator.lean_alloc_object(sz);
     }
 
-    // export_allocator_symbols=false: delegate directly to mimalloc,
-    // matching C++ lean_alloc_object behavior (mi_malloc + m_cs_sz=0).
-    const r = mimalloc.mi_malloc(sz) orelse @panic("lean_alloc_object: out of memory");
-    const obj: *lean.lean_object = @ptrCast(@alignCast(r));
-    obj.m_cs_sz = 0;
-    return obj;
+    const aligned = alignObjectSize(sz);
+    if (aligned <= LEAN_MAX_SMALL_OBJECT_SIZE) {
+        return lean_alloc_small(@intCast(aligned), @intCast(slotIndexForSize(aligned)));
+    }
+
+    bumpHeartbeat();
+    _ = g_test_alloc_count.fetchAdd(1, .acq_rel);
+    return allocLarge(sz);
 }
 
 pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
     if (!export_allocator_symbols) {
-        // Delegate directly to mimalloc (mi_free), matching C++
-        // lean_free_object behavior in mimalloc mode. Do NOT call
-        // external_allocator.lean_free_object — after flipping, that
-        // resolves to this same Zig strong symbol and would recurse.
-        // mimalloc's mi_free is equivalent to mi_free_size (it ignores
-        // the size hint internally).
-        mimalloc.mi_free(o);
-        return;
+        return external_allocator.lean_free_object(o);
     }
 
     if (header(o).m_tag == lean.LeanMPZ) {
@@ -485,12 +457,10 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
         else => freeLegacySmall(o),
     }
 }
+
 pub fn lean_free_small_object(o: *anyopaque) void {
     if (!export_allocator_symbols) {
-        // Same rationale as lean_free_object: call mi_free directly
-        // to avoid recursion through external_allocator after flipping.
-        mimalloc.mi_free(o);
-        return;
+        return external_allocator.lean_free_object(o);
     }
 
     if (allocationPayloadSize(o)) |_| {
@@ -499,6 +469,7 @@ pub fn lean_free_small_object(o: *anyopaque) void {
         freeLegacySmall(o);
     }
 }
+
 pub fn allocCtorMemory(sz: usize) *anyopaque {
     return lean_alloc_object(sz);
 }
@@ -508,7 +479,7 @@ pub fn allocSmallObject(sz: usize) *anyopaque {
         // In mimalloc mode, use mi_malloc_small (not mi_malloc) and set m_cs_sz
         // to the aligned allocation size, matching C++ lean_alloc_small_object.
         const aligned = alignObjectSize(sz);
-        const mem = mimalloc.mi_malloc_small(aligned);
+        const mem = mi_malloc_small(aligned);
         if (mem == null) @panic("out of memory");
         const o: *lean.lean_object = @ptrCast(@alignCast(mem.?));
         o.m_cs_sz = @intCast(aligned);
@@ -607,16 +578,12 @@ comptime {
         @export(&lean_alloc_small, .{ .name = "lean_alloc_small" });
         @export(&lean_free_small, .{ .name = "lean_free_small" });
         @export(&lean_small_mem_size, .{ .name = "lean_small_mem_size" });
-        // lean_inc_heartbeat, lean_alloc_object, lean_free_object
-        // moved outside export_allocator_symbols gate below
+        @export(&lean_inc_heartbeat, .{ .name = "lean_inc_heartbeat" });
+        @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
+        @export(&lean_free_object, .{ .name = "lean_free_object" });
     }
 }
 
-comptime {
-    @export(&lean_inc_heartbeat, .{ .name = "lean_inc_heartbeat" });
-    @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
-    @export(&lean_free_object, .{ .name = "lean_free_object" });
-}
 test "lean_alloc_object returns aligned non-null pointers" {
     resetTestCounters();
     const ptr = lean_alloc_object(64);

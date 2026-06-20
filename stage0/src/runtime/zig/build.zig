@@ -36,11 +36,12 @@ pub fn build(b: *std.Build) void {
     root_mod.addImport("runtime_options", opts_mod);
     if (use_gmp) {
         root_mod.linkSystemLibrary("gmp", .{});
+    } else {
+        // big_int.zig references GMP allocator symbols for binary
+        // compatibility with C++ mpz objects. Link libgmp when not
+        // using GMP so those symbols are available at link time.
+        root_mod.linkSystemLibrary("gmp", .{});
     }
-    // When not using GMP (default), big_int.zig uses std.math.big.int
-    // and gmp_alloc_compat.zig provides __gmp_default_* shims backed by
-    // libc. GMP is only needed if use-gmp=true or by C++ mpz.cpp at
-    // final link time (handled by the CMake build, not the Zig build).
     root_mod.linkSystemLibrary("c++", .{});
 
     // All UV subsystems (event_loop, timer, dns, signal, net_addr, tcp, udp,

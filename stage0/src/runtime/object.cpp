@@ -1104,19 +1104,20 @@ extern "C" LEAN_EXPORT void lean_finalize_task_manager() {
     }
 }
 
-// Use volatile function pointer to prevent the compiler from inlining
-// lean_init_task_manager_using/lean_finalize_task_manager, so that the
-// flipped Zig versions (strong symbols) are called instead of the
-// C++ versions being inlined.
-static void (*volatile p_init_task_manager_using)(unsigned) = lean_init_task_manager_using;
-static void (*volatile p_finalize_task_manager)() = lean_finalize_task_manager;
-
 scoped_task_manager::scoped_task_manager(unsigned num_workers) {
-    p_init_task_manager_using(num_workers);
+    lean_assert(g_task_manager == nullptr);
+#if defined(LEAN_MULTI_THREAD)
+    if (num_workers > 0) {
+        g_task_manager = new task_manager(num_workers);
+    }
+#endif
 }
 
 scoped_task_manager::~scoped_task_manager() {
-    p_finalize_task_manager();
+    if (g_task_manager) {
+        delete g_task_manager;
+        g_task_manager = nullptr;
+    }
 }
 
 extern "C" LEAN_EXPORT void lean_deactivate_task(lean_task_object * t) {
@@ -1350,11 +1351,11 @@ object * alloc_mpz(mpz const & m) {
 }
 
 #ifdef LEAN_USE_GMP
-extern "C" __attribute__((weak)) lean_object * lean_alloc_mpz(mpz_t v) {
+extern "C" LEAN_EXPORT lean_object * lean_alloc_mpz(mpz_t v) {
     return alloc_mpz(mpz(v));
 }
 
-extern "C" __attribute__((weak)) void lean_extract_mpz_value(lean_object * o, mpz_t v) {
+extern "C" LEAN_EXPORT void lean_extract_mpz_value(lean_object * o, mpz_t v) {
     return to_mpz(o)->m_value.set(v);
 }
 #endif
