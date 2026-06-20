@@ -158,7 +158,7 @@ fn mapLevels(levels: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque
 
 /// Recursively replace level params in an expression's const/sort nodes.
 /// Mirrors C++ instantiate_lparams: only const and sort nodes carry levels.
-fn instantiateLparamsExpr(e: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque {
+pub fn instantiateLparamsExpr(e: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque {
     if (!ea.hasLevelParam(e)) return e;
     switch (ea.kind(e)) {
         .Const => {

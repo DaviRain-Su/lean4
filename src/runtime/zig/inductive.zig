@@ -492,18 +492,16 @@ fn toCnstrWhenStructure(
 }
 
 // ── instantiate_lparams ──────────────────────────────────────────────────────
-// Replace level params in an expr's const nodes with the given levels.
-// This is a simple recursive walk that replaces const nodes.
-
-extern fn lean_expr_replace(f: *anyopaque, data: *anyopaque) callconv(.c) *anyopaque;
+// Replace level params in an expr's const/sort nodes with the given levels.
+// Delegates to runtime_helpers.instantiateLparamsExpr which walks the expr
+// tree and replaces level params in const and sort nodes, mirroring the
+// C++ kernel's instantiate_lparams.
 
 fn instantiateLparams(e: *anyopaque, lparams: *anyopaque, levels: *anyopaque) *anyopaque {
-    // TODO: proper pure-Zig implementation of level param substitution.
-    // For now, return the expression unchanged. This is incorrect but
-    // allows the build to succeed. The instantiate_lparams bridge in
-    // type_checker.zig (lean_kernel_instantiate_type_lparams) handles
-    // the real substitution for inferConstant/unfoldDefinition.
-    _ = lparams;
-    _ = levels;
-    return rc.lean_inc_ret(e);
+    const result = runtime_helpers.instantiateLparamsExpr(e, lparams, levels);
+    if (result == e) {
+        // No substitution happened: return an inc'd reference
+        return rc.lean_inc_ret(e);
+    }
+    return result;
 }
