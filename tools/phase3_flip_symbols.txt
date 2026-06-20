@@ -25,6 +25,7 @@
 lean_align
 lean_alloc_ctor_memory
 lean_alloc_external
+lean_alloc_mpz
 lean_alloc_sarray_would_overflow
 lean_alloc_small_object
 lean_alloc_string
@@ -160,6 +161,7 @@ lean_event_loop_loop
 lean_event_loop_unlock
 lean_expr_data
 lean_expr_dbg_to_string
+lean_extract_mpz_value
 lean_finalize_openssl
 lean_finalize_stack_overflow
 lean_finalize_task_manager
