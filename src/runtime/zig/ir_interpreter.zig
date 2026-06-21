@@ -1187,8 +1187,8 @@ var empty_args: [*]u8 = undefined;
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&leanEvalMain, .{ .name = "lean_eval_main", .linkage = .weak });
-        @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .weak });
-        @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .weak });
+        @export(&leanEvalMain, .{ .name = "lean_eval_main", .linkage = .strong });
+        @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .strong });
+        @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .strong });
     }
 }

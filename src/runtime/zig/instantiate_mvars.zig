@@ -202,6 +202,6 @@ fn lean_instantiate_level_mvars(m: *anyopaque, l: *anyopaque) callconv(.c) *anyo
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&lean_instantiate_level_mvars, .{ .name = "lean_instantiate_level_mvars", .linkage = .weak });
+        @export(&lean_instantiate_level_mvars, .{ .name = "lean_instantiate_level_mvars", .linkage = .strong });
     }
 }

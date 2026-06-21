@@ -79,6 +79,6 @@ pub const force_link = true;
 
 comptime {
     if (runtime_options.export_kernel_symbols) {
-        @export(&lean_mk_cases_on, .{ .name = "lean_mk_cases_on", .linkage = .weak });
+        @export(&lean_mk_cases_on, .{ .name = "lean_mk_cases_on", .linkage = .strong });
     }
 }

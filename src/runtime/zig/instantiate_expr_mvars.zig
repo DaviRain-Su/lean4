@@ -790,6 +790,6 @@ fn lean_instantiate_expr_mvars(m: *anyopaque, e: *anyopaque) callconv(.c) *anyop
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&lean_instantiate_expr_mvars, .{ .name = "lean_instantiate_expr_mvars", .linkage = .weak });
+        @export(&lean_instantiate_expr_mvars, .{ .name = "lean_instantiate_expr_mvars", .linkage = .strong });
     }
 }
