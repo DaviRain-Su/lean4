@@ -143,6 +143,27 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(static_lib);
     }
 
+    // ── Step 4: Lean bootstrap (.lean → .c) ────────────────────────────────
+    // Uses a pre-built lean binary from stage0 or previous stage to compile
+    // Lean source files to C code. This step depends on the C++ libraries
+    // being built (for libleanshared linking).
+    const lean_bin = b.option([]const u8, "lean-bin", "Path to bootstrap lean binary") orelse
+        "build/release/stage0/bin/lean";
+    const lean_path_arg = b.option([]const u8, "lean-path", "LEAN_PATH for stdlib") orelse
+        "build/release/stage1/lib/lean";
+
+    const lean_compile_step = b.step("lean-compile", "Compile .lean files to .c using bootstrap lean");
+    _ = lean_bin;
+    _ = lean_path_arg;
+    _ = lean_compile_step;
+
+    // ── Step 5: Link libleanshared ─────────────────────────────────────────
+    // Combines all static libraries + Zig runtime into the shared library
+    // that user programs link against.
+    const link_step = b.step("link", "Link libleanshared from all static libraries");
+    _ = link_step;
+
+
     // ── Test step ──────────────────────────────────────────────────────────
     const test_step = b.step("test", "Run tests");
     _ = test_step;
