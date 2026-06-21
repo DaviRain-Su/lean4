@@ -11,10 +11,11 @@ pub const force_link = true;
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const ctor = @import("ctor.zig");
+const util_name = @import("util_name.zig");
 
 extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
-extern fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 
 inline fn eTag(e: *anyopaque) u8 {
@@ -25,31 +26,11 @@ inline fn eTag(e: *anyopaque) u8 {
 inline fn eData(e: *anyopaque) u64 {
     if (object.lean_is_scalar(e)) return 0;
     const nobjs: u32 = @intCast(ctor.ctorNumObjs(e));
-    return ctor.lean_ctor_get_usize(e, nobjs * @sizeOf(*anyopaque));
+    return ctor.lean_ctor_get_usize(e, nobjs);
 }
 
 fn nameLt(a: *anyopaque, b: *anyopaque) bool {
-    if (a == b) return false;
-    const a_sc = object.lean_is_scalar(a);
-    const b_sc = object.lean_is_scalar(b);
-    if (a_sc and b_sc) return false;
-    if (a_sc) return true;
-    if (b_sc) return false;
-    const ka = object.lean_ptr_tag(a);
-    const kb = object.lean_ptr_tag(b);
-    if (ka != kb) return ka < kb;
-    const pa = ctor.lean_ctor_get(a, 1) orelse return false;
-    const pb = ctor.lean_ctor_get(b, 1) orelse return false;
-    if (nameLt(pa, pb)) return true;
-    if (nameLt(pb, pa)) return false;
-    if (ka == 0) {
-        const sa = ctor.lean_ctor_get(a, 0) orelse return false;
-        const sb = ctor.lean_ctor_get(b, 0) orelse return false;
-        return lean_string_lt(sa, sb) != 0;
-    }
-    const na = if (ctor.lean_ctor_get(a, 0)) |v| object.lean_unbox(v) else 0;
-    const nb = if (ctor.lean_ctor_get(b, 0)) |v| object.lean_unbox(v) else 0;
-    return na < nb;
+    return util_name.cmpCore(a, b) < 0;
 }
 
 fn levelKind(l: *anyopaque) u8 {
@@ -110,6 +91,10 @@ fn mdataLt(ma: *anyopaque, mb: *anyopaque) bool {
     return @intFromPtr(ma) < @intFromPtr(mb);
 }
 
+inline fn exprEqv(a: *anyopaque, b: *anyopaque) bool {
+    return lean_expr_eqv(a, b) != 0;
+}
+
 fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
     if (a == b) return false;
     const ka = eTag(a);
@@ -121,7 +106,7 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         if (ha < hb) return true;
         if (ha > hb) return false;
     }
-    if (lean_expr_equal(a, b) != 0) return false;
+    if (exprEqv(a, b)) return false;
     switch (ka) {
         0 => {
             const ia = if (object.lean_is_scalar(a)) object.lean_unbox(a) else blk: {
@@ -160,7 +145,7 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         5 => {
             const fa = ctor.lean_ctor_get(a, 0) orelse return false;
             const fb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (fa != fb) return isLtExpr(fa, fb, use_hash);
+            if (!exprEqv(fa, fb)) return isLtExpr(fa, fb, use_hash);
             const aa = ctor.lean_ctor_get(a, 1) orelse return false;
             const ab = ctor.lean_ctor_get(b, 1) orelse return false;
             return isLtExpr(aa, ab, use_hash);
@@ -168,7 +153,7 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         6, 7 => {
             const da = ctor.lean_ctor_get(a, 1) orelse return false;
             const db = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (da != db) return isLtExpr(da, db, use_hash);
+            if (!exprEqv(da, db)) return isLtExpr(da, db, use_hash);
             const ba = ctor.lean_ctor_get(a, 2) orelse return false;
             const bb = ctor.lean_ctor_get(b, 2) orelse return false;
             return isLtExpr(ba, bb, use_hash);
@@ -179,10 +164,10 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
             if (nda != ndb) return nda < ndb;
             const ta = ctor.lean_ctor_get(a, 1) orelse return false;
             const tb = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (ta != tb) return isLtExpr(ta, tb, use_hash);
+            if (!exprEqv(ta, tb)) return isLtExpr(ta, tb, use_hash);
             const va = ctor.lean_ctor_get(a, 2) orelse return false;
             const vb = ctor.lean_ctor_get(b, 2) orelse return false;
-            if (va != vb) return isLtExpr(va, vb, use_hash);
+            if (!exprEqv(va, vb)) return isLtExpr(va, vb, use_hash);
             const ba = ctor.lean_ctor_get(a, 3) orelse return false;
             const bb = ctor.lean_ctor_get(b, 3) orelse return false;
             return isLtExpr(ba, bb, use_hash);
@@ -191,7 +176,7 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         10 => {
             const ea = ctor.lean_ctor_get(a, 1) orelse return false;
             const eb = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (ea != eb) return isLtExpr(ea, eb, use_hash);
+            if (!exprEqv(ea, eb)) return isLtExpr(ea, eb, use_hash);
             const ma = ctor.lean_ctor_get(a, 0) orelse return false;
             const mb = ctor.lean_ctor_get(b, 0) orelse return false;
             return mdataLt(ma, mb);
@@ -199,7 +184,7 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         11 => {
             const ea = ctor.lean_ctor_get(a, 2) orelse return false;
             const eb = ctor.lean_ctor_get(b, 2) orelse return false;
-            if (ea != eb) return isLtExpr(ea, eb, use_hash);
+            if (!exprEqv(ea, eb)) return isLtExpr(ea, eb, use_hash);
             const sa = ctor.lean_ctor_get(a, 0) orelse return false;
             const sb = ctor.lean_ctor_get(b, 0) orelse return false;
             if (lean_name_eq(sa, sb) == 0) return nameLt(sa, sb);

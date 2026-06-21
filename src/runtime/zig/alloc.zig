@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const testing = std.testing;
 const lean = @import("lean_object.zig");
 const mpz_zig = @import("mpz_zig");
+const mpz_object = @import("mpz_object.zig");
 const runtime_options = @import("runtime_options");
 const allocprof = @import("allocprof.zig");
 
@@ -142,7 +143,17 @@ fn trackedMeta(payload_size: usize, slot_idx: usize, kind: u8) AllocationMeta {
 }
 
 fn hasTrackedMeta(ptr: *anyopaque) bool {
-    return metaFromPayload(ptr).magic == allocation_magic;
+    if (!export_allocator_symbols) return false;
+    // Tracked allocations have 16 bytes of AllocationMeta before the payload.
+    // If ptr is within the first 16 bytes of a page, ptr-4 would read from
+    // the previous page which may be unmapped (e.g. malloc-allocated objects
+    // at page boundaries). leanAlloc always places metadata in the same
+    // malloc block, so the offset from page start is >= sizeof(AllocationMeta).
+    const page_size = std.heap.pageSize();
+    const offset_in_page = @intFromPtr(ptr) & (page_size - 1);
+    if (offset_in_page < @sizeOf(AllocationMeta)) return false;
+    const magic_ptr: *u32 = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(u32));
+    return magic_ptr.* == allocation_magic;
 }
 
 pub fn allocationPayloadSize(ptr: *anyopaque) ?usize {
@@ -422,67 +433,25 @@ pub fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque {
 }
 
 pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
-    if (!export_allocator_symbols) {
-        // Delegate directly to mimalloc (mi_free), matching C++
-        // lean_free_object behavior in mimalloc mode. Do NOT call
-        // external_allocator.lean_free_object — after flipping, that
-        // resolves to this same Zig strong symbol and would recurse.
-        // mimalloc's mi_free is equivalent to mi_free_size (it ignores
-        // the size hint internally).
-        mimalloc.mi_free(o);
-        return;
-    }
+    // Match C++ lean_free_object behavior: free the allocation.
+    // For tracked allocations (from leanAlloc), the malloc pointer is
+    // ptr - sizeof(AllocationMeta); for legacy allocations (from
+    // mi_malloc_small), the malloc pointer IS the object pointer.
+    // We detect tracked allocations by checking the magic field, but
+    // only when safe (offset_in_page >= sizeof(AllocationMeta)).
 
+    // Special-case MPZ to deinit the mpz value first.
     if (header(o).m_tag == lean.LeanMPZ) {
-        if (allocationKind(o) == allocation_kind_mpz) {
-            const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
-            mpzValue(mpz_obj).deinit();
-            _ = g_test_free_count.fetchAdd(1, .acq_rel);
-            std.c.free(metaFromPayload(o));
-        } else {
-            freeDelegatedCppObject(o);
-        }
-        return;
+        const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
+        mpz_object.mpzValue(mpz_obj).deinit();
     }
 
-    if (header(o).m_tag == lean.LeanExternal) {
-        const ext: *lean.lean_external_object = @ptrCast(@alignCast(o));
-        if (ext.m_data) |data| {
-            ext.m_class.m_finalize(data);
-        }
-        if (allocationPayloadSize(o)) |_| {
-            freeSmall(o);
-        } else {
-            freeLegacySmall(o);
-        }
-        return;
-    }
-
-    if (header(o).m_tag == lean.LeanTask and allocationPayloadSize(o) != null) {
-        const task: *lean.lean_task_object = @ptrCast(@alignCast(o));
-        leanrt_task_deactivate_task_impl(task);
-        return;
-    }
-
-    if (allocationPayloadSize(o)) |_| {
-        if (isLargeAllocation(o)) {
-            freeLarge(o);
-        } else {
-            freeSmall(o);
-        }
-        return;
-    }
-
-    if (header(o).m_tag == lean.LeanPromise) {
-        task_runtime.leanrt_task_deactivate_promise_impl(o);
-        return;
-    }
-
-    switch (header(o).m_tag) {
-        lean.LeanArray, lean.LeanScalarArray, lean.LeanString, lean.LeanClosure => freeLegacyRaw(o),
-        lean.LeanTask, lean.LeanPromise => freeDelegatedCppObject(o),
-        lean.LeanThunk, lean.LeanRef => freeLegacySmall(o),
-        else => freeLegacySmall(o),
+    if (export_allocator_symbols and hasTrackedMeta(o)) {
+        // Tracked allocation: free the malloc block that includes AllocationMeta
+        std.c.free(metaFromPayload(o));
+    } else {
+        // Legacy allocation: free the object directly
+        mimalloc.mi_free(o);
     }
 }
 pub fn lean_free_small_object(o: *anyopaque) void {
@@ -757,6 +726,29 @@ test "lean_small_mem_size accepts legacy small allocations" {
     defer std.c.free(ptr);
 
     try testing.expectEqual(@as(c_uint, @intCast(@sizeOf(lean.lean_ref_object))), lean_small_mem_size(ptr));
+}
+
+test "tracked payload metadata survives page boundary" {
+    const page_size = std.heap.pageSize();
+    const total_size = page_size * 2;
+    const mapping = try std.posix.mmap(
+        null,
+        total_size,
+        .{ .READ = true, .WRITE = true },
+        .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+        -1,
+        0,
+    );
+    defer std.posix.munmap(mapping);
+
+    const raw = mapping.ptr + page_size - @sizeOf(AllocationMeta);
+    const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
+    meta.* = trackedMeta(17, 0, allocation_kind_small);
+    const payload = payloadFromMeta(meta);
+
+    try testing.expect(@intFromPtr(payload) % page_size < @sizeOf(AllocationMeta));
+    try testing.expectEqual(@as(?usize, 17), allocationPayloadSize(payload));
+    try testing.expectEqual(@as(?u8, allocation_kind_small), allocationKind(payload));
 }
 
 // C++ mangled: lean::add_heartbeats(unsigned long long)

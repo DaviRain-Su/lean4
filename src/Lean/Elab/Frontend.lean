@@ -314,6 +314,7 @@ def runFrontend
     | return none
   let env := cmdState.env
   let finalOpts := cmdState.scopes[0]!.opts
+  let _ := (← snaps.waitAll).get
 
   -- Saves `snapToSave` wrapped with the init-mod indices used by `runInitAttrsForModules` on load.
   -- Writes a `<incrFile>.deps` JSON helper alongside: the dep regions grouped per module (see

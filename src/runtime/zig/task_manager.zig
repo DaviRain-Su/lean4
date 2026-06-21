@@ -90,7 +90,7 @@ const TaskMarkMtState = struct {
         const rc_value = @as(*lean.lean_object, @ptrCast(@alignCast(closure))).m_rc;
         _ = self.dequeued_closures.fetchAdd(1, .seq_cst);
         self.last_dequeued_closure_rc.store(rc_value, .seq_cst);
-        if (rc_value >= 0) {
+        if (rc_value > 0) {
             self.all_dequeued_closures_marked.store(false, .seq_cst);
         }
     }
@@ -102,7 +102,7 @@ const TaskMarkMtState = struct {
         const rc_value = @as(*lean.lean_object, @ptrCast(@alignCast(value))).m_rc;
         _ = self.published_values.fetchAdd(1, .seq_cst);
         self.last_published_value_rc.store(rc_value, .seq_cst);
-        if (rc_value >= 0) {
+        if (rc_value > 0) {
             self.all_published_values_marked.store(false, .seq_cst);
         }
     }
@@ -194,9 +194,6 @@ fn taskValue(task: *lean.lean_task_object) ?*anyopaque {
 }
 
 fn freeTaskImp(imp: *lean.lean_task_imp) void {
-    if (imp.m_closure) |closure| {
-        rc.lean_dec(closure);
-    }
     alloc.lean_free_small_object(@ptrCast(imp));
 }
 
@@ -737,7 +734,9 @@ pub const TaskManager = struct {
             // safe. However, using atomic load is the correct pattern for
             // cross-thread visibility.)
             const dep_imp = @atomicLoad(?*lean.lean_task_imp, &dep.m_imp, .seq_cst) orelse {
-                // Dependent was already resolved — skip it.
+                // Dependent was already resolved — can't get next from null imp.
+                // This shouldn't happen in normal flow (dependents are only
+                // enqueued when their source resolves), but guard against it.
                 break;
             };
             if (imp.m_canceled != 0) {

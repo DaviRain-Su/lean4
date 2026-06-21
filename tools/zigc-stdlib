@@ -61,11 +61,18 @@ def module_to_zig_file(module: str) -> str:
     return module + ".zig"
 
 
+def host_lean_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("LEAN_MAIN_USE_THREAD", "0")
+    env.setdefault("LEAN_NUM_THREADS", "0")
+    return env
+
+
 def run(cmd: list[str], *, cwd: pathlib.Path | None = None, check: bool = True,
-        capture: bool = False) -> subprocess.CompletedProcess:
+        capture: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     if capture:
-        return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
-    return subprocess.run(cmd, cwd=cwd, check=check)
+        return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True, env=env)
+    return subprocess.run(cmd, cwd=cwd, check=check, env=env)
 
 
 def acquire_cache_lock(cache_dir: pathlib.Path, lock_name: str = ".lock"):
@@ -101,7 +108,7 @@ def module_cache_lock_name(module: str) -> str:
 
 def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    run([str(lean), "-z", str(out), str(src)], cwd=cwd)
+    run([str(lean), "-z", str(out), str(src)], cwd=cwd, env=host_lean_env())
 
 
 def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path) -> None:
@@ -297,6 +304,7 @@ def link(
     zigrt_lib: pathlib.Path,
     output: str,
     include_dir: pathlib.Path,
+    cpp_archives: list[pathlib.Path] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [
         str(zig), "build-exe", "-O", "Debug", "-fstrip",
@@ -304,6 +312,15 @@ def link(
         "-I", str(include_dir),
         str(zigrt_lib),
     ]
+    # C++ runtime archives provide kernel/library symbols that the helperless
+    # Zig runtime references via extern fn but does not export (e.g.
+    # lean_expr_mk_lambda, lean_level_mk_succ, lean_ir_find_env_decl).
+    # Phase 3 symbol weakening has already resolved which definitions win:
+    # flipped symbols are weak in C++ and strong in Zig; unflipped symbols
+    # are strong in C++ and weak (or absent) in Zig.
+    if cpp_archives:
+        for ar in cpp_archives:
+            cmd.append(str(ar))
     for lib_dir in discover_lib_dirs():
         cmd.extend(["-L", lib_dir])
     cmd.extend(["-lgmp", "-luv", "-lc++", "-lpthread"])
@@ -492,7 +509,8 @@ def build_helperless_zigrt(
         "--global-cache-dir",
         str(global_cache_dir),
         "-Dexport-lean-helpers=false",
-        f"-Dlean-include-dir={build_dir / 'include'}",
+        "-Dexport-kernel-symbols=false",
+        "-Dexport-allocator-symbols=false",
     ]
     result = subprocess.run(cmd, cwd=runtime_dir, capture_output=True, text=True)
     if result.returncode != 0:
@@ -637,6 +655,7 @@ def lean_fingerprint(lean: pathlib.Path) -> dict:
         capture_output=True,
         text=True,
         check=False,
+        env=host_lean_env(),
     )
     resolved = lean.resolve()
     return {
@@ -836,6 +855,7 @@ def append_reachable_modules(
             cwd=src_root,
             capture_output=True,
             text=True,
+            env=host_lean_env(),
         )
         for line in out.stdout.strip().splitlines():
             dep_path = pathlib.Path(line).resolve()
@@ -1117,9 +1137,24 @@ def main() -> int:
         else:
             objs = stdlib_objs + [driver_obj]
         max_attempts = args.max_stub_iterations if args.allow_stubs else 1
+        # C++ runtime + C-compiled stdlib archives.  The helperless Zig runtime
+        # references kernel/library/stdlib symbols (e.g. lean_expr_mk_lambda,
+        # lean_level_mk_succ, lean_ir_find_env_decl) via extern fn.  These are
+        # defined in C-compiled Lean stdlib objects (libInit/libStd/libLean) and
+        # the C++ runtime (libleanrt_initial-exec, libleancpp).  Phase 3 symbol
+        # weakening in the CMake build ensures Zig definitions win where both exist.
+        cpp_archives = [
+            build_dir / "runtime" / "libleanrt_initial-exec.a",
+            build_dir / "lib" / "lean" / "libleancpp.a",
+            build_dir / "lib" / "temp" / "libleancpp_1.a",
+            build_dir / "lib" / "lean" / "libInit.a",
+            build_dir / "lib" / "lean" / "libStd.a",
+            build_dir / "lib" / "lean" / "libLean.a",
+        ]
+        cpp_archives = [ar for ar in cpp_archives if ar.exists()]
         for iteration in range(max_attempts):
             print(f"linking (attempt {iteration + 1})...")
-            result = link(zig, objs, zigrt_lib, args.output, build_dir / "include")
+            result = link(zig, objs, zigrt_lib, args.output, build_dir / "include", cpp_archives=cpp_archives)
             if result.returncode == 0:
                 print(f"linked {args.output}")
                 return 0

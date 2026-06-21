@@ -12,6 +12,7 @@ const builtin = @import("builtin");
 const apply = @import("apply.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+const rc = @import("rc.zig");
 const string = @import("string.zig");
 
 const gpa = std.heap.c_allocator;
@@ -145,12 +146,14 @@ pub export fn lean_display_cumulative_profiling_times() callconv(.c) *anyopaque 
 
 pub export fn lean_profileit(category: *anyopaque, opts: *anyopaque, fn_obj: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
     const unit = object.lean_box(0).?;
+    rc.lean_inc(opts);
     if (lean_get_profiler(opts) == 0) {
         return apply.lean_apply_1(fn_obj, unit) orelse @panic("lean_profileit: apply returned null");
     }
 
     const cat_bytes = stringBytes(category);
     const category_owned = gpa.dupe(u8, cat_bytes) catch @panic("lean_profileit: oom");
+    rc.lean_inc(opts);
     const threshold_secs = lean_get_profiler_threshold(opts);
 
     const task = gpa.create(TimeTask) catch @panic("lean_profileit: oom");

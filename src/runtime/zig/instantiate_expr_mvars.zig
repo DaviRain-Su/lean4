@@ -60,9 +60,10 @@ inline fn retain(e: *anyopaque) *anyopaque {
 
 fn mkRevApp(f: *anyopaque, num_rev_args: usize, rev_args: []*anyopaque) *anyopaque {
     var r = f;
-    var i: usize = 0;
-    while (i < num_rev_args) : (i += 1) {
-        r = lean_expr_mk_app(r, rev_args[i]);
+    var i: usize = num_rev_args;
+    while (i > 0) {
+        i -= 1;
+        r = lean_expr_mk_app(r, rc.lean_inc_ret(rev_args[i]));
     }
     return r;
 }
@@ -112,10 +113,11 @@ fn instantiateRevArgs(e: *anyopaque, n: usize, rev_args: []*anyopaque) *anyopaqu
 }
 
 fn instantiateRange(e: *anyopaque, i: usize, num_rev_args: usize, rev_args: []*anyopaque) *anyopaque {
-    // instantiate(e, i, rev_args + n) where n = num_rev_args - i
+    // C++: instantiate(e, i, rev_args + n) where n = num_rev_args - i
+    // Instantiates e with i args from rev_args[n..], i.e. the last i args.
     const n = num_rev_args - i;
-    const slice = rev_args[i .. i + n];
-    return instantiateRevArgs(e, n, slice);
+    const slice = rev_args[n .. n + i];
+    return instantiateRevArgs(e, i, slice);
 }
 
 fn applyBeta(f: *anyopaque, num_rev_args: usize, rev_args: []*anyopaque) *anyopaque {
@@ -174,12 +176,12 @@ inline fn listTail(o: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(o, 1) orelse @panic("listTail: missing tail");
 }
 
-fn mapLevelsReuse(ls: *anyopaque, mctx: *anyopaque, level_cache: *instantiate_mvars.SharingCache) *anyopaque {
+fn mapLevelsReuse(ls: *anyopaque, mctx_ptr: **anyopaque, level_cache: *instantiate_mvars.SharingCache) *anyopaque {
     if (isNil(ls)) return retain(ls);
     const head = listHead(ls);
     const tail = listTail(ls);
-    const new_head = instantiate_mvars.visitLevel(head, mctx, level_cache);
-    const new_tail = mapLevelsReuse(tail, mctx, level_cache);
+    const new_head = instantiate_mvars.visitLevel(head, mctx_ptr, level_cache);
+    const new_tail = mapLevelsReuse(tail, mctx_ptr, level_cache);
     if (head == new_head and tail == new_tail) {
         rc.lean_dec(new_head);
         rc.lean_dec(new_tail);
@@ -202,6 +204,7 @@ const DirectVisitor = struct {
     level_cache: instantiate_mvars.SharingCache,
     cache: SimpleCache,
     already_normalized: std.AutoHashMap(*anyopaque, void),
+    saved: std.ArrayListUnmanaged(*anyopaque) = .empty,
     has_updateable_delayed: bool = false,
     allocator: std.mem.Allocator,
 
@@ -216,28 +219,36 @@ const DirectVisitor = struct {
     }
 
     fn deinit(self: *DirectVisitor) void {
+        for (self.saved.items) |s| rc.lean_dec(s);
+        self.saved.deinit(self.allocator);
         self.level_cache.deinit();
         self.cache.deinit();
         self.already_normalized.deinit();
     }
 
     fn getAssignment(self: *DirectVisitor, mid: *anyopaque) ?*anyopaque {
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid);
         const opt = lean_get_mvar_assignment(self.mctx, mid);
         if (isNone(opt)) {
             rc.lean_dec(opt);
             return null;
         }
         const a = someVal(opt);
-        // Check if already normalized or has no mvar
-        if (!ea.hasExprMVar(a)) return a;
+        // Check if already normalized or has no remaining expr/level mvar.
+        if (!ea.hasExprMVar(a) and !ea.hasLevelMVar(a)) return a;
         if (self.already_normalized.contains(mid)) return a;
         self.already_normalized.put(mid, {}) catch {};
         const a_new = self.visit(a);
         if (a != a_new) {
-            // Write back
-            const new_mctx = lean_assign_mvar(self.mctx, mid, a_new);
-            _ = new_mctx;
+            // Write back: lean_assign_mvar consumes a_new, so inc it for the return.
+        rc.lean_inc(a_new);
+        rc.lean_inc(mid);
+        const new_mctx = lean_assign_mvar(self.mctx, mid, a_new);
+            self.mctx = new_mctx;
+            self.saved.append(self.allocator, a) catch @panic("getAssignment: OOM");
         } else {
+            // visit returned retain(a); drop the extra ref from the option.
             rc.lean_dec(a_new);
         }
         return a_new;
@@ -256,7 +267,10 @@ const DirectVisitor = struct {
     fn visitAppBeta(self: *DirectVisitor, f_new: *anyopaque, e: *anyopaque) *anyopaque {
         // Collect args (visiting each), then beta-reduce
         var args = std.ArrayListUnmanaged(*anyopaque).empty;
-        defer args.deinit(self.allocator);
+        defer {
+            for (args.items) |a| rc.lean_dec(a);
+            args.deinit(self.allocator);
+        }
         var curr = e;
         while (ea.isApp(curr)) {
             const a = self.visit(ea.appArg(curr));
@@ -275,18 +289,20 @@ const DirectVisitor = struct {
         const mid = ea.mvarName(f);
         // Direct mvar assignment takes precedence
         if (self.getAssignment(mid)) |f_new| {
-            return self.visitAppBeta(f_new, e);
+            const result = self.visitAppBeta(f_new, e);
+            rc.lean_dec(f_new);
+            return result;
         }
         // Check for delayed-assigned mvar
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid);
         const opt_d = lean_get_delayed_mvar_assignment(self.mctx, mid);
         if (!isNil(opt_d)) {
             if (!isNone(opt_d)) {
                 const d = someVal(opt_d);
+                // lean_delayed_mvar_assignment_mvar_id_pending consumes d
                 const mid_pending = lean_delayed_mvar_assignment_mvar_id_pending(d);
-                if (self.getAssignment(mid_pending) != null) {
-                    self.has_updateable_delayed = true;
-                }
-                rc.lean_dec(d);
+                if (self.getAssignment(mid_pending)) |r| { rc.lean_dec(r); self.has_updateable_delayed = true; }
             } else {
                 rc.lean_dec(opt_d);
             }
@@ -303,14 +319,14 @@ const DirectVisitor = struct {
             return r;
         }
         // Check delayed
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid);
         const opt_d = lean_get_delayed_mvar_assignment(self.mctx, mid);
         if (!isNil(opt_d) and !isNone(opt_d)) {
             const d = someVal(opt_d);
+            // lean_delayed_mvar_assignment_mvar_id_pending consumes d
             const mid_pending = lean_delayed_mvar_assignment_mvar_id_pending(d);
-            if (self.getAssignment(mid_pending) != null) {
-                self.has_updateable_delayed = true;
-            }
-            rc.lean_dec(d);
+            if (self.getAssignment(mid_pending)) |r| { rc.lean_dec(r); self.has_updateable_delayed = true; }
         } else {
             rc.lean_dec(opt_d);
         }
@@ -318,24 +334,21 @@ const DirectVisitor = struct {
     }
 
     fn visit(self: *DirectVisitor, e: *anyopaque) *anyopaque {
-        if (!ea.hasExprMVar(e)) return retain(e);
+        if (!ea.hasExprMVar(e) and !ea.hasLevelMVar(e)) return retain(e);
 
         if (self.cache.find(e)) |cached| {
             return retain(cached);
         }
 
         const r = switch (ea.kind(e)) {
-            .BVar, .Lit, .FVar => {
-                // hasExprMVar is false for these, so unreachable
-                @panic("instantiate_direct: unreachable kind");
-            },
+            .BVar, .Lit, .FVar => @panic("instantiate_direct: unreachable kind"),
             .Sort => blk: {
-                const new_l = instantiate_mvars.visitLevel(ea.sortLevel(e), self.mctx, &self.level_cache);
+                const new_l = instantiate_mvars.visitLevel(ea.sortLevel(e), &self.mctx, &self.level_cache);
                 const r = ea.updateSort(e, new_l);
                 break :blk r;
             },
             .Const => blk: {
-                const new_ls = mapLevelsReuse(ea.constLevels(e), self.mctx, &self.level_cache);
+                const new_ls = mapLevelsReuse(ea.constLevels(e), &self.mctx, &self.level_cache);
                 const r = ea.updateConst(e, new_ls);
                 break :blk r;
             },
@@ -460,9 +473,23 @@ const DelayedVisitor = struct {
     already_normalized: std.AutoHashMap(*anyopaque, void),
     resolvable_expr_cache: std.AutoHashMap(*anyopaque, bool),
     resolvable_pending_cache: std.AutoHashMap(*anyopaque, u8), // 0=in-progress, 1=yes, 2=no
+    saved: std.ArrayListUnmanaged(*anyopaque) = .empty,
     allocator: std.mem.Allocator,
 
-    fn init(mctx: *anyopaque, a: std.mem.Allocator) DelayedVisitor {
+    fn initBorrowed(mctx: *anyopaque, a: std.mem.Allocator) DelayedVisitor {
+        rc.lean_inc(mctx);
+        return .{
+            .mctx = mctx,
+            .fvar_subst = std.AutoHashMap(*anyopaque, FvarSubstEntry).init(a),
+            .cache = ScopeCache.init(a),
+            .already_normalized = std.AutoHashMap(*anyopaque, void).init(a),
+            .resolvable_expr_cache = std.AutoHashMap(*anyopaque, bool).init(a),
+            .resolvable_pending_cache = std.AutoHashMap(*anyopaque, u8).init(a),
+            .allocator = a,
+        };
+    }
+
+    fn initOwned(mctx: *anyopaque, a: std.mem.Allocator) DelayedVisitor {
         return .{
             .mctx = mctx,
             .fvar_subst = std.AutoHashMap(*anyopaque, FvarSubstEntry).init(a),
@@ -475,6 +502,8 @@ const DelayedVisitor = struct {
     }
 
     fn deinit(self: *DelayedVisitor) void {
+        for (self.saved.items) |s| rc.lean_dec(s);
+        self.saved.deinit(self.allocator);
         self.fvar_subst.deinit();
         self.cache.deinit();
         self.already_normalized.deinit();
@@ -492,7 +521,9 @@ const DelayedVisitor = struct {
         if (self.resolvable_pending_cache.get(pending)) |v| {
             return v == 1;
         }
-        self.resolvable_pending_cache.put(pending, 0) catch {}; // in-progress
+        self.resolvable_pending_cache.put(pending, 0) catch {};
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(pending);
         const opt_r = lean_get_mvar_assignment(self.mctx, pending);
         if (isNone(opt_r)) {
             rc.lean_dec(opt_r);
@@ -508,7 +539,6 @@ const DelayedVisitor = struct {
 
     fn isResolvableExpr(self: *DelayedVisitor, e: *anyopaque) bool {
         if (!ea.hasExprMVar(e)) return true;
-        // No shared check for simplicity (correct but may be slower)
         return self.isResolvableExprCore(e);
     }
 
@@ -519,18 +549,24 @@ const DelayedVisitor = struct {
                 const f = ea.getAppFn(e);
                 if (ea.isMVar(f)) {
                     const mid = ea.mvarName(f);
+                    rc.lean_inc(self.mctx);
+                    rc.lean_inc(mid);
                     const opt_d = lean_get_delayed_mvar_assignment(self.mctx, mid);
                     defer rc.lean_dec(opt_d);
                     if (isNil(opt_d) or isNone(opt_d)) break :blk false;
                     const d = ctor.lean_ctor_get(opt_d, 0) orelse break :blk false;
                     rc.lean_inc(d);
                     defer rc.lean_dec(d);
+                    rc.lean_inc(d);
                     const fvars = lean_delayed_mvar_assignment_fvars(d);
                     const num_fvars = array.lean_array_size(fvars);
+                    rc.lean_dec(fvars);
                     if (num_fvars > ea.getAppNumArgs(e)) break :blk false;
+                    rc.lean_inc(d);
                     const mid_pending = lean_delayed_mvar_assignment_mvar_id_pending(d);
-                    if (!self.isResolvablePending(mid_pending)) break :blk false;
-                    // Check args
+                    const ok = self.isResolvablePending(mid_pending);
+                    rc.lean_dec(mid_pending);
+                    if (!ok) break :blk false;
                     var curr = e;
                     while (ea.isApp(curr)) {
                         if (!self.isResolvableExpr(ea.appArg(curr))) break :blk false;
@@ -570,6 +606,8 @@ const DelayedVisitor = struct {
     }
 
     fn getAssignment(self: *DelayedVisitor, mid: *anyopaque) ?*anyopaque {
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid);
         const opt_r = lean_get_mvar_assignment(self.mctx, mid);
         if (isNone(opt_r)) {
             rc.lean_dec(opt_r);
@@ -581,8 +619,11 @@ const DelayedVisitor = struct {
             self.already_normalized.put(mid, {}) catch {};
             const a_new = self.visit(a);
             if (a != a_new) {
+                rc.lean_inc(a_new);
+                rc.lean_inc(mid);
                 const new_mctx = lean_assign_mvar(self.mctx, mid, a_new);
-                _ = new_mctx;
+                self.mctx = new_mctx;
+                self.saved.append(self.allocator, a) catch @panic("DelayedVisitor.getAssignment: OOM");
             } else {
                 rc.lean_dec(a_new);
             }
@@ -597,7 +638,10 @@ const DelayedVisitor = struct {
     fn visitDelayed(self: *DelayedVisitor, fvars: *anyopaque, mid_pending: *anyopaque, e: *anyopaque) *anyopaque {
         // Collect args (visiting each)
         var args = std.ArrayListUnmanaged(*anyopaque).empty;
-        defer args.deinit(self.allocator);
+        defer {
+            for (args.items) |a| rc.lean_dec(a);
+            args.deinit(self.allocator);
+        }
         var curr = e;
         while (ea.isApp(curr)) {
             const a = self.visit(ea.appArg(curr));
@@ -616,6 +660,7 @@ const DelayedVisitor = struct {
         var i: usize = 0;
         while (i < fvar_count) : (i += 1) {
             const fv = array.lean_array_uget(fvars, i) orelse continue;
+            defer rc.lean_dec(fv);
             const fid = ea.fvarName(fv);
             const had_old = self.fvar_subst.get(fid);
             if (had_old) |old| {
@@ -633,6 +678,8 @@ const DelayedVisitor = struct {
         }
 
         // Get pending mvar's value (must be assigned, pass 1 normalized it)
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid_pending);
         const opt_val = lean_get_mvar_assignment(self.mctx, mid_pending);
         const val = someVal(opt_val);
         const val_new = self.visit(val);
@@ -652,7 +699,9 @@ const DelayedVisitor = struct {
         }
 
         // apply_beta with extra args
-        return applyBeta(val_new, extra_count, args.items);
+        const result = applyBeta(val_new, extra_count, args.items);
+        rc.lean_dec(val_new);
+        return result;
     }
 
     const SavedEntry = struct {
@@ -676,23 +725,38 @@ const DelayedVisitor = struct {
         if (!ea.isMVar(f)) return self.visitNonMVarApp(e);
         const mid = ea.mvarName(f);
         // Direct mvar assignments resolved by pass 1
+        rc.lean_inc(self.mctx);
+        rc.lean_inc(mid);
         const opt_d = lean_get_delayed_mvar_assignment(self.mctx, mid);
         if (isNil(opt_d) or isNone(opt_d)) {
             rc.lean_dec(opt_d);
             return self.visitNonMVarApp(e);
         }
         const d = someVal(opt_d);
-        defer rc.lean_dec(d);
+        // Both delayed_mvar_assignment_* functions consume d; inc for each call.
+        rc.lean_inc(d);
         const fvars = lean_delayed_mvar_assignment_fvars(d);
+        rc.lean_inc(d);
         const mid_pending = lean_delayed_mvar_assignment_mvar_id_pending(d);
+        // d is now fully consumed (two incs, two consuming calls). No defer dec needed.
         if (array.lean_array_size(fvars) > ea.getAppNumArgs(e)) {
+            rc.lean_dec(fvars);
+            rc.lean_dec(mid_pending);
             return self.visitNonMVarApp(e);
         }
         if (self.isResolvablePending(mid_pending)) {
-            return self.visitDelayed(fvars, mid_pending, e);
+            // visitDelayed consumes mid_pending (via lean_get_mvar_assignment) but borrows fvars.
+            const result = self.visitDelayed(fvars, mid_pending, e);
+            rc.lean_dec(fvars);
+            rc.lean_dec(mid_pending);
+            return result;
         } else {
             // Non-resolvable: normalize pending for write-back (outer mode only)
-            _ = self.getAssignment(mid_pending);
+            // getAssignment consumes mid_pending (via lean_get_mvar_assignment), so inc it.
+            rc.lean_inc(mid_pending);
+            if (self.getAssignment(mid_pending)) |r| rc.lean_dec(r);
+            rc.lean_dec(fvars);
+            rc.lean_dec(mid_pending);
             return self.visitNonMVarApp(e);
         }
     }
@@ -704,8 +768,8 @@ const DelayedVisitor = struct {
     }
 
     fn visit(self: *DelayedVisitor, e: *anyopaque) *anyopaque {
-        // Early exit: no fvar (in inner mode) and no expr mvar
-        if ((self.inOuterMode() or !ea.hasFVar(e)) and !ea.hasExprMVar(e)) {
+        // Early exit: no fvar (in inner mode), no expr mvar, and no level mvar.
+        if ((self.inOuterMode() or !ea.hasFVar(e)) and !ea.hasExprMVar(e) and !ea.hasLevelMVar(e)) {
             return retain(e);
         }
 
@@ -717,15 +781,14 @@ const DelayedVisitor = struct {
                 return retain(e);
             },
             .MVar => blk: {
-                // Bare mvar in pass 2: unassigned direct mvar
                 const mid = ea.mvarName(e);
+                rc.lean_inc(self.mctx);
                 const opt = lean_get_mvar_assignment(self.mctx, mid);
                 if (isNone(opt)) {
                     rc.lean_dec(opt);
                     break :blk retain(e);
                 }
                 rc.lean_dec(opt);
-                // Should not happen; return as-is
                 break :blk retain(e);
             },
             .MData => blk: {
@@ -762,24 +825,23 @@ const DelayedVisitor = struct {
 fn runInstantiateAll(m: *anyopaque, e: *anyopaque) *anyopaque {
     const a = std.heap.page_allocator;
 
-    // Pass 1: instantiate direct mvars, pre-normalize delayed pending values
     var pass1 = DirectVisitor.init(m, a);
     defer pass1.deinit();
     const e1 = pass1.visit(e);
+    rc.lean_dec(e);
 
-    // Pass 2: resolve delayed-assigned mvars (only if needed)
+    var current_mctx = pass1.mctx;
     var e2 = e1;
     if (pass1.has_updateable_delayed) {
-        var pass2 = DelayedVisitor.init(m, a);
+        var pass2 = DelayedVisitor.initOwned(current_mctx, a);
         defer pass2.deinit();
         e2 = pass2.visit(e1);
+        current_mctx = pass2.mctx;
         if (e1 != e2) rc.lean_dec(e1);
     }
 
-    // Build result tuple (mctx, expr) as ctor 0 with 2 obj fields
     const result = alloc.lean_alloc_ctor(0, 2, 0);
-    rc.lean_inc(m);
-    ctor.lean_ctor_set(result, 0, m);
+    ctor.lean_ctor_set(result, 0, current_mctx);
     ctor.lean_ctor_set(result, 1, e2);
     return result;
 }

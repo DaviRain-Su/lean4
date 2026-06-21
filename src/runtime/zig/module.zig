@@ -372,10 +372,14 @@ pub export fn zig_lean_compacted_region_read(
 
     // Try to mmap at the saved base address. Use MAP_FIXED_NOREPLACE on Linux so an
     // existing mapping causes a clean failure rather than clobbering memory.
+    // On macOS, do NOT use MAP_FIXED — it can clobber existing mappings. The C++
+    // runtime also does not use MAP_FIXED on macOS. The base_addr is just a hint;
+    // if mmap returns a different address, we fall back to malloc and the reader
+    // walk relocates pointers.
     const map_flags: std.posix.MAP = if (builtin.os.tag == .linux)
         .{ .TYPE = .PRIVATE, .FIXED = true, .FIXED_NOREPLACE = true }
     else
-        .{ .TYPE = .PRIVATE, .FIXED = true };
+        .{ .TYPE = .PRIVATE };
 
     if (std.posix.mmap(
         @ptrFromInt(base_addr),
@@ -622,4 +626,12 @@ test "compacted region save/read closure with v3 format" {
     const free_result = zig_lean_compacted_region_free(region, object.lean_box(0));
     defer rc.lean_dec(free_result);
     try std.testing.expect(io_result.lean_io_result_is_ok(free_result));
+}
+
+// Bridge exports: expose zig_lean_compacted_region_* under the canonical
+// lean_compacted_region_* names expected by the Lean stdlib.
+comptime {
+    @export(&zig_lean_compacted_region_save, .{ .name = "lean_compacted_region_save", .linkage = .strong });
+    @export(&zig_lean_compacted_region_read, .{ .name = "lean_compacted_region_read", .linkage = .strong });
+    @export(&zig_lean_compacted_region_free, .{ .name = "lean_compacted_region_free", .linkage = .strong });
 }

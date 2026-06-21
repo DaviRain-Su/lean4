@@ -454,11 +454,8 @@ pub fn localDeclType(ld: *anyopaque) *anyopaque {
 
 pub fn localDeclValue(ld: *anyopaque) ?*anyopaque {
     const opt = ctor.lean_ctor_get(ld, 4) orelse return null;
-    if (isNone(opt)) {
-        rc.lean_dec(opt);
-        return null;
-    }
-    return someVal(opt);
+    if (isNone(opt)) return null;
+    return ctor.lean_ctor_get(opt, 0) orelse @panic("localDeclValue: malformed some");
 }
 
 pub fn localDeclUserName(ld: *anyopaque) *anyopaque {

@@ -144,30 +144,25 @@ def findEnvDecl (env : Environment) (declName : Name) : Option Decl :=
 
 @[export lean_ir_find_env_decl]
 private def findInterpDecl (env : Environment) (declName : Name) : Option Decl :=
-  -- This function is never used in `leanir`, so no need for `findExtEntry?`
   match env.getModuleIdxFor? declName with
   | some modIdx =>
-    -- `meta import/import all` and additional server-mode IR
-    findAtSorted? (declMapExt.getModuleIREntries env modIdx) declName <|>
-    -- (closure of) `meta def`; will report `.extern`s for other `def`s so needs to come second
-    findAtSorted? (declMapExt.getModuleEntries env modIdx) declName
-  | none => declMapExt.getState env |>.find? declName
+    (findAtSorted? (declMapExt.getModuleIREntries env modIdx) declName) <|>
+    (findAtSorted? (declMapExt.getModuleEntries env modIdx) declName) <|>
+    ((declMapExt.getState env).find? declName)
+  | none =>
+    (declMapExt.getState env).find? declName
 
 /-- Like ``findInterpDecl env (declName ++ `_boxed)`` but with optimized negative lookup. -/
 @[export lean_ir_find_env_decl_boxed]
 private def findInterpDeclBoxed (env : Environment) (declName : Name) : Option Decl :=
   let boxed := Compiler.LCNF.mkBoxedName declName
-  -- Important: get module index of base name, not boxed version. Usually the interpreter never
-  -- does negative lookups except in the case of `call_boxed` which must check whether a boxed
-  -- version exists. If `declName` exists as an imported declaration but `declName'` doesn't, the
-  -- latter's module index would be `none` and we may do an expensive blocking wait on the
-  -- environment extension state even if in this situation we definitely know that `declName'` is
-  -- not a local declaration.
   match env.getModuleIdxFor? declName with
   | some modIdx =>
-    findAtSorted? (declMapExt.getModuleIREntries env modIdx) boxed <|>
-    findAtSorted? (declMapExt.getModuleEntries env modIdx) boxed
-  | none => declMapExt.getState env |>.find? boxed
+    (findAtSorted? (declMapExt.getModuleIREntries env modIdx) boxed) <|>
+    (findAtSorted? (declMapExt.getModuleEntries env modIdx) boxed) <|>
+    ((declMapExt.getState env).find? boxed)
+  | none =>
+    (declMapExt.getState env).find? boxed
 
 @[export lean_has_compile_error]
 private def hasCompileError (env : Environment) (constName : Name) : Bool :=

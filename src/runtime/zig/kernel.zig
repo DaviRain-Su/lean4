@@ -20,6 +20,9 @@ const array = @import("array.zig");
 const interrupt = @import("interrupt.zig");
 const runtime_options = @import("runtime_options");
 
+extern fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_nat_big_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
+extern fn lean_string_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
 
 // ── Expression metadata (trivial bit-packing) ────────────────────────────────
@@ -47,12 +50,13 @@ fn lean_expr_mk_data(
     const range_raw = object.lean_unbox(bvar_range_obj);
     if (range_raw > 1048575) @panic("too many bound variables");
     const range: u64 = @intCast(range_raw);
-    const h: u64 = @truncate(hash_val);
-    return h + (approx_depth << 32) +
-        (@as(u64, has_fvar) << 40) +
-        (@as(u64, has_expr_mvar) << 41) +
-        (@as(u64, has_level_mvar) << 42) +
-        (@as(u64, has_level_param) << 43) +
+    const h: u32 = @truncate(hash_val);
+    return @as(u64, h) +%
+        (approx_depth << 32) +%
+        (@as(u64, has_fvar) << 40) +%
+        (@as(u64, has_expr_mvar) << 41) +%
+        (@as(u64, has_level_mvar) << 42) +%
+        (@as(u64, has_level_param) << 43) +%
         (range << 44);
 }
 
@@ -64,22 +68,32 @@ fn lean_expr_mk_app_data(f_data: u64, a_data: u64) callconv(.c) u64 {
     const f_range: u32 = @intCast(f_data >> 44);
     const a_range: u32 = @intCast(a_data >> 44);
     const range: u64 = @max(f_range, a_range);
-    const h: u64 = hashCombine(f_data, a_data);
-    return ((f_data | a_data) & (@as(u64, 15) << 40)) | h | (depth << 32) | (range << 44);
+    const h: u32 = @truncate(hashCombine(f_data, a_data));
+    return ((f_data | a_data) & (@as(u64, 15) << 40)) | @as(u64, h) | (depth << 32) | (range << 44);
 }
 
-inline fn hashCombine(a: u64, b: u64) u64 {
-    // Same hash combine as C++ runtime
-    const rot = std.math.rotl(u64, a, 5);
-    return rot ^ b +% 9 *% a;
+inline fn hashCombine(h: u64, k: u64) u64 {
+    const m: u64 = 0xc6a4a7935bd1e995;
+    const r: u6 = 47;
+    var kk = k *% m;
+    kk ^= kk >> r;
+    kk ^= m;
+    var hh = h ^ kk;
+    hh *%= m;
+    return hh;
 }
 
 // ── Level metadata ───────────────────────────────────────────────────────────
 
-fn lean_level_mk_data(hash_val: u32, depth: u32) callconv(.c) u64 {
-    const d: u64 = @min(depth, 65535);
-    const h: u64 = hash_val;
-    return h + (d << 32);
+fn lean_level_mk_data(hash_val: u64, depth_obj: ?*anyopaque, has_mvar: u8, has_param: u8) callconv(.c) u64 {
+    if (!object.lean_is_scalar(depth_obj))
+        @panic("universe level depth is too big");
+    const d_raw = object.lean_unbox(depth_obj);
+    if (d_raw > 16777215)
+        @panic("universe level depth is too big");
+    const d: u64 = @intCast(d_raw);
+    const h: u32 = @truncate(hash_val);
+    return @as(u64, h) + (@as(u64, has_mvar) << 32) + (@as(u64, has_param) << 33) + (d << 40);
 }
 
 // ── Level equality (structural) ──────────────────────────────────────────────
@@ -103,6 +117,60 @@ fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     }
     return 1;
 }
+fn natEq(a: *anyopaque, b: *anyopaque) u8 {
+    if (object.lean_is_scalar(a) or object.lean_is_scalar(b)) {
+        return if (object.lean_is_scalar(a) and object.lean_is_scalar(b) and a == b) 1 else 0;
+    }
+    return @intFromBool(lean_nat_big_eq(a, b));
+}
+
+fn levelListEq(a: *anyopaque, b: *anyopaque) u8 {
+    if (a == b) return 1;
+    var lhs = a;
+    var rhs = b;
+    while (!object.lean_is_scalar(lhs) and !object.lean_is_scalar(rhs)) {
+        const lhs_head = ctor.lean_ctor_get(lhs, 0) orelse return 0;
+        const rhs_head = ctor.lean_ctor_get(rhs, 0) orelse return 0;
+        if (lean_level_eq(lhs_head, rhs_head) == 0) return 0;
+        lhs = ctor.lean_ctor_get(lhs, 1) orelse return 0;
+        rhs = ctor.lean_ctor_get(rhs, 1) orelse return 0;
+    }
+    return if (lhs == rhs) 1 else 0;
+}
+
+fn litEq(a: *anyopaque, b: *anyopaque) u8 {
+    if (a == b) return 1;
+    const tag = object.lean_ptr_tag(a);
+    if (tag != object.lean_ptr_tag(b)) return 0;
+    const lhs = ctor.lean_ctor_get(a, 0) orelse return 0;
+    const rhs = ctor.lean_ctor_get(b, 0) orelse return 0;
+    return switch (tag) {
+        0 => natEq(lhs, rhs),
+        1 => @intFromBool(lean_string_eq(lhs, rhs)),
+        else => 0,
+    };
+}
+
+fn kvmapEq(a: *anyopaque, b: *anyopaque) u8 {
+    if (a == b) return 1;
+    var lhs = a;
+    var rhs = b;
+    while (!object.lean_is_scalar(lhs) and !object.lean_is_scalar(rhs)) {
+        if (lhs == rhs) return 1;
+        const lhs_entry = ctor.lean_ctor_get(lhs, 0) orelse return 0;
+        const rhs_entry = ctor.lean_ctor_get(rhs, 0) orelse return 0;
+        const lhs_key = ctor.lean_ctor_get(lhs_entry, 0) orelse return 0;
+        const rhs_key = ctor.lean_ctor_get(rhs_entry, 0) orelse return 0;
+        if (lean_name_eq(lhs_key, rhs_key) == 0) return 0;
+        const lhs_value = ctor.lean_ctor_get(lhs_entry, 1) orelse return 0;
+        const rhs_value = ctor.lean_ctor_get(rhs_entry, 1) orelse return 0;
+        if (lean_data_value_beq(lhs_value, rhs_value) == 0) return 0;
+        lhs = ctor.lean_ctor_get(lhs, 1) orelse return 0;
+        rhs = ctor.lean_ctor_get(rhs, 1) orelse return 0;
+    }
+    return if (lhs == rhs) 1 else 0;
+}
+
 
 // ── Expression structural equality ───────────────────────────────────────────
 
@@ -149,7 +217,26 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
             if (lean_name_eq(na, nb) == 0) return 0;
             const la = ctor.lean_ctor_get(a, 1) orelse return 0;
             const lb = ctor.lean_ctor_get(b, 1) orelse return 0;
-            return lean_level_eq(la, lb);
+            return levelListEq(la, lb);
+        },
+        5 => {
+            const aa = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const ab = ctor.lean_ctor_get(b, 1) orelse return 0;
+            if (exprEqRec(aa, ab, compare_bi) == 0) return 0;
+            var fa = ctor.lean_ctor_get(a, 0) orelse return 0;
+            var fb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            while (true) {
+                if (fa == fb) return 1;
+                const fa_is_app = !object.lean_is_scalar(fa) and object.lean_ptr_tag(fa) == 5;
+                const fb_is_app = !object.lean_is_scalar(fb) and object.lean_ptr_tag(fb) == 5;
+                if (!fa_is_app) return exprEqRec(fa, fb, compare_bi);
+                if (!fb_is_app) return 0;
+                const fa_arg = ctor.lean_ctor_get(fa, 1) orelse return 0;
+                const fb_arg = ctor.lean_ctor_get(fb, 1) orelse return 0;
+                if (exprEqRec(fa_arg, fb_arg, compare_bi) == 0) return 0;
+                fa = ctor.lean_ctor_get(fa, 0) orelse return 0;
+                fb = ctor.lean_ctor_get(fb, 0) orelse return 0;
+            }
         },
         6, 7 => {
             const da = ctor.lean_ctor_get(a, 1) orelse return 0;
@@ -180,13 +267,18 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
             const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
             return lean_name_eq(na, nb);
         },
+        9 => {
+            const la = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const lb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return litEq(la, lb);
+        },
         10 => {
             const ea = ctor.lean_ctor_get(a, 1) orelse return 0;
             const eb = ctor.lean_ctor_get(b, 1) orelse return 0;
             if (exprEqRec(ea, eb, compare_bi) == 0) return 0;
             const ma = ctor.lean_ctor_get(a, 0) orelse return 0;
             const mb = ctor.lean_ctor_get(b, 0) orelse return 0;
-            return if (ma == mb) 1 else 0;
+            return kvmapEq(ma, mb);
         },
         11 => {
             const ea = ctor.lean_ctor_get(a, 2) orelse return 0;
@@ -197,45 +289,24 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
             if (lean_name_eq(sa, sb) == 0) return 0;
             const ia = ctor.lean_ctor_get(a, 1) orelse return 0;
             const ib = ctor.lean_ctor_get(b, 1) orelse return 0;
-            return if (object.lean_unbox(ia) == object.lean_unbox(ib)) 1 else 0;
+            return natEq(ia, ib);
         },
-        else => {},
+        else => return 0,
     }
-    const nfields = ctor.ctorNumObjs(a);
-    if (nfields != ctor.ctorNumObjs(b)) return 0;
-
-    for (0..nfields) |i| {
-        const fa = ctor.lean_ctor_get(a, @intCast(i)) orelse continue;
-        const fb = ctor.lean_ctor_get(b, @intCast(i)) orelse continue;
-        if (object.lean_is_scalar(fa) and object.lean_is_scalar(fb)) {
-            if (object.lean_unbox(fa) != object.lean_unbox(fb)) return 0;
-        } else if (object.lean_is_scalar(fa) != object.lean_is_scalar(fb)) {
-            return 0;
-        } else {
-            if (fa != fb) {
-                const fa_tag = object.lean_ptr_tag(fa);
-                if (fa_tag <= 11 and object.lean_ptr_tag(fb) <= 11) {
-                    if (exprEqRec(fa, fb, compare_bi) == 0) return 0;
-                } else if (lean_level_eq(fa, fb) == 0) {
-                    return 0;
-                }
-            }
-        }
-    }
-    return 1;
 }
 
 // ── Has loose bound variable check ───────────────────────────────────────────
 
-/// Returns true if expression `e` has a loose bound variable with index >= `idx`.
+/// Returns true if expression `e` has a loose bound variable with index `idx`.
 fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8 {
+    if (!object.lean_is_scalar(idx)) return 0;
     if (object.lean_is_scalar(e)) return 0;
     const tag = object.lean_ptr_tag(e);
     const i = object.lean_unbox(idx);
     switch (tag) {
         0 => { // bvar
             const bi = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return 0);
-            return if (bi >= i) 1 else 0;
+            return if (bi == i) 1 else 0;
         },
         5 => { // app
             const f = ctor.lean_ctor_get(e, 0) orelse return 0;
@@ -305,7 +376,7 @@ inline fn hasFVar(e: *anyopaque) bool {
 }
 
 inline fn hasMVar(e: *anyopaque) bool {
-    return (eData(e) >> 41) & 1 != 0;
+    return (eData(e) >> 41) & 1 != 0 or (eData(e) >> 42) & 1 != 0;
 }
 
 /// Return e with RC incremented.
@@ -426,6 +497,7 @@ fn instantiateRec(e: *anyopaque, off: u32, n: usize, base: usize, subst: *anyopa
                 if (h >= off and idx < h) {
                     const si = if (rev) n - 1 - (idx - off) else idx - off;
                     const v = array.lean_array_uget(subst, base + si) orelse return retain(e);
+                    defer rc.lean_dec(v);
                     const d_obj = object.lean_box(off) orelse return retain(e);
                     const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
                     return lean_expr_lift_loose_bvars(v, s_obj, d_obj);
@@ -467,6 +539,7 @@ fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque 
         while (i > 0) {
             i -= 1;
             const v = array.lean_array_uget(subst, i) orelse continue;
+            defer rc.lean_dec(v);
             if (eTag(v) == tag) {
                 const v_name = ctor.lean_ctor_get(v, 0) orelse continue;
                 if (lean_name_eq(name, v_name) != 0) {
@@ -649,8 +722,34 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
     return ctor.lean_ctor_get(opt_cancel_tk, 0);
 }
 
+fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
+    return switch (object.lean_ptr_tag(decl)) {
+        0...3 => blk: {
+            rc.lean_inc(decl);
+            break :blk decl;
+        },
+        5 => blk: {
+            const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
+            if (object.lean_is_scalar(defns)) {
+                @panic("empty mutual definition declaration");
+            }
+            const defn = ctor.lean_ctor_get(defns, 0) orelse @panic("mutual definition declaration missing head definition");
+            const tail = ctor.lean_ctor_get(defns, 1) orelse @panic("mutual definition declaration missing tail");
+            if (!object.lean_is_scalar(tail)) {
+                @panic("multi-definition mutual declarations are not implemented in the Zig kernel add path");
+            }
+            rc.lean_inc(defn);
+            const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
+            ctor.lean_ctor_set(cinfo, 0, defn);
+            break :blk cinfo;
+        },
+        else => @panic("declaration kind is not implemented in the Zig kernel add path"),
+    };
+}
+
 fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
-    const new_env = lean_environment_add(env, decl);
+    const cinfo = declarationToPreliminaryConstantInfo(decl);
+    const new_env = lean_environment_add(env, cinfo);
     // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
     const result = alloc.lean_alloc_ctor(1, 1, 0);
     ctor.lean_ctor_set(result, 0, new_env);
@@ -665,7 +764,8 @@ fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_ca
     interrupt.setCancelToken(cancelTokenFromOption(opt_cancel_tk));
     defer interrupt.clearCancelToken();
 
-    const new_env = lean_environment_add(env, decl);
+    const cinfo = declarationToPreliminaryConstantInfo(decl);
+    const new_env = lean_environment_add(env, cinfo);
     // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
     const result = alloc.lean_alloc_ctor(1, 1, 0);
     ctor.lean_ctor_set(result, 0, new_env);

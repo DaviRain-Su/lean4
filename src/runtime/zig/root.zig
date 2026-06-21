@@ -88,6 +88,7 @@ pub const type_checker = @import("type_checker.zig");
 pub const uint_conv = @import("uint.zig");
 pub const utf8 = @import("utf8.zig");
 pub const util_ffi = @import("util_ffi.zig");
+pub const util_shell = @import("util_shell.zig");
 pub const uv_dns = @import("uv_dns.zig");
 pub const uv_event_loop = @import("uv_event_loop.zig");
 pub const uv_exports = @import("uv_exports.zig");
@@ -177,6 +178,7 @@ comptime {
     _ = time_task;
     _ = uint_conv;
     _ = util_ffi;
+    _ = util_shell;
     _ = util_options;
     _ = utf8;
     _ = uv_dns.force_link;

@@ -185,33 +185,21 @@ fn mkNatZeroExpr() *anyopaque {
     const nat = lean_expr_mk_const(constants.getNatName(), object.lean_box(0).?);
     const has_zero = lean_expr_mk_const(constants.getHasZeroZeroName(), mkList1(object.lean_box(0).?));
     const nat_has_zero = lean_expr_mk_const(constants.getNatHasZeroName(), object.lean_box(0).?);
-    const r = lean_expr_mk_app(lean_expr_mk_app(has_zero, nat), nat_has_zero);
-    rc.lean_dec(nat);
-    rc.lean_dec(has_zero);
-    rc.lean_dec(nat_has_zero);
-    return r;
+    return lean_expr_mk_app(lean_expr_mk_app(has_zero, nat), nat_has_zero);
 }
 
 fn mkNatOneExpr() *anyopaque {
     const nat = lean_expr_mk_const(constants.getNatName(), object.lean_box(0).?);
     const has_one = lean_expr_mk_const(constants.getHasOneOneName(), mkList1(object.lean_box(0).?));
     const nat_has_one = lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?);
-    const r = lean_expr_mk_app(lean_expr_mk_app(has_one, nat), nat_has_one);
-    rc.lean_dec(nat);
-    rc.lean_dec(has_one);
-    rc.lean_dec(nat_has_one);
-    return r;
+    return lean_expr_mk_app(lean_expr_mk_app(has_one, nat), nat_has_one);
 }
 
 fn mkNatBit0FnExpr() *anyopaque {
     const nat = lean_expr_mk_const(constants.getNatName(), object.lean_box(0).?);
     const bit0 = lean_expr_mk_const(constants.getBit0Name(), mkList1(object.lean_box(0).?));
     const nat_has_add = lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?);
-    const r = lean_expr_mk_app(lean_expr_mk_app(bit0, nat), nat_has_add);
-    rc.lean_dec(nat);
-    rc.lean_dec(bit0);
-    rc.lean_dec(nat_has_add);
-    return r;
+    return lean_expr_mk_app(lean_expr_mk_app(bit0, nat), nat_has_add);
 }
 
 fn mkNatBit1FnExpr() *anyopaque {
@@ -219,12 +207,7 @@ fn mkNatBit1FnExpr() *anyopaque {
     const bit1 = lean_expr_mk_const(constants.getBit1Name(), mkList1(object.lean_box(0).?));
     const nat_has_one = lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?);
     const nat_has_add = lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?);
-    const r = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(bit1, nat), nat_has_one), nat_has_add);
-    rc.lean_dec(nat);
-    rc.lean_dec(bit1);
-    rc.lean_dec(nat_has_one);
-    rc.lean_dec(nat_has_add);
-    return r;
+    return lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(bit1, nat), nat_has_one), nat_has_add);
 }
 
 fn mkList1(x: *anyopaque) *anyopaque {
@@ -258,17 +241,9 @@ fn toNatExprCore(n: *const mpz_zig.Mpz) *anyopaque {
 
     const sub = toNatExpr(&half);
     if (is_even) {
-        const fn_expr = mkNatBit0FnExpr();
-        const r = lean_expr_mk_app(fn_expr, sub);
-        rc.lean_dec(fn_expr);
-        rc.lean_dec(sub);
-        return r;
+        return lean_expr_mk_app(mkNatBit0FnExpr(), sub);
     } else {
-        const fn_expr = mkNatBit1FnExpr();
-        const r = lean_expr_mk_app(fn_expr, sub);
-        rc.lean_dec(fn_expr);
-        rc.lean_dec(sub);
-        return r;
+        return lean_expr_mk_app(mkNatBit1FnExpr(), sub);
     }
 }
 

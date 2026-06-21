@@ -88,7 +88,7 @@ pub fn registerAnnotation(kind: *anyopaque) void {
         if (nameEq(entry.kind, kind)) return;
     }
     const kv = mkAnnotationKvmap(kind);
-    g_annotation_maps.append(std.heap.c_allocator, .{ .kind = kind, .kvmap = kv }) catch @panic("registerAnnotation: oom");
+    g_annotation_maps.append(std.heap.c_allocator, .{ .kind = rc.lean_inc_ret(kind), .kvmap = kv }) catch @panic("registerAnnotation: oom");
 }
 
 /// If `e` is an annotation, return the wrapped mdata expression.
@@ -123,7 +123,7 @@ pub fn getAnnotationArg(e: *anyopaque) *anyopaque {
 pub fn mkAnnotation(kind: *anyopaque, e: *anyopaque) *anyopaque {
     for (g_annotation_maps.items) |entry| {
         if (nameEq(entry.kind, kind)) {
-            const r = lean_expr_mk_mdata(entry.kvmap, e);
+            const r = lean_expr_mk_mdata(rc.lean_inc_ret(entry.kvmap), rc.lean_inc_ret(e));
             return r;
         }
     }

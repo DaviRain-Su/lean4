@@ -286,6 +286,14 @@ fn outerCurried(a1: Obj) callconv(.c) Obj {
     closureSlots(closure)[0] = a1;
     return closure_ptr;
 }
+fn pureReturnSecond(_: Obj, value: Obj) callconv(.c) Obj {
+    return value;
+}
+
+fn mkFreshLikeCont(to_pure: Obj, r: Obj, _: Obj) callconv(.c) Obj {
+    return lean_apply_2(to_pure.?, object.lean_box(0).?, r.?);
+}
+
 
 fn testFn17(args: [*]Obj) callconv(.c) Obj {
     var sum: usize = 0;
@@ -361,6 +369,22 @@ test "lean_apply_2 over arity re-applies remaining arguments to the returned clo
 
     try testing.expectEqual(@as(usize, 9), object.lean_unbox(result));
 }
+test "lean_apply_1 preserves captured result in mkFreshId-shaped continuation" {
+    const pure_closure = alloc.lean_alloc_closure(opaqueFunPtr(&pureReturnSecond), 2, 0);
+    defer alloc.lean_free_object(pure_closure);
+
+    const captured = object.lean_box(42).?;
+    const cont = alloc.lean_alloc_closure(opaqueFunPtr(&mkFreshLikeCont), 3, 2);
+    defer alloc.lean_free_object(cont);
+    const cont_closure = closurePtr(cont);
+    const cont_slots = closureSlots(cont_closure);
+    cont_slots[0] = pure_closure;
+    cont_slots[1] = captured;
+
+    const result = lean_apply_1(cont, object.lean_box(7).?) orelse @panic("expected continuation result");
+    try testing.expectEqual(@as(usize, 42), object.lean_unbox(result));
+}
+
 
 test "lean_apply_n dispatches through the fixed-arity helpers" {
     const closure = alloc.lean_alloc_closure(opaqueFunPtr(&testFn2), 2, 0);

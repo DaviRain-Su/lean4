@@ -93,7 +93,7 @@ if(ZIG)
       "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
       -Dexport-lean-helpers=false
       -Dexport-allocator-symbols=false
-      -Dexport-kernel-symbols=false
+      -Dexport-kernel-symbols=true
       -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
       -Dcpp-build-type=${CMAKE_BUILD_TYPE}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"

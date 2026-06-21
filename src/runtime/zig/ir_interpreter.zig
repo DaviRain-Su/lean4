@@ -670,6 +670,49 @@ const Interpreter = struct {
         return entry;
     }
 
+    fn lookupSymbolWithDecl(self: *Interpreter, fn_name: *anyopaque, d: *anyopaque) SymbolCacheEntry {
+        if (self.symbol_cache.get(fn_name)) |e| return e;
+        var entry = SymbolCacheEntry{
+            .decl = ownedArg(d),
+            .native_addr = null,
+            .native_boxed = false,
+        };
+        if (self.prefer_native or declTag(d) == .Extern) {
+            const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
+            defer rc.lean_dec(mangled);
+            const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
+            defer rc.lean_dec(boxed_mangled);
+            const boxed_sym = lean_string_cstr(boxed_mangled);
+            if (lookupSymbolInCurexe(boxed_sym)) |p| {
+                entry.native_addr = p;
+                entry.native_boxed = true;
+            } else {
+                const export_name = lean_get_export_name_for(self.envArg(), ownedArg(fn_name));
+                defer rc.lean_dec(export_name);
+                const mangled_sym = lean_string_cstr(mangled);
+                var sym_name = mangled_sym;
+                if (!object.lean_is_scalar(export_name)) {
+                    if (ctor.lean_ctor_get(export_name, 0)) |export_name_val| {
+                        if (!object.lean_is_scalar(export_name_val) and object.lean_ptr_tag(export_name_val) == 1) {
+                            if (ctor.lean_ctor_get(export_name_val, 1)) |export_str| {
+                                sym_name = lean_string_cstr(export_str);
+                            }
+                        }
+                    }
+                }
+                if (lookupSymbolInCurexe(sym_name)) |p| {
+                    entry.native_addr = p;
+                } else if (@intFromPtr(sym_name) != @intFromPtr(mangled_sym)) {
+                    if (lookupSymbolInCurexe(mangled_sym)) |p| {
+                        entry.native_addr = p;
+                    }
+                }
+            }
+        }
+        self.symbol_cache.put(fn_name, entry) catch {};
+        return entry;
+    }
+
     fn getDecl(self: *Interpreter, fn_name: *anyopaque) *anyopaque {
         const opt_d = lean_ir_find_env_decl(self.envArg(), ownedArg(fn_name));
         if (object.lean_is_scalar(opt_d)) {
@@ -1114,14 +1157,45 @@ const Interpreter = struct {
         return r;
     }
 
-    fn runMain(self: *Interpreter, args: *anyopaque) u32 {
-        const main_name = runtime_helpers.lean_name_mk_str(object.lean_box(0).?, "main");
-        defer rc.lean_dec(main_name);
+    fn callBoxedDecl(self: *Interpreter, d: *anyopaque, n: usize, args: [*]*anyopaque) *anyopaque {
+        const fn_name = declFunId(d);
+        const sym = self.lookupSymbolWithDecl(fn_name, d);
+        const arity = array.lean_array_size(declParams(sym.decl));
+        var r: *anyopaque = undefined;
+        if (arity == 0) {
+            const t = declType(sym.decl);
+            const v = self.load(fn_name, t);
+            r = boxT(v, t);
+            if (!typeIsScalar(t)) rc.lean_inc(r);
+        } else {
+            if (sym.native_addr) |addr| {
+                r = alloc.lean_alloc_closure(addr, @intCast(arity), 0);
+            } else {
+                if (n != arity) {
+                    @panic("partial application for interpreted decls is not implemented");
+                }
+                const old_size = self.arg_stack.items.len;
+                const params = declParams(sym.decl);
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    const param = array.lean_array_uget(params, i) orelse @panic("missing decl param");
+                    self.arg_stack.append(self.allocator, unboxT(args[i], paramType(param))) catch @panic("callBoxedDecl: OOM");
+                }
+                self.pushFrame(sym.decl, old_size);
+                const v = self.evalBody(declFunBody(sym.decl));
+                self.popFrame();
+                return boxT(v, declType(sym.decl));
+            }
+        }
+        if (n > 0) {
+            r = apply_mod.lean_apply_n(r, @intCast(n), @ptrCast(args)) orelse object.lean_box(0).?;
+        }
+        return r;
+    }
 
-        const d = self.getDecl(main_name);
+    fn runMainDecl(self: *Interpreter, args: *anyopaque, d: *anyopaque) u32 {
         const params = declParams(d);
         const num_params = array.lean_array_size(params);
-        rc.lean_dec(d);
 
         const world = object.lean_box(0).?;
         var call_args: [2]*anyopaque = undefined;
@@ -1133,7 +1207,7 @@ const Interpreter = struct {
         call_args[n] = world;
         n += 1;
 
-        const w = self.callBoxed(main_name, n, &call_args);
+        const w = self.callBoxedDecl(d, n, &call_args);
         if (io_min.lean_io_result_is_ok(w)) {
             const ret_val = io_min.lean_io_result_get_value(w);
             const ret_uint = if (object.lean_is_scalar(ret_val)) object.lean_unbox(ret_val) else 0;
@@ -1144,6 +1218,31 @@ const Interpreter = struct {
             rc.lean_dec(w);
             return 1;
         }
+    }
+
+    fn runMain(self: *Interpreter, args: *anyopaque, main_name: *anyopaque) u32 {
+        const d = blk: {
+            const opt_d = lean_ir_find_env_decl(self.envArg(), ownedArg(main_name));
+            if (!object.lean_is_scalar(opt_d)) {
+                const found = ctor.lean_ctor_get(opt_d, 0) orelse @panic("runMain: missing decl");
+                rc.lean_inc(found);
+                rc.lean_dec(opt_d);
+                break :blk found;
+            }
+            rc.lean_dec(opt_d);
+
+            const opt_d_boxed = lean_ir_find_env_decl_boxed(self.envArg(), ownedArg(main_name));
+            if (object.lean_is_scalar(opt_d_boxed)) {
+                rc.lean_dec(opt_d_boxed);
+                @panic("(interpreter) unknown declaration");
+            }
+            const found = ctor.lean_ctor_get(opt_d_boxed, 0) orelse @panic("runMain: missing boxed decl");
+            rc.lean_inc(found);
+            rc.lean_dec(opt_d_boxed);
+            break :blk found;
+        };
+        defer rc.lean_dec(d);
+        return self.runMainDecl(args, d);
     }
 };
 
@@ -1162,11 +1261,11 @@ fn curry(addr: *anyopaque, n: usize, args: [*]*anyopaque) *anyopaque {
 
 // ── Entry points ────────────────────────────────────────────────────────────
 
-fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque) callconv(.c) u32 {
+fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl: *anyopaque) callconv(.c) u32 {
     const a = std.heap.page_allocator;
     var interp = Interpreter.init(env, opts, a);
     defer interp.deinit();
-    return interp.runMain(args);
+    return interp.runMainDecl(args, decl);
 }
 
 fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
@@ -1231,7 +1330,7 @@ var empty_args: [*]u8 = undefined;
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&leanEvalMain, .{ .name = "lean_eval_main", .linkage = .strong });
+        @export(&leanEvalMain, .{ .name = "lean_eval_main_decl", .linkage = .strong });
         @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .strong });
         @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .strong });
     }

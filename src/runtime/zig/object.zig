@@ -1,9 +1,12 @@
 const std = @import("std");
 const testing = std.testing;
+const runtime_options = @import("runtime_options");
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const mpz_object = @import("mpz_object.zig");
 const allocprof = @import("allocprof.zig");
+
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -16,6 +19,14 @@ fn ptrBits(o: ?*anyopaque) usize {
 fn header(o: *anyopaque) *align(1) lean.lean_object {
     return @ptrCast(o);
 }
+fn setStHeader(hdr: *align(1) lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
+
 
 fn ptrTag(o: *anyopaque) u8 {
     return header(o).m_tag;
@@ -53,6 +64,11 @@ fn stringDataByteSize(o: *lean.lean_string_object) usize {
 }
 
 fn defaultObjectSize(o: *anyopaque) usize {
+    // Compacted-region objects have m_rc == 0 (non-heap). Skip the
+    // AllocationMeta check for them — the bytes before a compacted-region
+    // object are adjacent object data, not our metadata, and a false
+    // positive would corrupt the reader walk by returning a wrong size.
+    if (header(o).m_rc == 0) return alloc.legacyPayloadSize(o);
     return alloc.allocationPayloadSize(o) orelse alloc.legacyPayloadSize(o);
 }
 
@@ -73,13 +89,11 @@ pub export fn lean_register_external_class(
 }
 
 pub export fn lean_alloc_external(cls: *lean.lean_external_class, data: ?*anyopaque) callconv(.c) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_external_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_external_object));
     const ext: *lean.lean_external_object = @ptrCast(@alignCast(ptr));
-    ext.* = .{
-        .m_header = .{ .m_rc = 1, .m_cs_sz = 0, .m_other = 0, .m_tag = lean.LeanExternal },
-        .m_class = cls,
-        .m_data = data,
-    };
+    setStHeader(&ext.m_header, lean.LeanExternal, 0);
+    ext.m_class = cls;
+    ext.m_data = data;
     allocprof.recordAlloc(lean.LeanExternal);
     return ptr;
 }

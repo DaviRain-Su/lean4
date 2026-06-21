@@ -12,6 +12,7 @@ import Lean.Server.Watchdog
 import Lean.Server.FileWorker
 import Lean.Compiler.LCNF.EmitC
 import Lean.Compiler.LCNF.EmitZig
+import Lean.Compiler.IR
 
 import Init.System.Platform
 import Lean.Compiler.Options
@@ -34,8 +35,8 @@ abort on files with invalid UTF-8.
 opaque decodeLossyUTF8 (a : @& ByteArray) : String
 
 /- Runs the `main` function of the module with `args` using the Lean interpreter. -/
-@[extern "lean_eval_main"]
-opaque runMain (env : @& Environment) (opts : @& Options) (args : @& List String) : BaseIO UInt32
+@[extern "lean_eval_main_decl"]
+opaque runMain (env : @& Environment) (opts : @& Options) (args : @& List String) (decl : @& Lean.IR.Decl) : BaseIO UInt32
 
 /--
 Initializes the LLVM subsystem.
@@ -567,7 +568,12 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
           throw e
     else
       pure `_stdin
-  let env? ← Elab.runFrontend contents opts.leanOpts fileName mainModuleName
+  let leanOpts :=
+    if opts.run then
+      Compiler.compiler.postponeCompile.set (Elab.async.set opts.leanOpts false) false
+    else
+      opts.leanOpts
+  let env? ← Elab.runFrontend contents leanOpts fileName mainModuleName
     opts.trustLevel opts.oleanFileName? opts.ileanFileName? opts.jsonOutput opts.errorOnKinds
     #[] opts.printStats setup?
     (incrSaveFileName? := opts.incrSaveFileName?)
@@ -575,7 +581,11 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
     (incrHeaderSaveFileName? := opts.incrHeaderSaveFileName?)
   if let some env := env? then
     if opts.run then
-      return ← runMain env opts.leanOpts args
+      let (_, s) ← (Lean.compileDecls #[`main]).toIO
+        { fileName, fileMap := default, options := leanOpts } { env }
+      let some decl := Lean.IR.findEnvDecl s.env `main
+        | throw <| IO.userError "missing IR for `main` after compileDecls"
+      return ← runMain s.env leanOpts args decl
     if let some c := opts.cFileName? then
       let .ok out ← IO.FS.Handle.mk c .write |>.toBaseIO
         | IO.eprintln s!"failed to create '{c}'"

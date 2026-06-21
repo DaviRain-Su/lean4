@@ -143,6 +143,7 @@ pub const ReplaceVisitor = struct {
 
     fn saveResult(self: *ReplaceVisitor, e: *anyopaque, r: *anyopaque, shared: bool) *anyopaque {
         if (shared) {
+            rc.lean_inc(r);
             self.cache.put(e, r) catch @panic("replace_visitor: oom");
         }
         return r;

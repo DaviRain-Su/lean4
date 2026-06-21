@@ -20,6 +20,8 @@ const ctor = @import("ctor.zig");
 const io_result = @import("io_result.zig");
 
 pub const force_link = true;
+extern fn l_Lean_Name_hash___override(n: *anyopaque) callconv(.c) u64;
+
 
 // ── Object header field accessors ─────────────────────────────────────────────
 
@@ -468,10 +470,12 @@ pub export fn lean_io_result_take_value(r: *anyopaque) callconv(.c) *anyopaque {
 // ── Name hashing ─────────────────────────────────────────────────────────────
 
 pub export fn lean_name_hash_ptr(n: *anyopaque) callconv(.c) u64 {
-    // Name objects store the hash in the first scalar field after the object pointers.
     const num_objs = ptrOther(n);
     const offset = num_objs * @sizeOf(?*anyopaque);
-    return ctor.lean_ctor_get_uint64(n, @intCast(offset));
+    if ((ptrTag(n) == 1 or ptrTag(n) == 2) and ctor.ctorScalarBytes(n) >= @sizeOf(u64)) {
+        return ctor.lean_ctor_get_uint64(n, @intCast(offset));
+    }
+    return l_Lean_Name_hash___override(n);
 }
 
 pub export fn lean_name_hash(n: *anyopaque) callconv(.c) u64 {

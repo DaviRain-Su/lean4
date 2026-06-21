@@ -286,17 +286,17 @@ pub fn expandEtaStruct(env: *anyopaque, e_type: *anyopaque, e: *anyopaque) *anyo
     // mk_app(mk_const(ctor_name, const_levels(I)), params)
     // args are reversed (args_buf has reversed order from getAppArgs)
     std.mem.reverse(*anyopaque, args_buf.items);
-    var result = mkConstFromName(ctor_name, ea.constLevels(I));
+    var result = mkConstFromName(rc.lean_inc_ret(ctor_name), rc.lean_inc_ret(ea.constLevels(I)));
     var i: usize = 0;
     while (i < ctor_val_nparams and i < args_buf.items.len) : (i += 1) {
-        result = lean_expr_mk_app(result, args_buf.items[i]);
+        result = lean_expr_mk_app(result, rc.lean_inc_ret(args_buf.items[i]));
     }
 
     // Add projections: mk_proj(I, i, e) for each field
     var j: usize = 0;
     while (j < ctor_val_nfields) : (j += 1) {
         const idx = object.lean_box(j).?;
-        const proj = lean_expr_mk_proj(ea.constName(I), idx, e);
+        const proj = lean_expr_mk_proj(rc.lean_inc_ret(ea.constName(I)), idx, rc.lean_inc_ret(e));
         result = lean_expr_mk_app(result, proj);
     }
     return result;

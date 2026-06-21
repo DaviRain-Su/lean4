@@ -30,8 +30,25 @@ extern fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_append_index_after(n: *anyopaque, i: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_lower_loose_bvars(e: *anyopaque, s: *anyopaque, d: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
+extern fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_kernel_check(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 
 const alloc = @import("alloc.zig");
+const array = @import("array.zig");
+
+fn arrayFromRevArgs(rev_args: []*anyopaque) *anyopaque {
+    // rev_args are in reverse order (last arg first), which is the correct
+    // order for lean_expr_instantiate: subst[0] replaces bvar(0), etc.
+    return array.mkArrayFromSlice(rev_args);
+}
 
 fn nameEq(a: *anyopaque, b: *anyopaque) bool {
     return lean_name_eq(a, b) != 0;
@@ -132,11 +149,53 @@ pub fn mkFreshLpName(lp_names: *anyopaque) *anyopaque {
 }
 
 fn simpleFind(m: *anyopaque, n: *anyopaque) bool {
-    // Very small local find: traverse `m` looking for exact pointer or constant named `n`.
-    // Used only for the simple `occurs` variants; full `find` is C++-provided.
-    _ = m;
-    _ = n;
-    return false; // stub: real find requires C++ find_fn
+    // Traverse `m` looking for subexpression pointer-equal to `n`.
+    return findExprPtr(m, n);
+}
+
+fn findExprPtr(e: *anyopaque, target: *anyopaque) bool {
+    if (e == target) return true;
+    if (object.lean_is_scalar(e)) return false;
+    switch (ea.kind(e)) {
+        .BVar, .FVar, .MVar, .Sort, .Const, .Lit => return false,
+        .App => {
+            return findExprPtr(ea.appFn(e), target) or findExprPtr(ea.appArg(e), target);
+        },
+        .Lambda, .Pi => {
+            // bindingDomain and bindingBody
+            return findExprPtr(ea.bindingDomain(e), target) or findExprPtr(ea.bindingBody(e), target);
+        },
+        .Let => {
+            // letType, letValue, letBody
+            if (findExprPtr(ea.letType(e), target)) return true;
+            if (findExprPtr(ea.letValue(e), target)) return true;
+            return findExprPtr(ea.letBody(e), target);
+        },
+        .MData => return findExprPtr(ea.mdataExpr(e), target),
+        .Proj => return findExprPtr(ea.projExpr(e), target),
+    }
+}
+
+fn findConstName(e: *anyopaque, target_name: *anyopaque) bool {
+    if (ea.isConst(e) and nameEq(ea.constName(e), target_name)) return true;
+    if (object.lean_is_scalar(e)) return false;
+    switch (ea.kind(e)) {
+        .BVar, .FVar, .MVar, .Sort, .Lit => return false,
+        .Const => return nameEq(ea.constName(e), target_name),
+        .App => {
+            return findConstName(ea.appFn(e), target_name) or findConstName(ea.appArg(e), target_name);
+        },
+        .Lambda, .Pi => {
+            return findConstName(ea.bindingDomain(e), target_name) or findConstName(ea.bindingBody(e), target_name);
+        },
+        .Let => {
+            if (findConstName(ea.letType(e), target_name)) return true;
+            if (findConstName(ea.letValue(e), target_name)) return true;
+            return findConstName(ea.letBody(e), target_name);
+        },
+        .MData => return findConstName(ea.mdataExpr(e), target_name),
+        .Proj => return findConstName(ea.projExpr(e), target_name),
+    }
 }
 
 pub fn occursExpr(n: *anyopaque, m: *anyopaque) bool {
@@ -144,9 +203,7 @@ pub fn occursExpr(n: *anyopaque, m: *anyopaque) bool {
 }
 
 pub fn occursName(n: *anyopaque, m: *anyopaque) bool {
-    _ = n;
-    _ = m;
-    return false; // stub
+    return findConstName(m, n);
 }
 
 pub fn isAppOf(e: *anyopaque, f_name: *anyopaque) bool {
@@ -169,9 +226,33 @@ pub fn consumeAutoOptParam(type_expr: *anyopaque) *anyopaque {
 }
 
 pub fn unfoldTerm(env: *anyopaque, e: *anyopaque) ?*anyopaque {
-    _ = env;
-    _ = e;
-    return null; // stub: needs instantiate_value_lparams + apply_beta
+    // Port of C++ unfold_term (util.cpp:102-113).
+    const f = ea.getAppFn(e);
+    if (!ea.isConst(f)) return null;
+    const info = ka.envFind(env, ea.constName(f)) orelse return null;
+    defer rc.lean_dec(info);
+    if (!ka.ciHasValue(info)) return null;
+    if (ka.listLength(ea.constLevels(f)) != ka.ciNumLparams(info)) return null;
+    // Instantiate value with levels
+    const d = lean_kernel_instantiate_value_lparams(env, info, ea.constLevels(f));
+    // Collect args (reverse order)
+    var args = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer {
+        for (args.items) |a| rc.lean_dec(a);
+        args.deinit(alloc.allocator());
+    }
+    var curr = e;
+    while (ea.isApp(curr)) {
+        args.append(alloc.allocator(), ea.appArg(curr)) catch @panic("unfoldTerm: OOM");
+        rc.lean_inc(args.items[args.items.len - 1]);
+        curr = ea.appFn(curr);
+    }
+    // Apply beta: d applied to reversed args
+    const subst = arrayFromRevArgs(args.items);
+    const result = lean_expr_instantiate(d, subst);
+    rc.lean_dec(subst);
+    rc.lean_dec(d);
+    return result;
 }
 
 pub fn unfoldApp(env: *anyopaque, e: *anyopaque) ?*anyopaque {
@@ -298,16 +379,82 @@ pub fn getConstructorNames(env: *anyopaque, n: *anyopaque, result: *std.ArrayLis
 }
 
 pub fn isConstructorAppExt(env: *anyopaque, e: *anyopaque) ?*anyopaque {
-    _ = env;
-    _ = e;
-    return null; // stub: needs is_constructor_app
+    // Port of C++ is_constructor_app_ext (util.cpp:230-244).
+    const inductive = @import("inductive.zig");
+    if (inductive.isConstructorApp(env, e)) {
+        const f = ea.getAppFn(e);
+        return rc.lean_inc_ret(ea.constName(f));
+    }
+    const f = ea.getAppFn(e);
+    if (!ea.isConst(f)) return null;
+    const info = ka.envFind(env, ea.constName(f)) orelse return null;
+    defer rc.lean_dec(info);
+    if (!ka.ciHasValue(info)) return null;
+    // Strip lambdas from value and recurse
+    var it = ka.ciValue(info);
+    while (ea.isLambda(it)) {
+        it = ea.bindingBody(it);
+    }
+    return isConstructorAppExt(env, it);
 }
 
 pub fn getConstructorRelevantFields(env: *anyopaque, n: *anyopaque, result: *std.ArrayList(bool)) void {
-    _ = env;
-    _ = n;
-    _ = result;
-    @panic("getConstructorRelevantFields not implemented");
+    // Port of C++ get_constructor_relevant_fields (util.cpp:246-268).
+    const info = ka.envGet(env, n);
+    defer rc.lean_dec(info);
+    std.debug.assert(ka.ciIsConstructor(info));
+    const type_e = ka.ciType(info);
+    const nparams = ka.ctorValNumParams(info);
+    var lctx: *anyopaque = object.lean_box(0).?;
+    var telescope = std.ArrayList(*anyopaque).init(std.heap.c_allocator);
+    defer {
+        for (telescope.items) |f| rc.lean_dec(f);
+        telescope.deinit();
+    }
+    const body = toTelescopeWhnf(env, &lctx, undefined, type_e, &telescope, null);
+    rc.lean_dec(body);
+    std.debug.assert(telescope.items.len >= nparams);
+    var i = nparams;
+    while (i < telescope.items.len) : (i += 1) {
+        const fvar = telescope.items[i];
+        // Get the type of this fvar from lctx
+        const decl = ka.lctxFind(lctx, ea.fvarName(fvar)) orelse {
+            result.append(false) catch @panic("getConstructorRelevantFields: OOM");
+            continue;
+        };
+        defer rc.lean_dec(decl);
+        const ftype = ka.localDeclType(decl);
+        if (isPropHelper(env, lctx, ftype)) {
+            result.append(false) catch @panic("getConstructorRelevantFields: OOM");
+        } else {
+            // Check if the remaining type is a sort or prop
+            var tmp_telescope = std.ArrayList(*anyopaque).init(std.heap.c_allocator);
+            defer {
+                for (tmp_telescope.items) |f| rc.lean_dec(f);
+                tmp_telescope.deinit();
+            }
+            const n_ftype = toTelescopeWhnf(env, &lctx, undefined, ftype, &tmp_telescope, null);
+            const not_sort = !ea.isSort(n_ftype);
+            const not_prop = !isPropHelper(env, lctx, n_ftype);
+            rc.lean_dec(n_ftype);
+            result.append(not_sort and not_prop) catch @panic("getConstructorRelevantFields: OOM");
+        }
+    }
+}
+
+fn isPropHelper(env: *anyopaque, lctx: *anyopaque, e: *anyopaque) bool {
+    // Check if e : Prop by inferring its type and whnf-ing it.
+    const except = lean_kernel_check(env, lctx, e);
+    defer rc.lean_dec(except);
+    if (object.lean_ptr_tag(except) != 1) return false; // error
+    const ty = ctor.lean_ctor_get(except, 0) orelse return false;
+    defer rc.lean_dec(ty);
+    const whnf_ty = lean_kernel_whnf(env, lctx, ty);
+    defer rc.lean_dec(whnf_ty);
+    if (!ea.isSort(whnf_ty)) return false;
+    const lvl = ea.sortLevel(whnf_ty);
+    // Prop = Sort 0, check level is zero (scalar 0)
+    return object.lean_is_scalar(lvl) and object.lean_unbox(lvl) == 0;
 }
 
 pub fn getNumConstructors(env: *anyopaque, n: *anyopaque) usize {
@@ -342,9 +489,33 @@ pub fn getConstructorInductiveType(env: *anyopaque, ctor_name: *anyopaque) *anyo
 }
 
 pub fn getDatatypeLevel(env: *anyopaque, ind_type: *anyopaque) *anyopaque {
-    _ = env;
-    _ = ind_type;
-    @panic("getDatatypeLevel not implemented");
+    // Port of C++ get_datatype_level (util.cpp:185-198).
+    // Whnf the type, strip Pi binders by creating fvars, then extract sort level.
+    var lctx: *anyopaque = object.lean_box(0).?; // empty local context (nil)
+    var it = lean_kernel_whnf(env, lctx, ind_type);
+    while (ea.isPi(it)) {
+        const binding_name = ea.bindingName(it);
+        const domain = ea.bindingDomain(it);
+        const bi = ea.bindingInfo(it);
+        // Create a fresh fvar for this binder
+        const fvar_name = util_name.mkInternalUniqueName();
+        lctx = lean_local_ctx_mk_local_decl(lctx, rc.lean_inc_ret(fvar_name.obj.?), binding_name, domain, bi);
+        const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
+        // Instantiate body with the fvar
+        const single = mkList1(fvar);
+        const new_it = lean_expr_instantiate_rev(ea.bindingBody(it), single);
+        rc.lean_dec(single);
+        rc.lean_dec(it);
+        it = lean_kernel_whnf(env, lctx, new_it);
+        rc.lean_dec(new_it);
+    }
+    if (ea.isSort(it)) {
+        const result = rc.lean_inc_ret(ea.sortLevel(it));
+        rc.lean_dec(it);
+        return result;
+    }
+    rc.lean_dec(it);
+    @panic("getDatatypeLevel: invalid inductive datatype type");
 }
 
 pub fn updateResultSort(t: *anyopaque, l: *anyopaque) *anyopaque {
@@ -360,29 +531,60 @@ pub fn updateResultSort(t: *anyopaque, l: *anyopaque) *anyopaque {
 }
 
 pub fn instantiateLparam(e: *anyopaque, p: *anyopaque, l: *anyopaque) *anyopaque {
-    _ = e;
-    _ = p;
-    _ = l;
-    @panic("instantiateLparam not implemented");
+    // Port of C++ instantiate_lparam: instantiate_lparams(e, names(p), levels(l))
+    const ps = mkList1(p);
+    const ls = mkList1(l);
+    const result = runtime_helpers.instantiateLparamsExpr(e, ps, ls);
+    if (result == e) {
+        return retain(e);
+    }
+    return result;
 }
 
-pub fn toTelescope(lctx: *anyopaque, ngen: *anyopaque, type_expr: *anyopaque, telescope: *std.ArrayList(*anyopaque), binfo: ?*anyopaque) *anyopaque {
-    _ = lctx;
-    _ = ngen;
-    _ = type_expr;
-    _ = telescope;
-    _ = binfo;
-    @panic("toTelescope not implemented");
+pub fn toTelescope(lctx: **anyopaque, ngen: *anyopaque, type_expr: *anyopaque, telescope: *std.ArrayList(*anyopaque), binfo: ?u8) *anyopaque {
+    // Port of C++ to_telescope (util.cpp:303-314).
+    // Pi version: strips Pi binders, creates fvars, instantiates body.
+    _ = ngen; // name generation handled by util_name.mkInternalUniqueName
+    var e = type_expr;
+    while (ea.isPi(e)) {
+        const binding_name = ea.bindingName(e);
+        const domain = ea.bindingDomain(e);
+        const bi = binfo orelse ea.bindingInfo(e);
+        // Create fvar
+        const fvar_name = util_name.mkInternalUniqueName();
+        lctx.* = lean_local_ctx_mk_local_decl(lctx.*, rc.lean_inc_ret(fvar_name.obj.?), binding_name, domain, bi);
+        const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
+        telescope.append(std.heap.c_allocator, fvar) catch @panic("toTelescope: OOM");
+        // Instantiate body with fvar
+        const subst = arrayFromRevArgs(&.{fvar});
+        const new_e = lean_expr_instantiate(ea.bindingBody(e), subst);
+        rc.lean_dec(subst);
+        e = new_e;
+    }
+    return e;
 }
 
-pub fn toTelescopeWhnf(env: *anyopaque, lctx: *anyopaque, ngen: *anyopaque, type_expr: *anyopaque, telescope: *std.ArrayList(*anyopaque), binfo: ?*anyopaque) *anyopaque {
-    _ = env;
-    _ = lctx;
+pub fn toTelescopeWhnf(env: *anyopaque, lctx: **anyopaque, ngen: *anyopaque, type_expr: *anyopaque, telescope: *std.ArrayList(*anyopaque), binfo: ?u8) *anyopaque {
+    // Port of C++ to_telescope with whnf (util.cpp:320-334).
     _ = ngen;
-    _ = type_expr;
-    _ = telescope;
-    _ = binfo;
-    @panic("toTelescopeWhnf not implemented");
+    var new_type = lean_kernel_whnf(env, lctx.*, type_expr);
+    var type_e = new_type;
+    while (ea.isPi(new_type)) {
+        type_e = new_type;
+        const binding_name = ea.bindingName(type_e);
+        const domain = ea.bindingDomain(type_e);
+        const bi = binfo orelse ea.bindingInfo(type_e);
+        const fvar_name = util_name.mkInternalUniqueName();
+        lctx.* = lean_local_ctx_mk_local_decl(lctx.*, rc.lean_inc_ret(fvar_name.obj.?), binding_name, domain, bi);
+        const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
+        telescope.append(std.heap.c_allocator, fvar) catch @panic("toTelescopeWhnf: OOM");
+        const subst = arrayFromRevArgs(&.{fvar});
+        type_e = lean_expr_instantiate(ea.bindingBody(type_e), subst);
+        rc.lean_dec(subst);
+        new_type = lean_kernel_whnf(env, lctx.*, type_e);
+        rc.lean_dec(type_e);
+    }
+    return new_type;
 }
 
 // ── Logical connectives and types ───────────────────────────────────────────
@@ -514,9 +716,7 @@ pub fn mkIffRefl(a: *anyopaque) *anyopaque {
 
 pub fn mkPropext(lhs: *anyopaque, rhs: *anyopaque, iff_pr: *anyopaque) *anyopaque {
     const c = lean_expr_mk_const(constants.getPropextName(), object.lean_box(0).?);
-    const r = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(c, lhs), rhs), iff_pr);
-    rc.lean_dec(c);
-    return r;
+    return lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(c, lhs), rhs), iff_pr);
 }
 
 pub fn isEqNdrecCore(e: *anyopaque) bool {
@@ -623,24 +823,17 @@ pub fn isNotOrNe(e: *anyopaque, a: *?*anyopaque) bool {
     if (isNot(e, a)) return true;
     if (isAppOfN(e, constants.getNeName(), 3)) {
         var args = std.ArrayList(*anyopaque).init(std.heap.c_allocator);
-        defer {
-            for (args.items) |x| rc.lean_dec(x);
-            args.deinit();
-        }
         collectAppArgs(e, &args);
         const fn_expr = ea.getAppFn(e);
         const new_fn = lean_expr_mk_const(constants.getEqName(), retain(ea.constLevels(fn_expr)));
-        defer rc.lean_dec(new_fn);
         var r = new_fn;
         for (args.items) |arg| {
-            const next = lean_expr_mk_app(r, arg);
-            rc.lean_dec(r);
-            r = next;
+            r = lean_expr_mk_app(r, arg);
         }
+        args.deinit();
         a.* = r;
         return true;
     }
-    return false;
 }
 
 pub fn mkNot(e: *anyopaque) *anyopaque {
@@ -676,13 +869,14 @@ pub fn getBinaryOpOut(e: *anyopaque, arg1: *?*anyopaque, arg2: *?*anyopaque) ?*a
 
 pub fn mkNaryApp(op: *anyopaque, args: []*anyopaque) *anyopaque {
     std.debug.assert(args.len >= 2);
-    var r = lean_expr_mk_app(lean_expr_mk_app(op, args[args.len - 2]), args[args.len - 1]);
+    var r = lean_expr_mk_app(
+        lean_expr_mk_app(rc.lean_inc_ret(op), rc.lean_inc_ret(args[args.len - 2])),
+        rc.lean_inc_ret(args[args.len - 1]),
+    );
     var i: usize = args.len;
     while (i > 2) {
         i -= 1;
-        const next = lean_expr_mk_app(lean_expr_mk_app(op, args[i - 1]), r);
-        rc.lean_dec(r);
-        r = next;
+        r = lean_expr_mk_app(lean_expr_mk_app(rc.lean_inc_ret(op), rc.lean_inc_ret(args[i - 1])), r);
     }
     return r;
 }
@@ -704,36 +898,296 @@ pub fn isAnnotatedHeadBeta(e: *anyopaque) bool {
 
 pub fn annotatedHeadBetaReduce(e: *anyopaque) *anyopaque {
     if (!isAnnotatedHeadBeta(e)) return retain(e);
-    @panic("annotatedHeadBetaReduce not implemented");
+    const annotation = @import("annotation.zig");
+    // Collect args (reverse order)
+    var args = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer {
+        for (args.items) |a| rc.lean_dec(a);
+        args.deinit(alloc.allocator());
+    }
+    var curr = e;
+    while (ea.isApp(curr)) {
+        args.append(alloc.allocator(), ea.appArg(curr)) catch @panic("annotatedHeadBetaReduce: OOM");
+        rc.lean_inc(args.items[args.items.len - 1]);
+        curr = ea.appFn(curr);
+    }
+    // Strip annotations from f
+    var f = curr;
+    if (annotation.isAnnotation(f)) |a| {
+        f = annotation.getNestedAnnotationArg(a);
+        rc.lean_inc(f);
+    }
+    // Apply beta: f is a lambda, args are in reverse order
+    const subst = arrayFromRevArgs(args.items);
+    const result = lean_expr_instantiate(ea.bindingBody(f), subst);
+    rc.lean_dec(subst);
+    rc.lean_dec(f);
+    return annotatedHeadBetaReduce(result);
 }
 
 // ── Eta/beta reduction ──────────────────────────────────────────────────────
 
+fn isEtaCandidate(b: *anyopaque) ?*anyopaque {
+    // Check if b = app(f, bvar(0)) and f has no loose bvar at index 0
+    if (!ea.isApp(b)) return null;
+    const arg = ea.appArg(b);
+    if (!ea.isBVar(arg)) return null;
+    if (object.lean_unbox(ea.bvarIdx(arg)) != 0) return null;
+    const f = ea.appFn(b);
+    const zero_box = object.lean_box(0).?;
+    if (lean_expr_has_loose_bvar(f, zero_box) != 0) return null;
+    return f;
+}
+
+fn lowerLooseBvars(e: *anyopaque, d: usize) *anyopaque {
+    const s_box = object.lean_box(0).?;
+    const d_box = object.lean_box(d).?;
+    return lean_expr_lower_loose_bvars(e, s_box, d_box);
+}
+
 pub fn tryEta(e: *anyopaque) *anyopaque {
-    _ = e;
-    @panic("tryEta not implemented");
+    // Port of C++ try_eta (util.cpp:699-718).
+    if (ea.isLambda(e)) {
+        const b = ea.bindingBody(e);
+        if (ea.isLambda(b)) {
+            const new_b = tryEta(b);
+            if (new_b == b) return e;
+            if (isEtaCandidate(new_b)) |f| {
+                const result = lowerLooseBvars(f, 1);
+                rc.lean_dec(new_b);
+                return result;
+            }
+            const updated = ea.updateBinding(e, ea.bindingDomain(e), new_b);
+            rc.lean_dec(new_b);
+            return updated;
+        } else if (isEtaCandidate(b)) |f| {
+            return lowerLooseBvars(f, 1);
+        }
+    }
+    return retain(e);
+}
+
+fn headBetaReduce(e: *anyopaque) *anyopaque {
+    // If e = (\x. body) arg1 ... argn, beta reduce
+    if (!ea.isApp(e)) return retain(e);
+    const f = ea.getAppFn(e);
+    if (!ea.isLambda(f)) return retain(e);
+    // Collect args (reverse order)
+    var args = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer {
+        for (args.items) |a| rc.lean_dec(a);
+        args.deinit(alloc.allocator());
+    }
+    var curr = e;
+    while (ea.isApp(curr)) {
+        args.append(alloc.allocator(), ea.appArg(curr)) catch @panic("headBetaReduce: OOM");
+        rc.lean_inc(args.items[args.items.len - 1]);
+        curr = ea.appFn(curr);
+    }
+    // f = curr (the lambda)
+    const subst = arrayFromRevArgs(args.items);
+    const result = lean_expr_instantiate(ea.bindingBody(curr), subst);
+    rc.lean_dec(subst);
+    return result;
+}
+
+fn isHeadBeta(e: *anyopaque) bool {
+    return ea.isApp(e) and ea.isLambda(ea.getAppFn(e));
+}
+
+fn betaReduceRec(e: *anyopaque) *anyopaque {
+    switch (ea.kind(e)) {
+        .App => {
+            const new_fn = betaReduceRec(ea.appFn(e));
+            const new_arg = betaReduceRec(ea.appArg(e));
+            var e1 = ea.updateApp(e, new_fn, new_arg);
+            if (isHeadBeta(e1)) {
+                const reduced = headBetaReduce(e1);
+                rc.lean_dec(e1);
+                e1 = betaReduceRec(reduced);
+                rc.lean_dec(reduced);
+            }
+            return e1;
+        },
+        .Lambda, .Pi => {
+            const new_dom = betaReduceRec(ea.bindingDomain(e));
+            const new_body = betaReduceRec(ea.bindingBody(e));
+            return ea.updateBinding(e, new_dom, new_body);
+        },
+        .Let => {
+            const new_ty = betaReduceRec(ea.letType(e));
+            const new_val = betaReduceRec(ea.letValue(e));
+            const new_body = betaReduceRec(ea.letBody(e));
+            return ea.updateLet(e, new_ty, new_val, new_body);
+        },
+        .MData => {
+            const new_inner = betaReduceRec(ea.mdataExpr(e));
+            return ea.updateMData(e, new_inner);
+        },
+        .Proj => {
+            const new_inner = betaReduceRec(ea.projExpr(e));
+            return ea.updateProj(e, new_inner);
+        },
+        else => return retain(e),
+    }
 }
 
 pub fn betaReduce(e: *anyopaque) *anyopaque {
-    _ = e;
-    @panic("betaReduce not implemented");
+    return betaReduceRec(e);
+}
+
+fn etaReduceRec(e: *anyopaque) *anyopaque {
+    switch (ea.kind(e)) {
+        .Lambda => {
+            const new_dom = etaReduceRec(ea.bindingDomain(e));
+            const new_body = etaReduceRec(ea.bindingBody(e));
+            var e1 = ea.updateBinding(e, new_dom, new_body);
+            rc.lean_dec(new_body);
+            // Apply tryEta in a loop
+            while (true) {
+                const e2 = tryEta(e1);
+                if (e2 == e1) break;
+                rc.lean_dec(e1);
+                e1 = e2;
+            }
+            return e1;
+        },
+        .App => {
+            const new_fn = etaReduceRec(ea.appFn(e));
+            const new_arg = etaReduceRec(ea.appArg(e));
+            return ea.updateApp(e, new_fn, new_arg);
+        },
+        .Pi => {
+            const new_dom = etaReduceRec(ea.bindingDomain(e));
+            const new_body = etaReduceRec(ea.bindingBody(e));
+            return ea.updateBinding(e, new_dom, new_body);
+        },
+        .Let => {
+            const new_ty = etaReduceRec(ea.letType(e));
+            const new_val = etaReduceRec(ea.letValue(e));
+            const new_body = etaReduceRec(ea.letBody(e));
+            return ea.updateLet(e, new_ty, new_val, new_body);
+        },
+        .MData => {
+            const new_inner = etaReduceRec(ea.mdataExpr(e));
+            return ea.updateMData(e, new_inner);
+        },
+        .Proj => {
+            const new_inner = etaReduceRec(ea.projExpr(e));
+            return ea.updateProj(e, new_inner);
+        },
+        else => return retain(e),
+    }
 }
 
 pub fn etaReduce(e: *anyopaque) *anyopaque {
-    _ = e;
-    @panic("etaReduce not implemented");
+    return etaReduceRec(e);
+}
+
+fn betaEtaReduceRec(e: *anyopaque) *anyopaque {
+    switch (ea.kind(e)) {
+        .App => {
+            const new_fn = betaEtaReduceRec(ea.appFn(e));
+            const new_arg = betaEtaReduceRec(ea.appArg(e));
+            var e1 = ea.updateApp(e, new_fn, new_arg);
+            if (isHeadBeta(e1)) {
+                const reduced = headBetaReduce(e1);
+                rc.lean_dec(e1);
+                e1 = betaEtaReduceRec(reduced);
+                rc.lean_dec(reduced);
+            }
+            return e1;
+        },
+        .Lambda => {
+            const new_dom = betaEtaReduceRec(ea.bindingDomain(e));
+            const new_body = betaEtaReduceRec(ea.bindingBody(e));
+            var e1 = ea.updateBinding(e, new_dom, new_body);
+            rc.lean_dec(new_body);
+            while (true) {
+                const e2 = tryEta(e1);
+                if (e2 == e1) break;
+                rc.lean_dec(e1);
+                e1 = e2;
+            }
+            return e1;
+        },
+        .Pi => {
+            const new_dom = betaEtaReduceRec(ea.bindingDomain(e));
+            const new_body = betaEtaReduceRec(ea.bindingBody(e));
+            return ea.updateBinding(e, new_dom, new_body);
+        },
+        .Let => {
+            const new_ty = betaEtaReduceRec(ea.letType(e));
+            const new_val = betaEtaReduceRec(ea.letValue(e));
+            const new_body = betaEtaReduceRec(ea.letBody(e));
+            return ea.updateLet(e, new_ty, new_val, new_body);
+        },
+        .MData => {
+            const new_inner = betaEtaReduceRec(ea.mdataExpr(e));
+            return ea.updateMData(e, new_inner);
+        },
+        .Proj => {
+            const new_inner = betaEtaReduceRec(ea.projExpr(e));
+            return ea.updateProj(e, new_inner);
+        },
+        else => return retain(e),
+    }
 }
 
 pub fn betaEtaReduce(e: *anyopaque) *anyopaque {
-    _ = e;
-    @panic("betaEtaReduce not implemented");
+    return betaEtaReduceRec(e);
 }
 
 pub fn inferImplicitParams(type_expr: *anyopaque, nparams: usize, k: ImplicitInferKind) *anyopaque {
-    _ = type_expr;
-    _ = nparams;
-    _ = k;
-    @panic("inferImplicitParams not implemented");
+    // Port of C++ infer_implicit_params → infer_implicit (expr.cpp:480-500).
+    const strict = switch (k) {
+        .Implicit => true,
+        .RelaxedImplicit => false,
+    };
+    return inferImplicit(type_expr, nparams, strict);
+}
+
+fn inferImplicit(t: *anyopaque, num_params: usize, strict: bool) *anyopaque {
+    if (num_params == 0) return retain(t);
+    if (!ea.isPi(t)) return retain(t);
+    const new_body = inferImplicit(ea.bindingBody(t), num_params - 1, strict);
+    const bi = ea.bindingInfo(t);
+    const is_explicit = bi == 0 or bi > 3; // Default=0, Implicit=1, StrictImplicit=2, InstImplicit=3
+    if (!is_explicit) {
+        // Already implicit — keep as-is
+        const result = ea.updateBinding(t, ea.bindingDomain(t), new_body);
+        rc.lean_dec(new_body);
+        return result;
+    } else if (hasLooseBvarsInDomain(new_body, 0, strict)) {
+        // Make this binder implicit (bi = 1)
+        const name = ea.bindingName(t);
+        const dom = ea.bindingDomain(t);
+        const result = lean_expr_mk_forall(name, dom, new_body, 1); // Implicit=1
+        rc.lean_dec(new_body);
+        return result;
+    } else {
+        // Keep explicit
+        const result = ea.updateBinding(t, ea.bindingDomain(t), new_body);
+        rc.lean_dec(new_body);
+        return result;
+    }
+}
+
+fn hasLooseBvarsInDomain(b: *anyopaque, vidx: usize, strict: bool) bool {
+    // Port of C++ has_loose_bvars_in_domain (expr.cpp:370-387).
+    if (ea.isPi(b)) {
+        const vidx_obj = object.lean_box(vidx).?;
+        if (lean_expr_has_loose_bvar(ea.bindingDomain(b), vidx_obj) != 0) {
+            const bi = ea.bindingInfo(b);
+            const is_explicit = bi == 0 or bi > 3;
+            if (is_explicit) return true;
+            if (hasLooseBvarsInDomain(ea.bindingBody(b), 0, strict)) return true;
+        }
+        return hasLooseBvarsInDomain(ea.bindingBody(b), vidx + 1, strict);
+    } else if (!strict) {
+        return lean_expr_has_loose_bvar(b, object.lean_box(vidx).?) != 0;
+    }
+    return false;
 }
 
 pub const ImplicitInferKind = enum { Implicit, RelaxedImplicit };

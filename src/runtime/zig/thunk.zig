@@ -1,11 +1,14 @@
 const std = @import("std");
 const testing = std.testing;
+const runtime_options = @import("runtime_options");
 const alloc = @import("alloc.zig");
 const apply = @import("apply.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const sync = @import("sync.zig");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
+
 
 const Obj = ?*anyopaque;
 
@@ -21,6 +24,14 @@ fn thunkPtr(t: *anyopaque) *lean.lean_thunk_object {
 fn opaqueFunPtr(fun: anytype) Obj {
     return @ptrCast(@constCast(fun));
 }
+fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
+
 
 fn closureSlot(thunk: *lean.lean_thunk_object) *sync.AtomicLeanPtr {
     return sync.atomicLeanPtr(&thunk.m_closure);
@@ -121,14 +132,9 @@ pub export fn leanrt_test_get_thunk_mt_cas_fail_count() callconv(.c) usize {
 }
 
 fn allocThunk(closure: Obj) *lean.lean_thunk_object {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_thunk_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_thunk_object));
     const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(ptr));
-    thunk.m_header = .{
-        .m_rc = 1,
-        .m_cs_sz = 0,
-        .m_other = 0,
-        .m_tag = lean.LeanThunk,
-    };
+    setStHeader(&thunk.m_header, lean.LeanThunk, 0);
     thunk.m_value = null;
     thunk.m_closure = closure;
     return thunk;

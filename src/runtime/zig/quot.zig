@@ -157,14 +157,14 @@ pub fn quotReduceRec(
     defer std.heap.page_allocator.free(mk_args);
     // mk_args[2] is the last arg (the value inside Quot.mk)
     const mk_val = mk_args[2];
-    var r = lean_expr_mk_app(f, mk_val);
+    var r = lean_expr_mk_app(rc.lean_inc_ret(f), rc.lean_inc_ret(mk_val));
 
     // Apply remaining args after elim_arity
     const elim_arity = mk_pos + 1;
     if (args.len > elim_arity) {
         var i: usize = elim_arity;
         while (i < args.len) : (i += 1) {
-            r = lean_expr_mk_app(r, args[i]);
+            r = lean_expr_mk_app(r, rc.lean_inc_ret(args[i]));
         }
     }
 

@@ -14,12 +14,22 @@ const nat_arithmetic = @import("nat_arithmetic.zig");
 const uint = @import("uint.zig");
 const nat_constructors = @import("nat_constructors.zig");
 const runtime_options = @import("runtime_options");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
+
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
 pub const force_link = true;
 const max_small_int: i64 = if (@sizeOf(usize) == 8) std.math.maxInt(c_int) else std.math.maxInt(c_int) >> 1;
 const min_small_int: i64 = if (@sizeOf(usize) == 8) std.math.minInt(c_int) else std.math.minInt(c_int) >> 1;
+
+fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
 
 pub export fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque {
     return int.lean_big_int64_to_int(n);
@@ -192,24 +202,20 @@ fn sarrayPtr(a: *anyopaque) *lean.lean_sarray_object {
 }
 
 pub export fn lean_mk_thunk(c: *anyopaque) callconv(.c) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_thunk_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_thunk_object));
     const thunk = thunkPtr(ptr);
-    thunk.* = .{
-        .m_header = .{ .m_rc = 1, .m_cs_sz = 0, .m_other = 0, .m_tag = lean.LeanThunk },
-        .m_value = null,
-        .m_closure = c,
-    };
+    setStHeader(&thunk.m_header, lean.LeanThunk, 0);
+    thunk.m_value = null;
+    thunk.m_closure = c;
     return ptr;
 }
 
 pub export fn lean_thunk_pure(v: *anyopaque) callconv(.c) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_thunk_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_thunk_object));
     const thunk = thunkPtr(ptr);
-    thunk.* = .{
-        .m_header = .{ .m_rc = 1, .m_cs_sz = 0, .m_other = 0, .m_tag = lean.LeanThunk },
-        .m_value = v,
-        .m_closure = null,
-    };
+    setStHeader(&thunk.m_header, lean.LeanThunk, 0);
+    thunk.m_value = v;
+    thunk.m_closure = null;
     return ptr;
 }
 
@@ -267,7 +273,6 @@ pub export fn lean_io_wait_any(task_list: *anyopaque) callconv(.c) *anyopaque {
     const t = lean_io_wait_any_core(task_list);
     const v = lean_task_get(t);
     rc.lean_inc(v);
-    rc.lean_dec(t);
     return v;
 }
 

@@ -191,7 +191,18 @@ comptime {
 pub export fn lean_initialize() callconv(.c) void {
     initializeRuntimeSubsystems();
     initializeThreadSubsystems();
+    // Initialize stdlib modules (mirrors C++ lean::lean_initialize in init.cpp)
+    const is_builtin: u8 = 1;
+    if (initialize_Init(is_builtin)) |r| lean_dec(r);
+    if (initialize_Std(is_builtin)) |r| lean_dec(r);
+    if (initialize_Lean(is_builtin)) |r| lean_dec(r);
 }
+// (lean_io_consume_result removed — we use lean_dec directly)
+extern fn initialize_Init(builtin: u8) ?*anyopaque;
+extern fn initialize_Std(builtin: u8) ?*anyopaque;
+extern fn initialize_Lean(builtin: u8) ?*anyopaque;
+extern fn lean_io_mark_end_initialization() callconv(.c) void;
+extern fn lean_dec(r: *anyopaque) callconv(.c) void;
 
 /// Test helper mirroring `lean_initialize` without the C-linkage export.
 fn lean_initialize_impl() void {

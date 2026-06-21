@@ -113,15 +113,12 @@ pub const SharingCache = struct {
 // assignment itself contains mvars, recurses and writes back the normalized
 // value. Sharing is preserved via a pointer-keyed cache.
 
-pub fn visitLevel(l: *anyopaque, mctx: *anyopaque, cache: *SharingCache) *anyopaque {
+pub fn visitLevel(l: *anyopaque, mctx_ptr: **anyopaque, cache: *SharingCache) *anyopaque {
     if (!levelHasMVar(l)) {
         rc.lean_inc(l);
         return l;
     }
 
-    // C++ only caches shared objects (refcount > 1). We approximate by checking
-    // the cache unconditionally for pointer-equal keys; the write-back below
-    // preserves sharing for repeated subtrees.
     if (cache.find(l)) |cached| {
         rc.lean_inc(cached);
         return cached;
@@ -129,55 +126,50 @@ pub fn visitLevel(l: *anyopaque, mctx: *anyopaque, cache: *SharingCache) *anyopa
 
     const kind = levelKind(l);
     switch (kind) {
-        1 => { // succ
+        1 => {
             const child = levelSuccOf(l);
-            const new_child = visitLevel(child, mctx, cache);
+            const new_child = visitLevel(child, mctx_ptr, cache);
             const result = lean_level_mk_succ(new_child);
-            rc.lean_dec(new_child);
             cache.insert(l, result);
             return result;
         },
-        2, 3 => { // max / imax
+        2, 3 => {
             const lhs = levelLhs(l);
             const rhs = levelRhs(l);
-            const new_lhs = visitLevel(lhs, mctx, cache);
-            const new_rhs = visitLevel(rhs, mctx, cache);
+            const new_lhs = visitLevel(lhs, mctx_ptr, cache);
+            const new_rhs = visitLevel(rhs, mctx_ptr, cache);
             const result = if (kind == 2)
                 lean_level_mk_max(new_lhs, new_rhs)
             else
                 lean_level_mk_imax(new_lhs, new_rhs);
-            rc.lean_dec(new_lhs);
-            rc.lean_dec(new_rhs);
             cache.insert(l, result);
             return result;
         },
-        5 => { // mvar
+        5 => {
             const mid = levelMvarId(l);
-            const opt_val = lean_get_lmvar_assignment(mctx, mid);
+            rc.lean_inc(mctx_ptr.*);
+            rc.lean_inc(mid);
+            const opt_val = lean_get_lmvar_assignment(mctx_ptr.*, mid);
             if (object.lean_is_scalar(opt_val)) {
-                // none: unassigned, keep the mvar.
                 rc.lean_dec(opt_val);
                 rc.lean_inc(l);
                 return l;
             }
-            // some val
             const val = ctor.lean_ctor_get(opt_val, 0) orelse @panic("lean_get_lmvar_assignment: some missing payload");
             rc.lean_inc(val);
             rc.lean_dec(opt_val);
             if (!levelHasMVar(val)) {
-                return val; // already fully resolved
+                return val;
             }
-            const new_val = visitLevel(val, mctx, cache);
-            // Write back the normalized assignment (mirrors C++ assign_lmvar).
-            const new_mctx = lean_assign_lmvar(mctx, mid, new_val);
-            // mctx is a borrowed reference here; the caller owns the original
-            // object. We do not replace the caller's mctx pointer because the
-            // C++ code mutates in place via steal/set_box on the same wrapper.
-            // The Lean side receives the updated mctx via the returned tuple.
-            _ = new_mctx;
+            const new_val = visitLevel(val, mctx_ptr, cache);
+            rc.lean_dec(val);
+            rc.lean_inc(new_val);
+            rc.lean_inc(mid);
+            const new_mctx = lean_assign_lmvar(mctx_ptr.*, mid, new_val);
+            mctx_ptr.* = new_mctx;
             return new_val;
         },
-        else => { // zero (scalar, handled above) or param (no mvar)
+        else => {
             rc.lean_inc(l);
             return l;
         },
@@ -187,15 +179,12 @@ pub fn visitLevel(l: *anyopaque, mctx: *anyopaque, cache: *SharingCache) *anyopa
 fn lean_instantiate_level_mvars(m: *anyopaque, l: *anyopaque) callconv(.c) *anyopaque {
     var cache = SharingCache.init(std.heap.page_allocator);
     defer cache.deinit();
-    const new_l = visitLevel(l, m, &cache);
+    var current_mctx: *anyopaque = m;
+    const new_l = visitLevel(l, &current_mctx, &cache);
+    rc.lean_dec(l);
 
-    // Build the result tuple `(MetavarContext × Level)` as ctor 0 with 2 obj
-    // fields. The mctx is passed through unchanged (the Lean-side wrapper
-    // observes the write-back via the borrowed reference). This matches the
-    // C++ `alloc_cnstr(0, 2, 0)` + `cnstr_set` pattern.
     const result = alloc.lean_alloc_ctor(0, 2, 0);
-    rc.lean_inc(m);
-    ctor.lean_ctor_set(result, 0, m);
+    ctor.lean_ctor_set(result, 0, current_mctx);
     ctor.lean_ctor_set(result, 1, new_l);
     return result;
 }

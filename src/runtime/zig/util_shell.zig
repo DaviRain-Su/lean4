@@ -10,7 +10,10 @@
 const std = @import("std");
 const object = @import("object.zig");
 const string = @import("string.zig");
-const list = @import("list.zig");
+const alloc = @import("alloc.zig");
+const ctor = @import("ctor.zig");
+const io_result = @import("io_result.zig");
+const rc_mod = @import("rc.zig");
 const runtime_options = @import("runtime_options");
 
 const ArgOpt = enum(c_int) {
@@ -111,7 +114,7 @@ fn getoptLong(argc: c_int, in_argv: [][*:0]u8, optstring: [*:0]const u8, opts: [
         const name_start: [*]const u8 = @ptrCast(argv + 2);
         const name_len = if (eq) |idx| idx - 2 else std.mem.len(argv) - 2;
         for (opts, 0..) |opt, idx| {
-            const opt_name = std.mem.span(&opt.name);
+            const opt_name = std.mem.sliceTo(&opt.name, 0);
             if (opt_name.len == name_len and std.mem.eql(u8, opt_name, name_start[0..name_len])) {
                 switch (opt.has_arg) {
                     .no_argument => {
@@ -171,13 +174,23 @@ extern fn lean_shell_options_get_run(shell_opts: *anyopaque) callconv(.c) u8;
 extern fn lean_shell_options_get_profiler(shell_opts: *anyopaque) callconv(.c) u8;
 extern fn lean_shell_options_get_num_threads(shell_opts: *anyopaque) callconv(.c) u32;
 extern fn lean_enable_initializer_execution() callconv(.c) *anyopaque;
+extern fn lean_init_task_manager_using(num_workers: c_uint) callconv(.c) void;
+extern fn lean_finalize_task_manager() callconv(.c) void;
 extern fn lean_io_mark_end_initialization() callconv(.c) void;
+extern fn lean_initialize() callconv(.c) void;
 
 fn getIoScalarResultUInt32(r: *anyopaque) u32 {
-    // Simplified: assume success and return boxed value.
-    const v = object.lean_unbox(r);
-    // In the real runtime this would check io_result_is_ok.
-    return @intCast(v);
+    // IO result is EResult: ctor tag 0 = error, tag 1 = ok with value.
+    // For --version etc, the value is a boxed UInt32 exit code.
+    if (object.lean_is_scalar(r)) {
+        return @truncate(object.lean_unbox(r));
+    }
+    // Extract value from the ok constructor (tag 1).
+    const inner = ctor.lean_ctor_get(r, 0);
+    if (object.lean_is_scalar(inner)) {
+        return @truncate(object.lean_unbox(inner));
+    }
+    return 0;
 }
 
 pub fn runShellMain(argc: c_int, argv: [][*:0]u8, shell_opts: *anyopaque) c_int {
@@ -186,10 +199,13 @@ pub fn runShellMain(argc: c_int, argv: [][*:0]u8, shell_opts: *anyopaque) c_int 
     while (i > 0) {
         i -= 1;
         const str = string.lean_mk_string(argv[@intCast(i)]);
-        args = list.lean_list_cons(str, args.?);
+        const cons = alloc.lean_alloc_ctor(1, 2, 0);
+        ctor.lean_ctor_set(cons, 0, str);
+        ctor.lean_ctor_set(cons, 1, args.?);
+        args = cons;
     }
     const result = lean_shell_main(args.?, shell_opts);
-    return @intCast(getIoScalarResultUInt32(result));
+    return @bitCast(getIoScalarResultUInt32(result));
 }
 
 pub fn initSearchPath() void {
@@ -206,59 +222,78 @@ fn mkOptionNone() *anyopaque {
 
 fn mkOptionSome(v: *anyopaque) *anyopaque {
     // Option.some is constructor 1 with one field.
-    const result = @import("ctor.zig").lean_alloc_ctor(1, 1, 0);
-    @import("ctor.zig").lean_ctor_set(result, 0, v);
+    const result = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(result, 0, v);
     return result;
 }
 
-pub fn processShellOption(shell_opts: *anyopaque, opt: c_int, optarg_arg: ?[*:0]const u8, rc: *c_int) bool {
+pub fn processShellOption(shell_opts: *?*anyopaque, opt: c_int, optarg_arg: ?[*:0]const u8, rc: *c_int) bool {
     const optarg_ref = if (optarg_arg) |a| mkOptionSome(string.lean_mk_string(@ptrCast(@constCast(a)))) else mkOptionNone();
-    const r = lean_shell_options_process(shell_opts, @intCast(opt), optarg_ref);
-    // Simplified: assume success
-    rc.* = 0;
-    _ = r;
-    return false;
+    // lean_shell_options_process consumes the old shell_opts and returns
+    // an io_result containing the new shell_opts.
+    const r = lean_shell_options_process(shell_opts.*.?, @intCast(opt), optarg_ref);
+    if (io_result.lean_io_result_is_ok(r)) {
+        const next = io_result.lean_io_result_get_value(r) orelse @panic("lean_shell_options_process returned ok without value");
+        rc_mod.lean_inc(next);
+        rc_mod.lean_dec(r);
+        shell_opts.* = next;
+        rc.* = 0;
+        return false;
+    } else {
+        const err = io_result.lean_io_result_get_error(r) orelse @panic("lean_shell_options_process returned error without payload");
+        rc.* = @intCast(object.lean_unbox(err));
+        rc_mod.lean_dec(r);
+        return true;
+    }
 }
 
 pub fn getShellRun(shell_opts: *anyopaque) bool {
+    rc_mod.lean_inc(shell_opts);
     return lean_shell_options_get_run(shell_opts) != 0;
 }
 
 pub fn getShellProfiler(shell_opts: *anyopaque) bool {
+    rc_mod.lean_inc(shell_opts);
     return lean_shell_options_get_profiler(shell_opts) != 0;
 }
 
 pub fn getShellNumThreads(shell_opts: *anyopaque) u32 {
+    rc_mod.lean_inc(shell_opts);
     return lean_shell_options_get_num_threads(shell_opts);
 }
 
-pub export fn lean_main(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
+fn leanMain(argc: c_int, argv: [*][*:0]u8) callconv(.c) c_int {
     // Platform-specific setup omitted; C++ handles Windows console and Emscripten.
+
+    // Initialize runtime subsystems (mirrors C++ `lean::initializer init;`)
+    lean_initialize();
 
     initSearchPath();
     _ = lean_enable_initializer_execution();
 
     var rc: c_int = 0;
-    const shell_opts = mkShellOptions();
+    var shell_opts: ?*anyopaque = mkShellOptions();
     while (true) {
-        const c = getoptLong(argc, argv, g_opt_str, &g_long_options, null);
+        const c = getoptLong(argc, argv[0..@intCast(argc)], g_opt_str, &g_long_options, null);
         if (c == -1) break;
-        if (processShellOption(shell_opts, c, optarg, &rc)) return rc;
-        if (getShellRun(shell_opts)) break;
+        if (processShellOption(&shell_opts, c, optarg, &rc)) return rc;
+        if (getShellRun(shell_opts.?)) break;
     }
 
     lean_io_mark_end_initialization();
 
-    return runShellMain(argc - optind, argv[@intCast(optind)..], shell_opts);
+    lean_init_task_manager_using(getShellNumThreads(shell_opts.?));
+    defer lean_finalize_task_manager();
+    return runShellMain(argc - optind, argv[0..@intCast(argc)][@intCast(optind)..], shell_opts.?);
 }
 
 comptime {
     if (runtime_options.export_lean_helpers) {
-        @export(&lean_main, .{ .name = "lean_main" });
+        @export(&leanMain, .{ .name = "lean_main", .linkage = .strong });
     }
 }
 
 test "shell module compiles" {
-    _ = lean_main;
+    _ = leanMain;
     _ = getoptLong;
 }

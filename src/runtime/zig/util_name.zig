@@ -15,6 +15,7 @@ const utf8 = @import("utf8.zig");
 const util_ascii = @import("util_ascii.zig");
 const lean = @import("lean_object.zig");
 const runtime_options = @import("runtime_options");
+const sync = @import("sync.zig");
 pub const lean_name_separator: []const u8 = ".";
 pub const id_begin_escape: u32 = 0xAB; // «
 pub const id_end_escape: u32 = 0xBB;   // »
@@ -26,6 +27,7 @@ extern fn lean_name_append_after(n: *anyopaque, s: *anyopaque) callconv(.c) *any
 extern fn lean_name_append_before(n: *anyopaque, s: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_append_index_after(n: *anyopaque, i: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(n1: *anyopaque, n2: *anyopaque) callconv(.c) u8;
+extern fn l_Lean_Name_hash___override(n: *anyopaque) callconv(.c) u64;
 
 pub const NameKind = enum(u8) {
     anonymous = 0,
@@ -35,7 +37,28 @@ pub const NameKind = enum(u8) {
 
 fn nameHash(n: ?*anyopaque) u64 {
     if (n == null or object.lean_is_scalar(n)) return 1723;
-    return ctor.lean_ctor_get_uint64(n.?, @sizeOf(?*anyopaque) * 2);
+    const name = n.?;
+    if (ctor.ctorNumObjs(name) == 2) {
+        const suffix = ctor.lean_ctor_get(name, 1);
+        return switch (object.lean_ptr_tag(name)) {
+            1 => if (suffix != null and !object.lean_is_scalar(suffix.?) and object.lean_ptr_tag(suffix.?) == lean.LeanString)
+                if (ctor.ctorScalarBytes(name) >= @sizeOf(u64))
+                    ctor.lean_ctor_get_uint64(name, @sizeOf(?*anyopaque) * 2)
+                else
+                    l_Lean_Name_hash___override(name)
+            else
+                l_Lean_Name_hash___override(name),
+            2 => if (suffix != null and (object.lean_is_scalar(suffix) or object.lean_ptr_tag(suffix.?) == lean.LeanMPZ))
+                if (ctor.ctorScalarBytes(name) >= @sizeOf(u64))
+                    ctor.lean_ctor_get_uint64(name, @sizeOf(?*anyopaque) * 2)
+                else
+                    l_Lean_Name_hash___override(name)
+            else
+                l_Lean_Name_hash___override(name),
+            else => l_Lean_Name_hash___override(name),
+        };
+    }
+    return l_Lean_Name_hash___override(name);
 }
 
 fn asStringObj(o: *anyopaque) *lean.lean_string_object {
@@ -141,9 +164,11 @@ pub const Name = struct {
 
     pub fn kind(self: Name) NameKind {
         if (self.obj == null or object.lean_is_scalar(self.obj)) return .anonymous;
-        const tag = object.lean_ptr_tag(self.obj.?);
-        if (tag == 1) return .string;
-        return .numeral;
+        return switch (object.lean_ptr_tag(self.obj.?)) {
+            1 => .string,
+            2 => .numeral,
+            else => @panic("invalid Lean.Name tag"),
+        };
     }
 
     pub fn isAnonymous(self: Name) bool {
@@ -513,7 +538,7 @@ pub fn isInternalName(n: Name) bool {
 
 var g_anonymous: ?Name = null;
 var g_next_id: u32 = 0;
-var g_name_mutex: std.Io.Mutex = .init;
+var g_name_mutex: sync.Mutex = .{};
 
 pub fn mkInternalUniqueName() Name {
     g_name_mutex.lock();
@@ -535,6 +560,8 @@ pub fn finalizeName() void {
 pub fn getAnonymous() Name {
     return g_anonymous.?;
 }
+
+
 
 comptime {
     _ = Name;

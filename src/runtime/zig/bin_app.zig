@@ -37,14 +37,11 @@ pub fn mkBinRop(op: *anyopaque, unit: *anyopaque, args: []*anyopaque) *anyopaque
         rc.lean_inc(unit);
         return unit;
     }
-    var r = args[args.len - 1];
-    rc.lean_inc(r);
+    var r = rc.lean_inc_ret(args[args.len - 1]);
     var i: usize = args.len - 1;
     while (i > 0) {
         i -= 1;
-        const new_r = lean_expr_mk_app(lean_expr_mk_app(op, args[i]), r);
-        rc.lean_dec(r);
-        r = new_r;
+        r = lean_expr_mk_app(lean_expr_mk_app(rc.lean_inc_ret(op), rc.lean_inc_ret(args[i])), r);
     }
     return r;
 }
@@ -55,12 +52,9 @@ pub fn mkBinLop(op: *anyopaque, unit: *anyopaque, args: []*anyopaque) *anyopaque
         rc.lean_inc(unit);
         return unit;
     }
-    var r = args[0];
-    rc.lean_inc(r);
+    var r = rc.lean_inc_ret(args[0]);
     for (args[1..]) |a| {
-        const new_r = lean_expr_mk_app(lean_expr_mk_app(op, r), a);
-        rc.lean_dec(r);
-        r = new_r;
+        r = lean_expr_mk_app(lean_expr_mk_app(rc.lean_inc_ret(op), r), rc.lean_inc_ret(a));
     }
     return r;
 }

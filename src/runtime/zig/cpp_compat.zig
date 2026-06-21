@@ -105,4 +105,5 @@ comptime {
     @export(&cpp_stack_guard_ctor, .{ .name = "_ZN4lean11stack_guardC1Ev", .linkage = .strong });
     // stack_guard destructor (complete object)
     @export(&cpp_stack_guard_dtor, .{ .name = "_ZN4lean11stack_guardD1Ev", .linkage = .strong });
+    // g_lean_report_task_get_blocked_time is provided by libleanrt_initial-exec.a
 }
