@@ -45,6 +45,7 @@ pub const io_min = @import("io_min.zig");
 pub const io_posix = @import("io_posix.zig");
 pub const io_result = @import("io_result.zig");
 pub const ir_interpreter = @import("ir_interpreter.zig");
+pub const llvm_stubs = @import("llvm_stubs.zig");
 pub const kernel = @import("kernel.zig");
 pub const kernel_accessors = @import("kernel_accessors.zig");
 pub const kernel_init = @import("kernel_init.zig");
@@ -85,6 +86,7 @@ pub const trace = @import("trace.zig");
 pub const type_checker = @import("type_checker.zig");
 pub const uint_conv = @import("uint.zig");
 pub const utf8 = @import("utf8.zig");
+pub const util_ffi = @import("util_ffi.zig");
 pub const uv_dns = @import("uv_dns.zig");
 pub const uv_event_loop = @import("uv_event_loop.zig");
 pub const uv_exports = @import("uv_exports.zig");
@@ -143,7 +145,9 @@ comptime {
         _ = ir_interpreter.force_link;
         _ = cases_on.force_link;
     }
+    _ = expr_lt;
     _ = library_util;
+    _ = llvm_stubs;
     _ = list;
     _ = memory;
     _ = mimalloc_compat;
@@ -174,6 +178,7 @@ comptime {
     _ = thunk;
     _ = time_task;
     _ = uint_conv;
+    _ = util_ffi;
     _ = utf8;
     _ = uv_dns.force_link;
     _ = uv_event_loop.force_link;

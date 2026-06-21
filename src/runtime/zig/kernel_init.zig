@@ -20,7 +20,4 @@ fn finalizeKernelModule() callconv(.c) void {
     trace.finalizeTrace();
 }
 
-comptime {
-    @export(&initializeKernelModule, .{ .name = "_ZN4lean25initialize_kernel_moduleEv", .linkage = .weak });
-    @export(&finalizeKernelModule, .{ .name = "_ZN4lean23finalize_kernel_moduleEv", .linkage = .weak });
-}
+// C++ mangled exports moved to cpp_compat.zig to avoid symbol collisions.

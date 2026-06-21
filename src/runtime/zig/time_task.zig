@@ -8,6 +8,7 @@
 pub const force_link = true;
 
 const std = @import("std");
+const builtin = @import("builtin");
 const apply = @import("apply.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
@@ -173,4 +174,69 @@ pub export fn lean_profileit(category: *anyopaque, opts: *anyopaque, fn_obj: *an
     g_current_time_task = task.parent;
     finishTimeTask(task);
     return result;
+}
+
+/// libc++ `std::string` / `std::basic_string<char>` layout (Darwin arm64/x86_64).
+/// Duplicates the helper in `dynlib_lib.zig` so this module stays self-contained.
+fn stdStringBytes(s: *const anyopaque) struct { ptr: [*]const u8, len: usize } {
+    const raw: [*]const u8 = @ptrCast(s);
+    if (builtin.os.tag != .macos and builtin.os.tag != .linux) {
+        return .{ .ptr = raw, .len = std.mem.len(raw) };
+    }
+    const size_byte = raw[23];
+    if ((size_byte & 0x80) == 0) {
+        const len: usize = size_byte;
+        return .{ .ptr = raw, .len = len };
+    }
+    const long_ptr: *const extern struct {
+        cap: usize,
+        size: usize,
+        data: [*]const u8,
+    } = @ptrCast(@alignCast(s));
+    return .{ .ptr = long_ptr.data, .len = long_ptr.size };
+}
+
+const SecondDuration = extern struct { rep: f64 };
+
+fn cppHasNoBlockProfilingTask() callconv(.c) bool {
+    return g_current_time_task != null and !std.mem.eql(u8, g_current_time_task.?.category, "blocked");
+}
+
+fn cppReportProfilingTime(category: *const anyopaque, time: SecondDuration) callconv(.c) void {
+    const parts = stdStringBytes(category);
+    reportProfilingTime(parts.ptr[0..parts.len], time.rep);
+}
+
+fn cppExcludeProfilingTimeFromCurrentTask(time: SecondDuration) callconv(.c) void {
+    if (g_current_time_task) |task| {
+        const child_inclusive_ns: i128 = @intFromFloat(time.rep * @as(f64, @floatFromInt(std.time.ns_per_s)));
+        task.excluded_ns += child_inclusive_ns;
+    }
+}
+
+// Export under Itanium mangled names used by `time_task.h` / `profiling.h` when
+// linked from C++. We provide both libc++ (macOS / clang -stdlib=libc++) and
+// libstdc++ (Linux / GCC-style) manglings.
+comptime {
+    if (builtin.os.tag == .macos) {
+        @export(&cppHasNoBlockProfilingTask, .{ .name = "_ZN4lean27has_no_block_profiling_taskEv", .linkage = .strong });
+        @export(&cppReportProfilingTime, .{
+            .name = "_ZN4lean21report_profiling_timeERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEENS0_6chrono8durationIdNS0_5ratioILl1ELl1EEEEE",
+            .linkage = .strong,
+        });
+        @export(&cppExcludeProfilingTimeFromCurrentTask, .{
+            .name = "_ZN4lean40exclude_profiling_time_from_current_taskENSt3__16chrono8durationIdNS0_5ratioILl1ELl1EEEEE",
+            .linkage = .strong,
+        });
+    } else if (builtin.os.tag == .linux) {
+        @export(&cppHasNoBlockProfilingTask, .{ .name = "_ZN4lean27has_no_block_profiling_taskEv", .linkage = .strong });
+        @export(&cppReportProfilingTime, .{
+            .name = "_ZN4lean21report_profiling_timeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENSt6chrono8durationIdSt5ratioILl1ELl1EEEE",
+            .linkage = .strong,
+        });
+        @export(&cppExcludeProfilingTimeFromCurrentTask, .{
+            .name = "_ZN4lean40exclude_profiling_time_from_current_taskENSt6chrono8durationIdSt5ratioILl1ELl1EEEE",
+            .linkage = .strong,
+        });
+    }
 }

@@ -48,10 +48,8 @@ pub fn getVerbose(opts: Options) bool {
 }
 
 comptime {
-    if (runtime_options.export_lean_helpers) {
-        @export(&lean_internal_get_default_verbose, .{ .name = "lean_internal_get_default_verbose" });
-        @export(&lean_internal_get_default_options_impl, .{ .name = "lean_internal_get_default_options" });
-    }
+    @export(&lean_internal_get_default_verbose, .{ .name = "lean_internal_get_default_verbose", .linkage = .strong });
+    @export(&lean_internal_get_default_options_impl, .{ .name = "lean_internal_get_default_options", .linkage = .strong });
 }
 
 test "options module compiles" {

@@ -1078,3 +1078,14 @@ lean_level_eq
 lean_level_eqv
 lean_level_mk_data
 lean_replace_expr
+# Library/util C ABI symbols
+lean_expr_quick_lt
+lean_expr_lt
+lean_init_llvm
+lean_emit_llvm
+lean_internal_get_default_verbose
+lean_internal_get_default_options
+lean_get_leanc_extra_flags
+lean_get_leanc_internal_flags
+lean_get_linker_flags
+lean_get_internal_linker_flags

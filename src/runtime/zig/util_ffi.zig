@@ -37,12 +37,10 @@ fn lean_get_internal_linker_flags(_: *anyopaque) callconv(.c) *anyopaque {
 }
 
 comptime {
-    if (runtime_options.export_lean_helpers) {
-        @export(&lean_get_leanc_extra_flags, .{ .name = "lean_get_leanc_extra_flags" });
-        @export(&lean_get_leanc_internal_flags, .{ .name = "lean_get_leanc_internal_flags" });
-        @export(&lean_get_linker_flags, .{ .name = "lean_get_linker_flags" });
-        @export(&lean_get_internal_linker_flags, .{ .name = "lean_get_internal_linker_flags" });
-    }
+    @export(&lean_get_leanc_extra_flags, .{ .name = "lean_get_leanc_extra_flags", .linkage = .strong });
+    @export(&lean_get_leanc_internal_flags, .{ .name = "lean_get_leanc_internal_flags", .linkage = .strong });
+    @export(&lean_get_linker_flags, .{ .name = "lean_get_linker_flags", .linkage = .strong });
+    @export(&lean_get_internal_linker_flags, .{ .name = "lean_get_internal_linker_flags", .linkage = .strong });
 }
 
 test "ffi module compiles" {
