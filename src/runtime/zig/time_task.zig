@@ -214,29 +214,5 @@ fn cppExcludeProfilingTimeFromCurrentTask(time: SecondDuration) callconv(.c) voi
     }
 }
 
-// Export under Itanium mangled names used by `time_task.h` / `profiling.h` when
-// linked from C++. We provide both libc++ (macOS / clang -stdlib=libc++) and
-// libstdc++ (Linux / GCC-style) manglings.
-comptime {
-    if (builtin.os.tag == .macos) {
-        @export(&cppHasNoBlockProfilingTask, .{ .name = "_ZN4lean27has_no_block_profiling_taskEv", .linkage = .strong });
-        @export(&cppReportProfilingTime, .{
-            .name = "_ZN4lean21report_profiling_timeERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS0_9allocatorIcEEEENS0_6chrono8durationIdNS0_5ratioILl1ELl1EEEEE",
-            .linkage = .strong,
-        });
-        @export(&cppExcludeProfilingTimeFromCurrentTask, .{
-            .name = "_ZN4lean40exclude_profiling_time_from_current_taskENSt3__16chrono8durationIdNS0_5ratioILl1ELl1EEEEE",
-            .linkage = .strong,
-        });
-    } else if (builtin.os.tag == .linux) {
-        @export(&cppHasNoBlockProfilingTask, .{ .name = "_ZN4lean27has_no_block_profiling_taskEv", .linkage = .strong });
-        @export(&cppReportProfilingTime, .{
-            .name = "_ZN4lean21report_profiling_timeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEENSt6chrono8durationIdSt5ratioILl1ELl1EEEE",
-            .linkage = .strong,
-        });
-        @export(&cppExcludeProfilingTimeFromCurrentTask, .{
-            .name = "_ZN4lean40exclude_profiling_time_from_current_taskENSt6chrono8durationIdSt5ratioILl1ELl1EEEE",
-            .linkage = .strong,
-        });
-    }
-}
+// `src/library/time_task.cpp` provides the Itanium mangled profiling helpers
+// when the C++ library layer is linked. Keep only the C ABI exports above.

@@ -13,7 +13,7 @@ BUILD_DIR="${BUILD_DIR:-$ROOT/build/release/stage1}"
 INPUT="$1"
 OUTPUT="${2:-$(basename "$INPUT" .zig)}"
 
-ZIGRT_LIB="$BUILD_DIR/runtime/zig/zig-out/lib/libleanrt_zig.a"
+ZIGRT_LIB="$BUILD_DIR/runtime/zig/zig-out/lib/libleanrt_zigrt.a"
 if [[ ! -f "$ZIGRT_LIB" ]]; then
   echo "zigc-zigrt: $ZIGRT_LIB not found; run 'make -C \"$BUILD_DIR\" leanrt_zig'" >&2
   exit 1
@@ -53,6 +53,7 @@ if [[ ! -f "$LEAN_RT_ZIG" ]]; then
   echo "zigc-zigrt: shared runtime module not found at $LEAN_RT_ZIG" >&2
   exit 1
 fi
+
 
 zig build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O Debug \
   -I "$BUILD_DIR/include" \

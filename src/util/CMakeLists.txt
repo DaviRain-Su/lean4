@@ -1,9 +1,23 @@
-# Util C++ source files kept on disk for comparison testing.
-# Zig implementations in src/runtime/zig/ provide all symbols.
 configure_file(ffi.cpp "${CMAKE_BINARY_DIR}/util/ffi.cpp" @ONLY)
 
 add_library(
   util
   OBJECT
-  ../kernel/zig_cutover_stub.cpp
+  name.cpp
+  name_set.cpp
+  escaped.cpp
+  bit_tricks.cpp
+  ascii.cpp
+  path.cpp
+  lbool.cpp
+  init_module.cpp
+  list_fn.cpp
+  timeit.cpp
+  timer.cpp
+  name_generator.cpp
+  kvmap.cpp
+  map_foreach.cpp
+  options.cpp
+  option_declarations.cpp
+  "${CMAKE_BINARY_DIR}/util/ffi.cpp"
 )

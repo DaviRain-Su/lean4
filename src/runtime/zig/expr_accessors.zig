@@ -137,8 +137,8 @@ pub inline fn bindingDomain(e: *anyopaque) *anyopaque {
 pub inline fn bindingBody(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 2) orelse @panic("binding_body on malformed expr");
 }
-pub inline fn bindingInfo(e: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(e, 3) orelse @panic("binding_info on malformed expr");
+pub inline fn bindingInfo(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(3 * @sizeOf(*anyopaque) + @sizeOf(u64)));
 }
 
 // Let: field 0 = name, field 1 = type, field 2 = value, field 3 = body,
@@ -152,6 +152,10 @@ pub inline fn letValue(e: *anyopaque) *anyopaque {
 pub inline fn letBody(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 3) orelse @panic("let_body on malformed expr");
 }
+pub inline fn letNonDep(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(4 * @sizeOf(*anyopaque) + @sizeOf(u64)));
+}
+
 
 // ── Metadata accessors (from packed data field) ─────────────────────────────
 
@@ -198,9 +202,9 @@ pub fn getAppNumArgs(e: *anyopaque) usize {
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_lambda(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_forall(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_lambda(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_forall(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 
@@ -241,7 +245,7 @@ pub fn updateBinding(e: *anyopaque, new_domain: *anyopaque, new_body: *anyopaque
 pub fn updateLet(e: *anyopaque, new_type: *anyopaque, new_value: *anyopaque, new_body: *anyopaque) *anyopaque {
     if (letType(e) == new_type and letValue(e) == new_value and letBody(e) == new_body) return e;
     const name = ctor.lean_ctor_get(e, 0) orelse @panic("update_let: name missing");
-    const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
+    const nd = letNonDep(e);
     return lean_expr_mk_let(name, new_type, new_value, new_body, nd);
 }
 

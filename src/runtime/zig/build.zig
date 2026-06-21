@@ -1,5 +1,7 @@
 const std = @import("std");
 
+
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -74,8 +76,67 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
+    const zigrt_mod = b.createModule(.{
+        .root_source_file = b.path("root_zigrt.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    zigrt_mod.addImport("mpz_zig", mpz_mod);
+    zigrt_mod.addImport("lean_allocator", allocator_mod);
+    zigrt_mod.addImport("runtime_options", opts_mod);
+    if (use_gmp) {
+        zigrt_mod.linkSystemLibrary("gmp", .{});
+    }
+    zigrt_mod.linkSystemLibrary("c++", .{});
+    if (export_lean_helpers) {
+        zigrt_mod.addCSourceFiles(.{
+            .files = &.{"io_error_weak_exports.c"},
+            .flags = &.{
+                "-std=c11",
+                "-O2",
+                b.fmt("-I{s}", .{lean_include_dir}),
+                "-I../..",
+            },
+        });
+    }
+    zigrt_mod.linkSystemLibrary("uv", .{});
+
+    const zigrt_lib = b.addLibrary(.{
+        .name = "leanrt_zigrt",
+        .root_module = zigrt_mod,
+        .linkage = .static,
+    });
+    b.installArtifact(zigrt_lib);
+
+    const zigrt_test_mod = b.createModule(.{
+        .root_source_file = b.path("root_test_zigrt.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    zigrt_test_mod.addImport("mpz_zig", mpz_mod);
+    zigrt_test_mod.addImport("lean_allocator", allocator_mod);
+    zigrt_test_mod.addImport("runtime_options", opts_mod);
+    if (use_gmp) {
+        zigrt_test_mod.linkSystemLibrary("gmp", .{});
+    }
+    zigrt_test_mod.linkSystemLibrary("c++", .{});
+    if (export_lean_helpers) {
+        zigrt_test_mod.addCSourceFiles(.{
+            .files = &.{"io_error_weak_exports.c"},
+            .flags = &.{
+                "-std=c11",
+                "-O2",
+                b.fmt("-I{s}", .{lean_include_dir}),
+                "-I../..",
+            },
+        });
+    }
+    zigrt_test_mod.linkSystemLibrary("uv", .{});
+
     const tests = b.addTest(.{
-        .root_module = root_mod,
+        .root_module = zigrt_test_mod,
     });
 
     const run_tests = b.addRunArtifact(tests);

@@ -127,19 +127,84 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
     }
     const tag = object.lean_ptr_tag(a);
     if (tag != object.lean_ptr_tag(b)) return 0;
+    switch (tag) {
+        0 => {
+            const ia = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const ib = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return if (object.lean_unbox(ia) == object.lean_unbox(ib)) 1 else 0;
+        },
+        1, 2 => {
+            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return lean_name_eq(na, nb);
+        },
+        3 => {
+            const la = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const lb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return lean_level_eq(la, lb);
+        },
+        4 => {
+            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            if (lean_name_eq(na, nb) == 0) return 0;
+            const la = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const lb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            return lean_level_eq(la, lb);
+        },
+        6, 7 => {
+            const da = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const db = ctor.lean_ctor_get(b, 1) orelse return 0;
+            if (exprEqRec(da, db, compare_bi) == 0) return 0;
+            const ba = ctor.lean_ctor_get(a, 2) orelse return 0;
+            const bb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            if (exprEqRec(ba, bb, compare_bi) == 0) return 0;
+            if (!compare_bi) return 1;
+            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            if (lean_name_eq(na, nb) == 0) return 0;
+            return if (exprBinderInfo(a) == exprBinderInfo(b)) 1 else 0;
+        },
+        8 => {
+            const ta = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const tb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            if (exprEqRec(ta, tb, compare_bi) == 0) return 0;
+            const va = ctor.lean_ctor_get(a, 2) orelse return 0;
+            const vb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            if (exprEqRec(va, vb, compare_bi) == 0) return 0;
+            const ba = ctor.lean_ctor_get(a, 3) orelse return 0;
+            const bb = ctor.lean_ctor_get(b, 3) orelse return 0;
+            if (exprEqRec(ba, bb, compare_bi) == 0) return 0;
+            if (exprLetNonDep(a) != exprLetNonDep(b)) return 0;
+            if (!compare_bi) return 1;
+            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return lean_name_eq(na, nb);
+        },
+        10 => {
+            const ea = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const eb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            if (exprEqRec(ea, eb, compare_bi) == 0) return 0;
+            const ma = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const mb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            return if (ma == mb) 1 else 0;
+        },
+        11 => {
+            const ea = ctor.lean_ctor_get(a, 2) orelse return 0;
+            const eb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            if (exprEqRec(ea, eb, compare_bi) == 0) return 0;
+            const sa = ctor.lean_ctor_get(a, 0) orelse return 0;
+            const sb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            if (lean_name_eq(sa, sb) == 0) return 0;
+            const ia = ctor.lean_ctor_get(a, 1) orelse return 0;
+            const ib = ctor.lean_ctor_get(b, 1) orelse return 0;
+            return if (object.lean_unbox(ia) == object.lean_unbox(ib)) 1 else 0;
+        },
+        else => {},
+    }
     const nfields = ctor.ctorNumObjs(a);
     if (nfields != ctor.ctorNumObjs(b)) return 0;
 
-    // When !compare_bi, skip binder_info (field 3 of lam/forallE) and
-    // nondep (field 4 of letE), matching C++ expr_eq_fn<false>.
-    const skip_field: ?u32 = if (!compare_bi) switch (tag) {
-        6, 7 => 3, // lam/forallE: binderInfo
-        8 => 4, // letE: nondep
-        else => null,
-    } else null;
-
     for (0..nfields) |i| {
-        if (skip_field) |sf| if (i == sf) continue;
         const fa = ctor.lean_ctor_get(a, @intCast(i)) orelse continue;
         const fb = ctor.lean_ctor_get(b, @intCast(i)) orelse continue;
         if (object.lean_is_scalar(fa) and object.lean_is_scalar(fb)) {
@@ -220,8 +285,16 @@ inline fn eTag(e: *anyopaque) u8 {
 inline fn eData(e: *anyopaque) u64 {
     if (object.lean_is_scalar(e)) return 0;
     const nobjs: u32 = @intCast(ctor.ctorNumObjs(e));
-    return ctor.lean_ctor_get_usize(e, nobjs * @sizeOf(*anyopaque));
+    return ctor.lean_ctor_get_usize(e, nobjs);
 }
+inline fn exprBinderInfo(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(3 * @sizeOf(*anyopaque) + @sizeOf(u64)));
+}
+
+inline fn exprLetNonDep(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(4 * @sizeOf(*anyopaque) + @sizeOf(u64)));
+}
+
 
 inline fn looseBVarRange(e: *anyopaque) u32 {
     return @intCast(eData(e) >> 44);
@@ -244,9 +317,10 @@ inline fn retain(e: *anyopaque) *anyopaque {
 // ── Expression constructor externs (Lean-exported) ───────────────────────────
 
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
@@ -290,7 +364,7 @@ fn lowerLiftRec(e: *anyopaque, offset: u32, s: u32, d: u32, mode: Mode) ?*anyopa
                 .lower => idx - d,
                 .lift => idx + d,
             };
-            return object.lean_box(new_idx);
+            return lean_expr_mk_bvar(object.lean_box(new_idx) orelse return null);
         }
     }
     return null;
@@ -356,9 +430,7 @@ fn instantiateRec(e: *anyopaque, off: u32, n: usize, base: usize, subst: *anyopa
                     const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
                     return lean_expr_lift_loose_bvars(v, s_obj, d_obj);
                 }
-                const new_idx_obj = object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e);
-                rc.lean_inc(new_idx_obj);
-                return new_idx_obj;
+                return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
             }
         }
     }
@@ -399,9 +471,7 @@ fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque 
                 const v_name = ctor.lean_ctor_get(v, 0) orelse continue;
                 if (lean_name_eq(name, v_name) != 0) {
                     const bvar_idx = off + @as(u32, @intCast(n)) - @as(u32, @intCast(i)) - 1;
-                    const idx_obj = object.lean_box(bvar_idx) orelse return retain(e);
-                    rc.lean_inc(idx_obj);
-                    return idx_obj;
+                    return lean_expr_mk_bvar(object.lean_box(bvar_idx) orelse return retain(e));
                 }
             }
         }
@@ -443,9 +513,8 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
             const name = ctor.lean_ctor_get(e, 0) orelse return retain(e);
             const d0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
-            const bi = ctor.lean_ctor_get(e, 3) orelse object.lean_box(0).?;
+            const bi = exprBinderInfo(e);
             rc.lean_inc(name);
-            rc.lean_inc(bi);
             const nd = replaceClosureImpl(f, d0);
             const nb = replaceClosureImpl(f, b0);
             return if (tag == 6) lean_expr_mk_lambda(name, nd, nb, bi) else lean_expr_mk_forall(name, nd, nb, bi);
@@ -455,9 +524,8 @@ fn replaceClosureImpl(f: *anyopaque, e: *anyopaque) *anyopaque {
             const t0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const v0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 3) orelse return retain(e);
-            const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
+            const nd = exprLetNonDep(e);
             rc.lean_inc(name);
-            rc.lean_inc(nd);
             return lean_expr_mk_let(name, replaceClosureImpl(f, t0), replaceClosureImpl(f, v0), replaceClosureImpl(f, b0), nd);
         },
         10 => { // mdata
@@ -582,13 +650,14 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
 }
 
 fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
-    return lean_environment_add(env, decl);
+    const new_env = lean_environment_add(env, decl);
+    // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
+    const result = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(result, 0, new_env);
+    return result;
 }
 
 fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
-    // Heartbeat and cancel-token scoping mirror the C++ `scope_max_heartbeat`
-    // / `scope_cancel_tk` guards in `environment.cpp`. The actual type-check
-    // is performed by the kernel type-checker bridge (C++ or Lean-exported).
     const prev_mh = interrupt.getMaxHeartbeat();
     interrupt.setMaxHeartbeat(max_heartbeat);
     defer interrupt.setMaxHeartbeat(prev_mh);
@@ -596,7 +665,11 @@ fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_ca
     interrupt.setCancelToken(cancelTokenFromOption(opt_cancel_tk));
     defer interrupt.clearCancelToken();
 
-    return lean_environment_add(env, decl);
+    const new_env = lean_environment_add(env, decl);
+    // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
+    const result = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(result, 0, new_env);
+    return result;
 }
 
 // lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).
@@ -623,9 +696,7 @@ fn instantiateSliceRec(e: *anyopaque, off: u32, n: usize, subst: []*anyopaque, r
                     const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
                     return lean_expr_lift_loose_bvars(subst[si], s_obj, d_obj);
                 }
-                const new_idx_obj = object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e);
-                rc.lean_inc(new_idx_obj);
-                return new_idx_obj;
+                return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
             }
         }
     }
@@ -652,9 +723,8 @@ fn replaceRecDirect(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *any
             const name = ctor.lean_ctor_get(e, 0) orelse return retain(e);
             const d0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
-            const bi = ctor.lean_ctor_get(e, 3) orelse object.lean_box(0).?;
+            const bi = exprBinderInfo(e);
             rc.lean_inc(name);
-            rc.lean_inc(bi);
             const nd = recurseChild(d0, offset, kind, ctx);
             const nb = recurseChild(b0, offset + 1, kind, ctx);
             return if (tag == 6) lean_expr_mk_lambda(name, nd, nb, bi) else lean_expr_mk_forall(name, nd, nb, bi);
@@ -664,9 +734,8 @@ fn replaceRecDirect(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *any
             const t0 = ctor.lean_ctor_get(e, 1) orelse return retain(e);
             const v0 = ctor.lean_ctor_get(e, 2) orelse return retain(e);
             const b0 = ctor.lean_ctor_get(e, 3) orelse return retain(e);
-            const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
+            const nd = exprLetNonDep(e);
             rc.lean_inc(name);
-            rc.lean_inc(nd);
             return lean_expr_mk_let(name, recurseChild(t0, offset, kind, ctx), recurseChild(v0, offset, kind, ctx), recurseChild(b0, offset + 1, kind, ctx), nd);
         },
         10 => { // mdata

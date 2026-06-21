@@ -1,8 +1,23 @@
-# Library C++ source files kept on disk for comparison testing.
-# Zig implementations in src/runtime/zig/ provide all C ABI symbols.
 add_library(
   library
   OBJECT
+  expr_lt.cpp
+  bin_app.cpp
+  constants.cpp
+  max_sharing.cpp
   module.cpp
-  ../kernel/zig_cutover_stub.cpp
+  dynlib.cpp
+  replace_visitor.cpp
+  num.cpp
+  util.cpp
+  print.cpp
+  annotation.cpp
+  init_module.cpp
+  profiling.cpp
+  time_task.cpp
+  formatter.cpp
+  elab_environment.cpp
+  init_attribute.cpp
+  ir_interpreter.cpp
+  instantiate_mvars.cpp
 )

@@ -96,8 +96,6 @@ fn cpp_stack_guard_dtor(this: *c.stack_t) callconv(.c) void {
 
 // ── Exports ──────────────────────────────────────────────────────────────────
 
-fn nopVoid() callconv(.c) void {}
-
 comptime {
     // hash_str
     @export(&cpp_hash_str, .{ .name = "_ZN4lean8hash_strEmPKhy", .linkage = .strong });
@@ -107,18 +105,4 @@ comptime {
     @export(&cpp_stack_guard_ctor, .{ .name = "_ZN4lean11stack_guardC1Ev", .linkage = .strong });
     // stack_guard destructor (complete object)
     @export(&cpp_stack_guard_dtor, .{ .name = "_ZN4lean11stack_guardD1Ev", .linkage = .strong });
-
-    // Module init/finalize stubs (C++ mangled, no-ops)
-    @export(&nopVoid, .{ .name = "_ZN4lean24initialize_kernel_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean22finalize_kernel_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean25initialize_library_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean23finalize_library_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean30initialize_library_core_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean28finalize_library_core_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean22initialize_util_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean20finalize_util_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean31initialize_constructions_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean29finalize_constructions_moduleEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean24get_short_version_stringEv", .linkage = .strong });
-    @export(&nopVoid, .{ .name = "_ZN4lean21init_default_print_fnEv", .linkage = .strong });
 }
