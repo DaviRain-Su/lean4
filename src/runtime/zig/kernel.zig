@@ -698,27 +698,27 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .weak });
-        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .weak });
-        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .weak });
-        @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .weak });
-        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .weak });
-        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .weak });
-        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .weak });
-        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .weak });
-        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .weak });
-        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .weak });
-        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .weak });
-        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .weak });
-        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .weak });
-        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .weak });
-        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .weak });
-        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .weak });
-        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .weak });
-        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .weak });
-        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .weak });
-        @export(&lean_level_eqv, .{ .name = "lean_level_eqv", .linkage = .weak });
-        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .weak });
-        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
+        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .strong });
+        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .strong });
+        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .strong });
+        @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
+        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .strong });
+        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .strong });
+        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .strong });
+        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .strong });
+        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .strong });
+        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .strong });
+        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .strong });
+        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .strong });
+        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .strong });
+        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .strong });
+        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .strong });
+        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .strong });
+        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .strong });
+        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
+        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
+        @export(&lean_level_eqv, .{ .name = "lean_level_eqv", .linkage = .strong });
+        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .strong });
+        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
     }
 }

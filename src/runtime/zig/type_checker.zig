@@ -975,8 +975,8 @@ fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&leanKernelWhnf, .{ .name = "lean_kernel_whnf_impl", .linkage = .weak });
-        @export(&leanKernelIsDefEq, .{ .name = "lean_kernel_is_def_eq_impl", .linkage = .weak });
-        @export(&leanKernelCheck, .{ .name = "lean_kernel_check_impl", .linkage = .weak });
+        @export(&leanKernelWhnf, .{ .name = "lean_kernel_whnf_impl", .linkage = .strong });
+        @export(&leanKernelIsDefEq, .{ .name = "lean_kernel_is_def_eq_impl", .linkage = .strong });
+        @export(&leanKernelCheck, .{ .name = "lean_kernel_check_impl", .linkage = .strong });
     }
 }

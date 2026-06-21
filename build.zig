@@ -77,17 +77,6 @@ pub fn build(b: *std.Build) void {
             "src/runtime/io_error_helpers.cpp", "src/runtime/byteslice.cpp",
             "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
         } },
-        .{ .name = "kernel", .files = &.{
-            "src/kernel/expr.cpp",         "src/kernel/level.cpp",
-            "src/kernel/declaration.cpp",  "src/kernel/environment.cpp",
-            "src/kernel/type_checker.cpp", "src/kernel/abstract.cpp",
-            "src/kernel/instantiate.cpp",  "src/kernel/local_ctx.cpp",
-            "src/kernel/for_each_fn.cpp",  "src/kernel/replace_fn.cpp",
-            "src/kernel/expr_eq_fn.cpp",   "src/kernel/expr_cache.cpp",
-            "src/kernel/equiv_manager.cpp","src/kernel/quot.cpp",
-            "src/kernel/inductive.cpp",    "src/kernel/trace.cpp",
-            "src/kernel/init_module.cpp",
-        } },
         .{ .name = "library", .needs_uv = true, .files = &.{
             "src/library/module.cpp",      "src/library/util.cpp",
             "src/library/constants.cpp",   "src/library/annotation.cpp",
