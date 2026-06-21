@@ -452,7 +452,7 @@ pub fn lean_expr_instantiate1(a: *anyopaque, e0: *anyopaque) callconv(.c) *anyop
 pub fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const n = array.lean_array_size(subst);
     if (n == 0) return retain(a);
-    return instantiateImplArr(a, 0, n, subst, false);
+    return instantiateImplArr(a, 0, 0, n, subst, false);
 }
 
 fn lean_expr_instantiate_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
@@ -463,13 +463,13 @@ fn lean_expr_instantiate_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *a
     if (b > ei or ei > sz) @panic("invalid range");
     const n = ei - b;
     if (n == 0) return retain(a);
-    return instantiateImplArr(a, b, n, subst, false);
+    return instantiateImplArr(a, 0, b, n, subst, false);
 }
 
 fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
     const n = array.lean_array_size(subst);
     if (n == 0) return retain(a);
-    return instantiateImplArr(a, 0, n, subst, true);
+    return instantiateImplArr(a, 0, 0, n, subst, true);
 }
 
 fn lean_expr_instantiate_rev_range(a: *anyopaque, begin_obj: *anyopaque, end_obj: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque {
@@ -480,12 +480,12 @@ fn lean_expr_instantiate_rev_range(a: *anyopaque, begin_obj: *anyopaque, end_obj
     if (b > ei or ei > sz) @panic("invalid range");
     const n = ei - b;
     if (n == 0) return retain(a);
-    return instantiateImplArr(a, b, n, subst, true);
+    return instantiateImplArr(a, 0, b, n, subst, true);
 }
 
-fn instantiateImplArr(e: *anyopaque, offset: usize, n: usize, subst: *anyopaque, rev: bool) *anyopaque {
+fn instantiateImplArr(e: *anyopaque, off: u32, base: usize, n: usize, subst: *anyopaque, rev: bool) *anyopaque {
     if (looseBVarRange(e) == 0) return retain(e);
-    return instantiateRec(e, @intCast(offset), n, offset, subst, rev);
+    return instantiateRec(e, off, n, base, subst, rev);
 }
 
 fn instantiateRec(e: *anyopaque, off: u32, n: usize, base: usize, subst: *anyopaque, rev: bool) *anyopaque {
