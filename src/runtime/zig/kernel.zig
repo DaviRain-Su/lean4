@@ -419,8 +419,8 @@ pub fn lean_expr_lift_loose_bvars(e: *anyopaque, s_obj: *anyopaque, d_obj: *anyo
 const Mode = enum { lower, lift };
 
 fn lowerLiftImpl(e: *anyopaque, s: u32, d: u32, mode: Mode) *anyopaque {
-    const r = lowerLiftRec(e, 0, s, d, mode);
-    return r orelse retain(e);
+    if (lowerLiftRec(e, 0, s, d, mode)) |r| return r;
+    return replaceRecDirect(e, 0, .lower_lift, .{ .lower_lift = .{ .s = s, .d = d, .mode = mode } });
 }
 
 /// Returns replacement expression or null (recurse into children).
@@ -861,7 +861,7 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
         .instantiate => instantiateRec(e, offset, ctx.instantiate.n, ctx.instantiate.base, ctx.instantiate.subst, ctx.instantiate.rev),
         .instantiate_slice => instantiateSliceRec(e, offset, ctx.instantiate_slice.n, ctx.instantiate_slice.subst_slice, ctx.instantiate_slice.rev),
         .abstract => abstractRec(e, offset, ctx.abstract.n, ctx.abstract.subst),
-        .lower_lift => lowerLiftRec(e, offset, ctx.lower_lift.s, ctx.lower_lift.d, ctx.lower_lift.mode) orelse retain(e),
+        .lower_lift => if (lowerLiftRec(e, offset, ctx.lower_lift.s, ctx.lower_lift.d, ctx.lower_lift.mode)) |r| r else replaceRecDirect(e, offset, .lower_lift, ctx),
     };
 }
 

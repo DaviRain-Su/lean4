@@ -451,18 +451,22 @@ fn printName(w: *std.Io.Writer, n: *anyopaque) void {
     }
     const ctor_mod = @import("ctor.zig");
     const tag = object.lean_ptr_tag(n);
-    const parent = ctor_mod.lean_ctor_get(n, 1) orelse return;
+    const parent = ctor_mod.lean_ctor_get(n, 0) orelse return;
     if (!object.lean_is_scalar(parent)) {
         printName(w, parent);
         w.writeByte('.') catch return;
     }
-    if (tag == 0) {
-        const str_obj = ctor_mod.lean_ctor_get(n, 0) orelse return;
-        const s: *lean.lean_string_object = @ptrCast(@alignCast(str_obj));
-        const data: [*]const u8 = @ptrCast(&s.m_data);
-        w.writeAll(data[0..s.m_size -| 1]) catch return;
-    } else {
-        w.print("{d}", .{object.lean_unbox(ctor_mod.lean_ctor_get(n, 0) orelse return)}) catch return;
+    switch (tag) {
+        1 => {
+            const str_obj = ctor_mod.lean_ctor_get(n, 1) orelse return;
+            const s: *lean.lean_string_object = @ptrCast(@alignCast(str_obj));
+            const data: [*]const u8 = @ptrCast(&s.m_data);
+            w.writeAll(data[0..s.m_size -| 1]) catch return;
+        },
+        2 => {
+            w.print("{d}", .{object.lean_unbox(ctor_mod.lean_ctor_get(n, 1) orelse return)}) catch return;
+        },
+        else => return,
     }
 }
 

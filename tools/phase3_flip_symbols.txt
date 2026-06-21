@@ -161,7 +161,6 @@ lean_event_loop_lock
 lean_event_loop_loop
 lean_event_loop_unlock
 lean_expr_data
-lean_expr_dbg_to_string
 lean_extract_mpz_value
 lean_finalize_openssl
 lean_finalize_stack_overflow
@@ -555,9 +554,6 @@ lean_isize_to_int64
 lean_isize_to_int8
 lean_isize_xor
 lean_kernel_cheap_beta_reduce
-lean_kernel_check_impl
-lean_kernel_is_def_eq_impl
-lean_kernel_whnf_impl
 lean_libuv_version
 lean_list_cons
 lean_manual_get_root
@@ -1050,9 +1046,9 @@ lean_zig_socket_address_to_sockaddr_storage
 lean_zig_uv_event_loop_init
 lean_zig_uv_event_loop_run
 lean_zig_uv_initialize
-# Kernel symbols (Zig kernel port)
-lean_add_decl
-lean_add_decl_without_checking
+# Kernel symbols (Zig kernel port) — partial cutover
+# lean_add_decl
+# lean_add_decl_without_checking
 lean_expr_instantiate1
 lean_expr_abstract
 lean_expr_abstract_range
@@ -1060,17 +1056,16 @@ lean_expr_instantiate
 lean_expr_instantiate_range
 lean_expr_instantiate_rev
 lean_expr_instantiate_rev_range
-lean_expr_mk_app_data
-lean_expr_mk_data
-lean_find_expr
-lean_find_ext_expr
-lean_kernel_check_impl
-lean_kernel_is_def_eq_impl
-lean_kernel_whnf_impl
-lean_level_eq
-lean_level_eqv
-lean_level_mk_data
-lean_replace_expr
+lean_expr_lift_loose_bvars
+lean_expr_lower_loose_bvars
+# lean_expr_mk_app_data
+# lean_expr_mk_data
+# lean_find_expr
+# lean_find_ext_expr
+# lean_level_eq
+# lean_level_eqv
+# lean_level_mk_data
+# lean_replace_expr
 # Library/util C ABI symbols
 lean_expr_quick_lt
 lean_expr_lt
