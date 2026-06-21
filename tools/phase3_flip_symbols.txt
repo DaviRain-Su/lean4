@@ -1058,13 +1058,13 @@ lean_expr_instantiate_rev
 lean_expr_instantiate_rev_range
 lean_expr_lift_loose_bvars
 lean_expr_lower_loose_bvars
-# lean_expr_mk_app_data
-# lean_expr_mk_data
-# lean_find_expr
-# lean_find_ext_expr
-# lean_level_eq
-# lean_level_eqv
-# lean_level_mk_data
+lean_expr_mk_app_data
+lean_expr_mk_data
+lean_find_expr
+lean_find_ext_expr
+lean_level_eq
+lean_level_eqv
+lean_level_mk_data
 # lean_replace_expr
 # Library/util C ABI symbols
 lean_expr_quick_lt
