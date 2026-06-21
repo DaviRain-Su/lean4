@@ -134,7 +134,7 @@ fn writeLibTable(fd: std.posix.fd_t, libs: []compact.LibInfo) bool {
     return true;
 }
 
-pub export fn lean_compacted_region_save(
+pub export fn zig_lean_compacted_region_save(
     ofname: *anyopaque,
     mod: *anyopaque,
     odata: *anyopaque,
@@ -332,7 +332,7 @@ fn cmpLibRelocByOldBase(_: void, a: compact.LibReloc, b: compact.LibReloc) bool 
     return a.old_base < b.old_base;
 }
 
-pub export fn lean_compacted_region_read(
+pub export fn zig_lean_compacted_region_read(
     ofname: *anyopaque,
     odep_regions: *anyopaque,
     _: Obj,
@@ -501,7 +501,7 @@ pub export fn lean_compacted_region_read(
 // Free
 // -----------------------------------------------------------------------------
 
-pub export fn lean_compacted_region_free(
+pub export fn zig_lean_compacted_region_free(
     region: *anyopaque,
     _: Obj,
 ) callconv(.c) *anyopaque {
@@ -553,11 +553,11 @@ test "compacted region save/read owns malloc buffer until free" {
     const data = string.lean_mk_string("saved");
     defer rc.lean_dec(data);
 
-    const save_result = lean_compacted_region_save(fname, object.lean_box(0).?, data, deps, object.lean_box(0).?, 0, object.lean_box(0));
+    const save_result = zig_lean_compacted_region_save(fname, object.lean_box(0).?, data, deps, object.lean_box(0).?, 0, object.lean_box(0));
     defer rc.lean_dec(save_result);
     try std.testing.expect(io_result.lean_io_result_is_ok(save_result));
 
-    const read_result = lean_compacted_region_read(fname, deps, object.lean_box(0));
+    const read_result = zig_lean_compacted_region_read(fname, deps, object.lean_box(0));
     try std.testing.expect(io_result.lean_io_result_is_ok(read_result));
     const pair = io_result.lean_io_result_get_value(read_result).?;
     const root = ctor.lean_ctor_get(pair, 0).?;
@@ -567,7 +567,7 @@ test "compacted region save/read owns malloc buffer until free" {
     try std.testing.expectEqual(OLEAN_HEADER_SIZE + @sizeOf(usize), regionBufferOffset(region));
     try std.testing.expect(regionBufferOffset(region) < regionSize(region));
 
-    const free_result = lean_compacted_region_free(region, object.lean_box(0));
+    const free_result = zig_lean_compacted_region_free(region, object.lean_box(0));
     defer rc.lean_dec(free_result);
     try std.testing.expect(io_result.lean_io_result_is_ok(free_result));
 }
@@ -593,7 +593,7 @@ test "compacted region save/read closure with v3 format" {
     const slots: [*]Obj = @ptrCast(@alignCast(&closure.m_objs));
     slots[0] = captured;
 
-    const save_result = lean_compacted_region_save(
+    const save_result = zig_lean_compacted_region_save(
         fname,
         object.lean_box(0).?,
         closure_obj,
@@ -605,7 +605,7 @@ test "compacted region save/read closure with v3 format" {
     defer rc.lean_dec(save_result);
     try std.testing.expect(io_result.lean_io_result_is_ok(save_result));
 
-    const read_result = lean_compacted_region_read(fname, deps, object.lean_box(0));
+    const read_result = zig_lean_compacted_region_read(fname, deps, object.lean_box(0));
     try std.testing.expect(io_result.lean_io_result_is_ok(read_result));
     const pair = io_result.lean_io_result_get_value(read_result).?;
     const root = ctor.lean_ctor_get(pair, 0).?;
@@ -619,7 +619,7 @@ test "compacted region save/read closure with v3 format" {
     const rt_slots: [*]Obj = @ptrCast(@alignCast(&roundtrip.m_objs));
     try std.testing.expectEqualStrings("captured", testStringBytes(rt_slots[0].?));
 
-    const free_result = lean_compacted_region_free(region, object.lean_box(0));
+    const free_result = zig_lean_compacted_region_free(region, object.lean_box(0));
     defer rc.lean_dec(free_result);
     try std.testing.expect(io_result.lean_io_result_is_ok(free_result));
 }

@@ -119,5 +119,6 @@ comptime {
     @export(&nopVoid, .{ .name = "_ZN4lean20finalize_util_moduleEv", .linkage = .strong });
     @export(&nopVoid, .{ .name = "_ZN4lean31initialize_constructions_moduleEv", .linkage = .strong });
     @export(&nopVoid, .{ .name = "_ZN4lean29finalize_constructions_moduleEv", .linkage = .strong });
+    @export(&nopVoid, .{ .name = "_ZN4lean24get_short_version_stringEv", .linkage = .strong });
     @export(&nopVoid, .{ .name = "_ZN4lean21init_default_print_fnEv", .linkage = .strong });
 }

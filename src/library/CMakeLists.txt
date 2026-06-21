@@ -3,5 +3,6 @@
 add_library(
   library
   OBJECT
+  module.cpp
   ../kernel/zig_cutover_stub.cpp
 )
