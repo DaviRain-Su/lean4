@@ -1,0 +1,12 @@
+.{
+    .name = .lean4,
+    .version = "4.33.0-pre",
+    .fingerprint = 0x5c779eb079e1c85,
+    .minimum_zig_version = "0.15.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
