@@ -24,14 +24,13 @@ pub const Options = extern struct {
 extern fn lean_options_get_empty(u: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_options_get_bool(opts: *anyopaque, n: *anyopaque, default_value: bool) callconv(.c) bool;
 extern fn lean_options_update_bool(opts: *anyopaque, n: *anyopaque, v: bool) callconv(.c) *anyopaque;
-extern fn lean_internal_get_default_options(u: *anyopaque) callconv(.c) *anyopaque;
 
 fn lean_internal_get_default_verbose(_: *anyopaque) callconv(.c) u8 {
     return if (LEAN_DEFAULT_VERBOSE) 1 else 0;
 }
 
 fn lean_internal_get_default_options_impl(_: *anyopaque) callconv(.c) *anyopaque {
-    return lean_internal_get_default_options(object.lean_box(0).?);
+    return lean_options_get_empty(object.lean_box(0).?);
 }
 
 pub fn optionsGetBool(opts: Options, n: *anyopaque, default_value: bool) bool {
