@@ -46,6 +46,7 @@ pub const io_posix = @import("io_posix.zig");
 pub const io_result = @import("io_result.zig");
 pub const ir_interpreter = @import("ir_interpreter.zig");
 pub const llvm_stubs = @import("llvm_stubs.zig");
+pub const util_options = @import("util_options.zig");
 pub const kernel = @import("kernel.zig");
 pub const kernel_accessors = @import("kernel_accessors.zig");
 pub const kernel_init = @import("kernel_init.zig");
@@ -179,6 +180,7 @@ comptime {
     _ = time_task;
     _ = uint_conv;
     _ = util_ffi;
+    _ = util_options;
     _ = utf8;
     _ = uv_dns.force_link;
     _ = uv_event_loop.force_link;
