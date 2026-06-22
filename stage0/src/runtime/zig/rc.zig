@@ -4,7 +4,6 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
-const mpz_object = @import("mpz_object.zig");
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -172,8 +171,6 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyo
             alloc.lean_free_object(o);
         },
         lean.LeanMPZ => {
-            const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
-            mpz_object.mpzValue(mpz_obj).deinit();
             alloc.lean_free_object(o);
         },
         lean.LeanThunk => {
