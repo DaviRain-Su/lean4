@@ -10,6 +10,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const runtime_options = @import("runtime_options");
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
+const cpp_use_mimalloc = runtime_options.cpp_use_mimalloc;
 extern fn l_Lean_Name_hash___override(n: *anyopaque) callconv(.c) u64;
 
 
@@ -72,18 +73,22 @@ pub fn ctorScalarBytes(o: *anyopaque) usize {
     const scalar_start = @sizeOf(lean.lean_ctor_object) + object_bytes;
 
     if (!export_allocator_symbols) {
-        // Mimalloc mode: m_cs_sz stores the aligned total allocation size
-        // (set by C++ lean_alloc_small_object). Scalar bytes = total - header - object_slots.
-        if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
-            std.debug.assert(hdr.m_cs_sz >= scalar_start);
-            return hdr.m_cs_sz - scalar_start;
+        if (cpp_use_mimalloc) {
+            // LEAN_MIMALLOC helperless mode: m_cs_sz stores aligned total allocation size.
+            if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
+                std.debug.assert(hdr.m_cs_sz >= scalar_start);
+                return hdr.m_cs_sz - scalar_start;
+            }
+            if (hdr.m_rc == 0 and hdr.m_cs_sz != 0) {
+                std.debug.assert(hdr.m_cs_sz >= scalar_start);
+                return hdr.m_cs_sz - scalar_start;
+            }
+            return 0;
+        } else {
+            const payload_size = alloc.legacyPayloadSize(o);
+            std.debug.assert(payload_size >= scalar_start);
+            return payload_size - scalar_start;
         }
-        // Non-heap object (m_rc == 0): m_cs_sz stores the actual object size.
-        if (hdr.m_rc == 0 and hdr.m_cs_sz != 0) {
-            std.debug.assert(hdr.m_cs_sz >= scalar_start);
-            return hdr.m_cs_sz - scalar_start;
-        }
-        return 0;
     }
 
     // Self-hosted mode: m_cs_sz stores scalar_sz directly for heap ctors.

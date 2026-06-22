@@ -8,6 +8,7 @@ const runtime_options = @import("runtime_options");
 const allocprof = @import("allocprof.zig");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
+const cpp_use_mimalloc = runtime_options.cpp_use_mimalloc;
 const external_allocator = struct {
     extern fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque;
     extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
@@ -31,6 +32,19 @@ const mimalloc = struct {
         if (ptr) |p| std.c.free(@ptrCast(p));
     }
 };
+
+fn allocLegacySmallNoMimalloc(sz: usize) *anyopaque {
+    const total = sz + @sizeOf(usize);
+    const raw = std.c.malloc(total) orelse @panic("allocLegacySmallNoMimalloc: out of memory");
+    const prefix: [*]usize = @ptrCast(@alignCast(raw));
+    prefix[0] = sz;
+    return @ptrFromInt(@intFromPtr(raw) + @sizeOf(usize));
+}
+
+fn freeLegacySmallNoMimalloc(o: *anyopaque) void {
+    const prefix: [*]usize = @ptrFromInt(@intFromPtr(o) - @sizeOf(usize));
+    std.c.free(prefix);
+}
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -129,7 +143,11 @@ fn mpzValue(obj: *lean.MpzObject) *mpz_zig.Mpz {
 }
 
 fn legacySmallPayloadSize(ptr: *anyopaque) usize {
-    return header(ptr).m_cs_sz;
+    if (cpp_use_mimalloc) {
+        return header(ptr).m_cs_sz;
+    }
+    const prefix: [*]usize = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(usize));
+    return prefix[0];
 }
 
 fn trackedMeta(payload_size: usize, slot_idx: usize, kind: u8) AllocationMeta {
@@ -208,11 +226,10 @@ fn setHeapHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
     hdr.m_rc = 1;
     hdr.m_tag = tag;
     hdr.m_other = other;
-    // Match C++ lean_set_st_header: in mimalloc mode (export_allocator_symbols=false),
-    // do NOT overwrite m_cs_sz — it was set by lean_alloc_small_object to the
-    // aligned total allocation size. In self-hosted mode, m_cs_sz is not used for
-    // heap objects (allocationPayloadSize tracks the size), so zeroing is fine.
-    if (export_allocator_symbols) {
+    // Match C++ lean_set_st_header:
+    // - with LEAN_MIMALLOC, preserve m_cs_sz (set by lean_alloc_small_object)
+    // - without LEAN_MIMALLOC, zero m_cs_sz
+    if (export_allocator_symbols or !cpp_use_mimalloc) {
         hdr.m_cs_sz = 0;
     }
 }
@@ -433,15 +450,10 @@ pub fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque {
 }
 
 pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
-    // Match C++ lean_free_object behavior: free the allocation.
-    // For tracked allocations (from leanAlloc), the malloc pointer is
-    // ptr - sizeof(AllocationMeta); for legacy allocations (from
-    // mi_malloc_small), the malloc pointer IS the object pointer.
-    // We detect tracked allocations by checking the magic field, but
-    // only when safe (offset_in_page >= sizeof(AllocationMeta)).
+    const tag = header(o).m_tag;
 
     // Special-case MPZ to deinit the mpz value first.
-    if (header(o).m_tag == lean.LeanMPZ) {
+    if (tag == lean.LeanMPZ) {
         const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
         mpz_object.mpzValue(mpz_obj).deinit();
     }
@@ -449,16 +461,28 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
     if (export_allocator_symbols and hasTrackedMeta(o)) {
         // Tracked allocation: free the malloc block that includes AllocationMeta
         std.c.free(metaFromPayload(o));
-    } else {
-        // Legacy allocation: free the object directly
+    } else if (cpp_use_mimalloc) {
+        // Legacy mimalloc allocation: object pointer is the malloc pointer.
         mimalloc.mi_free(o);
+    } else {
+        // Legacy non-mimalloc allocation:
+        // - arrays/strings/closures are direct malloc allocations
+        // - Zig MPZ objects in helperless mode are also direct malloc allocations
+        // - everything else is a size-prefixed small allocation from lean.h /
+        //   allocSmallObject
+        switch (tag) {
+            lean.LeanArray, lean.LeanScalarArray, lean.LeanString, lean.LeanClosure, lean.LeanMPZ => std.c.free(o),
+            else => freeLegacySmallNoMimalloc(o),
+        }
     }
 }
 pub fn lean_free_small_object(o: *anyopaque) void {
     if (!export_allocator_symbols) {
-        // Same rationale as lean_free_object: call mi_free directly
-        // to avoid recursion through external_allocator after flipping.
-        mimalloc.mi_free(o);
+        if (cpp_use_mimalloc) {
+            mimalloc.mi_free(o);
+        } else {
+            freeLegacySmallNoMimalloc(o);
+        }
         return;
     }
 
@@ -474,14 +498,18 @@ pub fn allocCtorMemory(sz: usize) *anyopaque {
 
 pub fn allocSmallObject(sz: usize) *anyopaque {
     if (!export_allocator_symbols) {
-        // In mimalloc mode, use mi_malloc_small (not mi_malloc) and set m_cs_sz
-        // to the aligned allocation size, matching C++ lean_alloc_small_object.
-        const aligned = alignObjectSize(sz);
-        const mem = mimalloc.mi_malloc_small(aligned);
-        if (mem == null) @panic("out of memory");
-        const o: *lean.lean_object = @ptrCast(@alignCast(mem.?));
-        o.m_cs_sz = @intCast(aligned);
-        return @ptrCast(o);
+        if (cpp_use_mimalloc) {
+            // Match C++ lean_alloc_small_object in LEAN_MIMALLOC mode.
+            const aligned = alignObjectSize(sz);
+            const mem = mimalloc.mi_malloc_small(aligned);
+            if (mem == null) @panic("out of memory");
+            const o: *lean.lean_object = @ptrCast(@alignCast(mem.?));
+            o.m_cs_sz = @intCast(aligned);
+            return @ptrCast(o);
+        } else {
+            // Match lean.h no-mimalloc path: size-prefixed allocation.
+            return allocLegacySmallNoMimalloc(sz);
+        }
     }
     return lean_alloc_object(sz);
 }
@@ -499,24 +527,28 @@ pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopa
     const total_size = checkedAdd(checkedAdd(@sizeOf(lean.lean_ctor_object), object_bytes), scalar_sz);
 
     if (!export_allocator_symbols) {
-        // In mimalloc mode, use C++ lean_alloc_small_object (not lean_alloc_object)
-        // because lean_alloc_small_object calls mi_malloc_small and sets m_cs_sz to
-        // the aligned allocation size. This matches C++ lean_alloc_ctor_memory behavior.
-        // setHeapHeader preserves m_cs_sz in mimalloc mode.
-        const aligned = alignObjectSize(total_size);
-        if (aligned > std.math.maxInt(c_uint)) @panic("constructor size overflow");
-        const ptr = external_allocator.lean_alloc_small_object(@intCast(aligned));
-        const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
-        setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
-        // C++ lean_alloc_ctor_memory zeroes the last word of padding when aligned > sz.
-        // We replicate that behavior to match C++ semantics for sharecommon.
-        if (aligned > total_size) {
-            const end = @as([*]usize, @ptrCast(@alignCast(ptr)));
-            const end_idx = (aligned / @sizeOf(usize)) - 1;
-            end[end_idx] = 0;
+        if (cpp_use_mimalloc) {
+            // Match C++ LEAN_MIMALLOC lean_alloc_ctor_memory behavior.
+            const aligned = alignObjectSize(total_size);
+            if (aligned > std.math.maxInt(c_uint)) @panic("constructor size overflow");
+            const ptr = external_allocator.lean_alloc_small_object(@intCast(aligned));
+            const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
+            setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
+            if (aligned > total_size) {
+                const end = @as([*]usize, @ptrCast(@alignCast(ptr)));
+                const end_idx = (aligned / @sizeOf(usize)) - 1;
+                end[end_idx] = 0;
+            }
+            allocprof.recordAlloc(@intCast(tag));
+            return ptr;
+        } else {
+            // Match lean.h no-mimalloc lean_alloc_ctor_memory behavior.
+            const ptr = allocSmallObject(total_size);
+            const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
+            setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
+            allocprof.recordAlloc(@intCast(tag));
+            return ptr;
         }
-        allocprof.recordAlloc(@intCast(tag));
-        return ptr;
     }
 
     const ptr = lean_alloc_object(total_size);

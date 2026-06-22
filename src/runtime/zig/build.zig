@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
     const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse true;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
+    const cpp_use_mimalloc = b.option(bool, "cpp-use-mimalloc", "Whether the C++/generated-code side uses LEAN_MIMALLOC layout and mi_* allocators") orelse false;
     const cpp_build_type = b.option([]const u8, "cpp-build-type", "C++ CMAKE_BUILD_TYPE for .olean compatibility (Debug, Release, RelWithDebInfo, MinSizeRel)") orelse "Release";
     const leanc_extra_cc_flags = b.option([]const u8, "leanc-extra-cc-flags", "Extra CC flags for leanc") orelse "";
     const leanc_internal_flags = b.option([]const u8, "leanc-internal-flags", "Internal flags for leanc") orelse "";
@@ -22,6 +23,7 @@ pub fn build(b: *std.Build) void {
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
+    opts.addOption(bool, "cpp_use_mimalloc", cpp_use_mimalloc);
     opts.addOption([]const u8, "cpp_build_type", cpp_build_type);
     opts.addOption([]const u8, "leanc_extra_cc_flags", leanc_extra_cc_flags);
     opts.addOption([]const u8, "leanc_internal_flags", leanc_internal_flags);

@@ -7,6 +7,7 @@ const mpz_object = @import("mpz_object.zig");
 const allocprof = @import("allocprof.zig");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
+const cpp_use_mimalloc = runtime_options.cpp_use_mimalloc;
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -24,7 +25,7 @@ fn setStHeader(hdr: *align(1) lean.lean_object, tag: u8, other: u8) void {
     hdr.m_rc = 1;
     hdr.m_tag = tag;
     hdr.m_other = other;
-    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+    hdr.m_cs_sz = if (export_allocator_symbols or !cpp_use_mimalloc) 0 else small_cs_sz;
 }
 
 
@@ -64,12 +65,13 @@ fn stringDataByteSize(o: *lean.lean_string_object) usize {
 }
 
 fn defaultObjectSize(o: *anyopaque) usize {
-    // Compacted-region objects have m_rc == 0 (non-heap). Skip the
-    // AllocationMeta check for them — the bytes before a compacted-region
-    // object are adjacent object data, not our metadata, and a false
-    // positive would corrupt the reader walk by returning a wrong size.
-    if (header(o).m_rc == 0) return alloc.legacyPayloadSize(o);
-    return alloc.allocationPayloadSize(o) orelse alloc.legacyPayloadSize(o);
+    const hdr = header(o);
+    if (hdr.m_cs_sz == 0) {
+        if (hdr.m_rc == 0) return alloc.legacyPayloadSize(o);
+        return alloc.allocationPayloadSize(o) orelse alloc.legacyPayloadSize(o);
+    } else {
+        return hdr.m_cs_sz;
+    }
 }
 
 pub export fn lean_register_external_class(
@@ -145,25 +147,50 @@ pub export fn lean_object_byte_size(o: *anyopaque) callconv(.c) usize {
 }
 
 pub export fn lean_object_data_byte_size(o: *anyopaque) callconv(.c) usize {
-    switch (ptrTag(o)) {
-        lean.LeanArray => {
-            const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
-            return arrayDataByteSize(array);
-        },
-        lean.LeanScalarArray => {
-            const array: *lean.lean_sarray_object = @ptrCast(@alignCast(o));
-            return sarrayDataByteSize(array);
-        },
-        lean.LeanString => {
-            const string: *lean.lean_string_object = @ptrCast(@alignCast(o));
-            return stringDataByteSize(string);
-        },
-        lean.LeanClosure => {
-            const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
-            return closureByteSize(closure);
-        },
-        lean.LeanMPZ => return mpz_object.mpzObjectByteSize(),
-        else => return defaultObjectSize(o),
+    const tag = ptrTag(o);
+    const hdr = header(o);
+    if (hdr.m_cs_sz == 0) {
+        switch (tag) {
+            lean.LeanArray => {
+                const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
+                return arrayDataByteSize(array);
+            },
+            lean.LeanScalarArray => {
+                const array: *lean.lean_sarray_object = @ptrCast(@alignCast(o));
+                return sarrayDataByteSize(array);
+            },
+            lean.LeanString => {
+                const string: *lean.lean_string_object = @ptrCast(@alignCast(o));
+                return stringDataByteSize(string);
+            },
+            lean.LeanClosure => {
+                const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
+                return closureByteSize(closure);
+            },
+            lean.LeanMPZ => return mpz_object.mpzObjectByteSize(),
+            else => return defaultObjectSize(o),
+        }
+    } else {
+        switch (tag) {
+            lean.LeanArray => {
+                const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
+                return arrayDataByteSize(array);
+            },
+            lean.LeanScalarArray => {
+                const array: *lean.lean_sarray_object = @ptrCast(@alignCast(o));
+                return sarrayDataByteSize(array);
+            },
+            lean.LeanString => {
+                const string: *lean.lean_string_object = @ptrCast(@alignCast(o));
+                return stringDataByteSize(string);
+            },
+            lean.LeanClosure => {
+                const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
+                return closureByteSize(closure);
+            },
+            lean.LeanMPZ => return mpz_object.mpzObjectByteSize(),
+            else => return hdr.m_cs_sz,
+        }
     }
 }
 

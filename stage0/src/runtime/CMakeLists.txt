@@ -13,7 +13,6 @@ set(
   alloc.cpp
   sharecommon.cpp
   object_ref.cpp
-  mimalloc_compat.cpp
   uv/net_addr.cpp
   uv/zig_link_compat.cpp
 )

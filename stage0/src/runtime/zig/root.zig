@@ -151,7 +151,7 @@ comptime {
     _ = llvm_stubs;
     _ = list;
     _ = memory;
-    _ = mimalloc_compat;
+    if (runtime_options.cpp_use_mimalloc) _ = mimalloc_compat;
     _ = misc;
     _ = module;
     _ = nat;

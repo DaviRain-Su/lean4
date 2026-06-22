@@ -109,7 +109,10 @@ option(LAZY_RC "LAZY_RC" OFF)
 option(RUNTIME_STATS "RUNTIME_STATS" OFF)
 option(BSYMBOLIC "Link with -Bsymbolic to reduce call overhead in shared libraries (Linux)" ON)
 option(USE_GMP "USE_GMP" ON)
-option(USE_MIMALLOC "use mimalloc" ON)
+option(USE_MIMALLOC "use mimalloc" OFF)
+if(USE_MIMALLOC)
+  message(FATAL_ERROR "USE_MIMALLOC is no longer supported; build without mimalloc.")
+endif()
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Note: LEAN_ZIG_RUNTIME is intentionally NOT added to compile definitions here.
 # The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
@@ -149,10 +152,6 @@ if(LAZY_RC MATCHES "ON")
   set(LEAN_LAZY_RC "#define LEAN_LAZY_RC")
 endif()
 
-if(USE_MIMALLOC)
-  set(SMALL_ALLOCATOR OFF)
-  set(LEAN_MIMALLOC "#define LEAN_MIMALLOC")
-endif()
 
 if(SMALL_ALLOCATOR MATCHES "ON")
   set(LEAN_SMALL_ALLOCATOR "#define LEAN_SMALL_ALLOCATOR")
@@ -723,12 +722,6 @@ else()
   set(LEAN_IS_STAGE0 "#define LEAN_IS_STAGE0 0")
 endif()
 configure_file("${LEAN_SOURCE_DIR}/config.h.in" "${LEAN_BINARY_DIR}/include/lean/config.h")
-if(USE_MIMALLOC)
-  file(
-    COPY "${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/include/mimalloc.h"
-    DESTINATION "${LEAN_BINARY_DIR}/include/lean"
-  )
-endif()
 install(DIRECTORY ${LEAN_BINARY_DIR}/include/ DESTINATION include)
 configure_file(${LEAN_SOURCE_DIR}/lean.mk.in ${LEAN_BINARY_DIR}/share/lean/lean.mk)
 install(DIRECTORY ${LEAN_BINARY_DIR}/share/ DESTINATION share)

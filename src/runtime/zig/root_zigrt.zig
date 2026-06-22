@@ -6,6 +6,7 @@
 // not needed by emitted Zig programs and otherwise drag in Lean stdlib symbol
 // dependencies.
 
+const runtime_options = @import("runtime_options");
 pub const alloc = @import("alloc.zig");
 pub const allocprof = @import("allocprof.zig");
 pub const allocator = @import("lean_allocator");
@@ -101,7 +102,7 @@ comptime {
     _ = interrupt;
     _ = list;
     _ = memory;
-    _ = mimalloc_compat;
+    if (runtime_options.cpp_use_mimalloc) _ = mimalloc_compat;
     _ = misc;
     _ = module;
     _ = mpz_zig;

@@ -28,7 +28,7 @@ fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
     hdr.m_rc = 1;
     hdr.m_tag = tag;
     hdr.m_other = other;
-    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+    hdr.m_cs_sz = if (export_allocator_symbols or !runtime_options.cpp_use_mimalloc) 0 else small_cs_sz;
 }
 
 

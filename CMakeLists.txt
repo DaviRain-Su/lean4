@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
 include(ExternalProject)
-include(FetchContent)
-
 if(NOT CMAKE_GENERATOR MATCHES "Makefiles")
   message(FATAL_ERROR "Only makefile generators are supported")
 endif()
 
-option(USE_MIMALLOC "use mimalloc" ON)
+option(USE_MIMALLOC "use mimalloc" OFF)
+if(USE_MIMALLOC)
+  message(FATAL_ERROR "USE_MIMALLOC is no longer supported; build without mimalloc.")
+endif()
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" OFF)
 
 # store all variables passed on the command line into CL_ARGS so we can pass them to the stage builds
@@ -119,21 +120,6 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   endif()
   list(APPEND STAGE0_ARGS -DLEANTAR=${LEANTAR})
   list(APPEND CL_ARGS -DCADICAL=${CADICAL} -DLEANTAR=${LEANTAR})
-endif()
-
-if(USE_MIMALLOC)
-  FetchContent_Declare(
-    mimalloc
-    GIT_REPOSITORY https://github.com/microsoft/mimalloc
-    GIT_TAG v2.2.3
-    # Unnecessarily deep directory structure, but it saves us from a complicated
-    # stage0 update for now. If we ever update the other dependencies like
-    # cadical, it might be worth reorganizing the directory structure.
-    SOURCE_DIR
-    "${CMAKE_BINARY_DIR}/mimalloc/src/mimalloc"
-    EXCLUDE_FROM_ALL
-  )
-  FetchContent_MakeAvailable(mimalloc)
 endif()
 
 if(NOT STAGE1_PREV_STAGE)

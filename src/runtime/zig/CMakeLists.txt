@@ -56,6 +56,7 @@ if(ZIG)
     --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
     "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
     "-Dcpp-build-type=${CMAKE_BUILD_TYPE}"
+    "-Dcpp-use-mimalloc=$<IF:$<BOOL:${USE_MIMALLOC}>,true,false>"
     "-Dleanc-extra-cc-flags=${LEANC_EXTRA_CC_FLAGS}"
     "-Dleanc-internal-flags=${LEANC_INTERNAL_FLAGS}"
     "-Dleanc-static-linker-flags=${LEANC_STATIC_LINKER_FLAGS}"
@@ -98,12 +99,12 @@ if(ZIG)
     -Dexport-kernel-symbols=true
     -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
     -Dcpp-build-type=${CMAKE_BUILD_TYPE}
+    -Dcpp-use-mimalloc=$<IF:$<BOOL:${USE_MIMALLOC}>,true,false>
     -Dleanc-extra-cc-flags=${LEANC_EXTRA_CC_FLAGS}
     -Dleanc-internal-flags=${LEANC_INTERNAL_FLAGS}
     -Dleanc-static-linker-flags=${LEANC_STATIC_LINKER_FLAGS}
     -Dleanc-shared-linker-flags=${LEANC_SHARED_LINKER_FLAGS}
     -Dleanc-internal-linker-flags=${LEANC_INTERNAL_LINKER_FLAGS}
-    -Dlean-extra-linker-flags=${LEAN_EXTRA_LINKER_FLAGS}
   )
   if(STAGE EQUAL 0)
     list(APPEND LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
