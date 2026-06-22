@@ -157,30 +157,30 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
             const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
             const slots = closureSlots(closure);
             for (0..closure.m_num_fixed) |i| decObject(todo, slots[i]);
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanArray => {
             const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
             const slots = arraySlots(array);
             for (0..array.m_size) |i| decObject(todo, slots[i]);
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanScalarArray, lean.LeanString => {
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanMPZ => {
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanThunk => {
             const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(o));
             decObject(todo, thunk.m_closure);
             decObject(todo, thunk.m_value);
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanRef => {
             const ref_obj: *lean.lean_ref_object = @ptrCast(@alignCast(o));
             decObject(todo, ref_obj.m_value);
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         lean.LeanPromise => {
             task_runtime.leanrt_task_deactivate_promise_impl(o);
@@ -190,7 +190,7 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
             leanrt_task_deactivate_task_impl(task);
         },
         lean.LeanExternal => {
-            alloc.lean_free_object(o);
+            alloc.lean_free_small_object(o);
         },
         else => @panic("unexpected object tag in delCoreOther"),
     }
@@ -203,7 +203,7 @@ fn delCore(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
         const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(o));
         const slots = ctorSlots(ctor);
         for (0..hdr.m_other) |i| decObject(todo, slots[i]);
-        alloc.lean_free_object(o);
+        alloc.lean_free_small_object(o);
     } else {
         delCoreOther(todo, o, tag);
     }
