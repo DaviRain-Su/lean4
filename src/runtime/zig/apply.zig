@@ -6,7 +6,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 
 const Obj = ?*anyopaque;
-const max_direct_args = 16;
+const max_direct_args = 4;
 
 const Fn1 = *const fn (Obj) callconv(.c) Obj;
 const Fn2 = *const fn (Obj, Obj) callconv(.c) Obj;
@@ -162,11 +162,49 @@ fn applySlice(f: *anyopaque, provided: []const Obj) Obj {
 }
 
 pub export fn lean_apply_1(f: *anyopaque, a1: *anyopaque) callconv(.c) Obj {
+    if (object.lean_is_scalar(f)) {
+        rc.lean_dec(a1);
+        return f;
+    }
+    const closure = closurePtr(f);
+    const arity: usize = closure.m_arity;
+    const fixed: usize = closure.m_num_fixed;
+    if (arity == fixed + 1) {
+        const exclusive = rc.lean_is_exclusive(f);
+        if (fixed == 0) {
+            const r = castFun(Fn1, closure.m_fun)(a1);
+            if (exclusive) freeMovedClosureShell(f) else rc.lean_dec_ref(f);
+            return r;
+        }
+    }
     const args = [_]Obj{a1};
     return applySlice(f, args[0..]);
 }
 
 export fn lean_apply_2(f: *anyopaque, a1: *anyopaque, a2: *anyopaque) callconv(.c) Obj {
+    if (object.lean_is_scalar(f)) {
+        rc.lean_dec(a1);
+        rc.lean_dec(a2);
+        return f;
+    }
+    const closure = closurePtr(f);
+    const arity: usize = closure.m_arity;
+    const fixed: usize = closure.m_num_fixed;
+    if (arity == fixed + 2) {
+        const exclusive = rc.lean_is_exclusive(f);
+        const slots = closureSlots(closure);
+        if (fixed == 0) {
+            const r = castFun(Fn2, closure.m_fun)(a1, a2);
+            if (exclusive) freeMovedClosureShell(f) else rc.lean_dec_ref(f);
+            return r;
+        }
+        if (fixed == 1) {
+            if (!exclusive) rc.lean_inc(slots[0]);
+            const r = castFun(Fn3, closure.m_fun)(slots[0], a1, a2);
+            if (exclusive) freeMovedClosureShell(f) else rc.lean_dec_ref(f);
+            return r;
+        }
+    }
     const args = [_]Obj{ a1, a2 };
     return applySlice(f, args[0..]);
 }

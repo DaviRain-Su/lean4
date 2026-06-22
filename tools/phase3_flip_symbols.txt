@@ -658,7 +658,6 @@ lean_sarray_eq
 lean_sarray_eq_cold
 lean_sarray_set_size
 lean_sarray_size
-lean_save_stack_info
 lean_scalar_to_int
 lean_scalar_to_int64
 lean_set_exit_on_panic

@@ -186,5 +186,5 @@ fn cpp_notify_assertion_violation(file_name: [*:0]const u8, line: c_int, conditi
     notifyAssertionViolation(file_name, line, condition);
 }
 comptime {
-    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .strong });
+    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .weak });
 }
