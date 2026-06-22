@@ -1067,7 +1067,7 @@ lean_find_ext_expr
 lean_level_mk_data
 # lean_replace_expr
 # Library/util C ABI symbols
-lean_expr_quick_lt
+#lean_expr_quick_lt
 lean_expr_lt
 lean_init_llvm
 lean_emit_llvm
