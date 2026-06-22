@@ -13,7 +13,6 @@ const object = @import("object.zig");
 const ctor = @import("ctor.zig");
 const ea = @import("expr_accessors.zig");
 const rt = @import("lean_rt.zig");
-const rc = @import("rc.zig");
 const util_name = @import("util_name.zig");
 
 extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
@@ -212,24 +211,10 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         else => return false,
     }
 }
-
 pub export fn lean_expr_quick_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    // Match C++ semantics: expr(a, true) does inc(a), destructor does dec.
-    // Without this, a worker thread can free the expression (or a
-    // sub-expression) while isLtExpr is still traversing it.
-    rc.lean_inc(a);
-    rc.lean_inc(b);
-    const r = isLtExpr(a, b, true);
-    rc.lean_dec(a);
-    rc.lean_dec(b);
-    return @intFromBool(r);
+    return @intFromBool(isLtExpr(a, b, true));
 }
 
 pub export fn lean_expr_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    rc.lean_inc(a);
-    rc.lean_inc(b);
-    const r = isLtExpr(a, b, false);
-    rc.lean_dec(a);
-    rc.lean_dec(b);
-    return @intFromBool(r);
+    return @intFromBool(isLtExpr(a, b, false));
 }

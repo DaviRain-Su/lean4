@@ -233,7 +233,7 @@ pub export fn lean_inc_ref_n(o: *anyopaque, n: usize) callconv(.c) void {
 
     const hdr = header(o);
     if (hdr.m_rc > 0) {
-        hdr.m_rc += toI32Count(n);
+        _ = @atomicRmw(i32, &hdr.m_rc, .Add, toI32Count(n), .seq_cst);
     } else if (hdr.m_rc != 0) {
         _ = @atomicRmw(i32, &hdr.m_rc, .Sub, toI32Count(n), .seq_cst);
     }
@@ -292,7 +292,7 @@ pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
 pub export fn lean_dec_ref(o: *anyopaque) callconv(.c) void {
     const hdr = header(o);
     if (hdr.m_rc > 1) {
-        hdr.m_rc -= 1;
+        _ = @atomicRmw(i32, &hdr.m_rc, .Sub, 1, .seq_cst);
     } else if (hdr.m_rc != 0) {
         lean_dec_ref_cold(o);
     }
