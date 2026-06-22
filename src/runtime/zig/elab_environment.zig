@@ -4,7 +4,8 @@
 //! C-linkage elaboration environment entrypoints ported from `src/library/elab_environment.cpp`.
 //!
 //! Declaration add paths compose Lean-exported environment helpers with kernel `lean_add_decl`.
-//! `lean_kernel_whnf` / `is_def_eq` / `check` delegate to `lean_kernel_*_impl` (Lean type checker).
+//! `lean_kernel_whnf` / `is_def_eq` / `check` are in kernel_entrypoints.zig (separate module)
+//! to prevent the ZCU optimizer from eliminating the env conversion.
 
 pub const force_link = true;
 
@@ -13,7 +14,6 @@ const ctor = @import("ctor.zig");
 const object = @import("object.zig");
 const interrupt = @import("interrupt.zig");
 const rc = @import("rc.zig");
-const std = @import("std");
 /// Matches `LEAN_BELIEVER_TRUST_LEVEL` in `src/kernel/environment.h`.
 const lean_believer_trust_level: u32 = 1024;
 
@@ -22,14 +22,6 @@ extern fn lean_elab_environment_update_base_after_kernel_add(env: *anyopaque, ke
 extern fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 
-extern fn lean_kernel_whnf_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_is_def_eq_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_kernel_check_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-
-// C barrier functions compiled separately by cc — the ZCU optimizer cannot
-// inline these, so the lean_elab_environment_to_kernel_env call is preserved.
-extern fn env_barrier_to_kernel_env(env: *anyopaque) callconv(.c) *anyopaque;
-extern fn env_barrier_dec(kenv: *anyopaque) callconv(.c) void;
 fn exceptIsOk(e: *anyopaque) bool {
     return object.lean_ptr_tag(e) == 1;
 }
@@ -75,17 +67,6 @@ pub export fn lean_elab_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *a
 
 pub export fn lean_elab_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
     return elabAddDeclCore(env, 0, decl, object.lean_box(0).?, false);
-}
-pub export fn lean_kernel_whnf(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_whnf_impl(obj_env, lctx, a);
-}
-
-pub export fn lean_kernel_is_def_eq(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_is_def_eq_impl(obj_env, lctx, a, b);
-}
-
-pub export fn lean_kernel_check(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
-    return lean_kernel_check_impl(obj_env, lctx, a);
 }
 
 pub export fn lean_internal_get_believer_trust_level(_: ?*anyopaque) callconv(.c) u32 {

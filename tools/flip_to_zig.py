@@ -176,13 +176,31 @@ def process_archive(archive_path: str, target_syms: set, action: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print(f"usage: {sys.argv[0]} <zig-archive.a> <symbol-list-file> <cpp-archive.a> [<cpp-archive.a> ...]", file=sys.stderr)
+    # Usage: flip_to_zig.py <zig-archive.a> [<zig-archive.a> ...] <symbol-list-file> <cpp-archive.a> [<cpp-archive.a> ...]
+    # Split args: zig archives first, then symbol file, then cpp archives.
+    # The symbol file is the first argument that ends with .txt
+    args = sys.argv[1:]
+    if len(args) < 3:
+        print(f"usage: {sys.argv[0]} <zig-archive.a> [<zig-archive.a> ...] <symbol-list-file> <cpp-archive.a> [<cpp-archive.a> ...]", file=sys.stderr)
         sys.exit(2)
 
-    zig_path = sys.argv[1]
-    sym_file = sys.argv[2]
-    cpp_paths = sys.argv[3:]
+    # Find the symbol list file (first arg ending in .txt)
+    sym_idx = None
+    for i, arg in enumerate(args):
+        if arg.endswith('.txt'):
+            sym_idx = i
+            break
+    if sym_idx is None:
+        print(f"usage: {sys.argv[0]} <zig-archive.a> [<zig-archive.a> ...] <symbol-list-file> <cpp-archive.a> [<cpp-archive.a> ...]", file=sys.stderr)
+        sys.exit(2)
+
+    zig_paths = args[:sym_idx]
+    sym_file = args[sym_idx]
+    cpp_paths = args[sym_idx + 1:]
+
+    if not zig_paths or not cpp_paths:
+        print(f"usage: {sys.argv[0]} <zig-archive.a> [<zig-archive.a> ...] <symbol-list-file> <cpp-archive.a> [<cpp-archive.a> ...]", file=sys.stderr)
+        sys.exit(2)
 
     flip_syms = read_symbol_list(sym_file)
     if not flip_syms:
@@ -197,7 +215,8 @@ if __name__ == "__main__":
         print(f"  C++ {cpp_path}: weakened {cpp_count} symbol(s)")
 
     # 2. Unweaken Zig symbols so they become strong
-    zig_count = process_archive(zig_path, flip_syms, 'unweaken')
-    print(f"  Zig {zig_path}: unweakened {zig_count} symbol(s)")
+    for zig_path in zig_paths:
+        zig_count = process_archive(zig_path, flip_syms, 'unweaken')
+        print(f"  Zig {zig_path}: unweakened {zig_count} symbol(s)")
 
     sys.exit(0)

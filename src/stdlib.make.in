@@ -1,3 +1,6 @@
+# Zig compiler for Lake Zig codegen (set by CMake when LEAN_ZIG_CODEGEN=ON).
+STDLIB_ZIG := ${STDLIB_ZIG}
+
 # LEAN_BASH: Makes the Bash shell used by the Lean build configurable.
 # On Windows, when CMake/Make is spawned directly (e.g., VSCode's CMake Tools),
 # it lacks a proper shell environment, so we need to manually point it to Bash.
@@ -60,7 +63,8 @@ ifeq "${USE_LAKE}" "ON"
 
 # build in parallel
 Init:
-	${PREV_STAGE}/bin/lake build -f ${CMAKE_BINARY_DIR}/lakefile.toml ${LEAN_EXTRA_LAKE_OPTS} $(LAKE_EXTRA_ARGS)
+	ulimit -n 65536 2>/dev/null || true; \
+	ZIG="${STDLIB_ZIG}" ${PREV_STAGE}/bin/lake build -f ${CMAKE_BINARY_DIR}/lakefile.toml ${LEAN_EXTRA_LAKE_OPTS} $(LAKE_EXTRA_ARGS)
 
 Std Lean Lake Leanc LeanChecker LeanIR: Init
 
@@ -125,6 +129,10 @@ else
 endif
 
 Init_shared: $(OUTLIB)/libInit_shared$(SO)
+ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
+# `lean` searches @rpath/libInit_shared.dylib under both `lib/` and `lib/lean/`.
+	ln -sf lean/libInit_shared$(SO) ${CMAKE_BINARY_DIR}/lib/libInit_shared$(SO)
+endif
 
 $(OUTLIB)/libleanshared$(SO): $(OUTLIB)/libInit_shared$(SO) ${LIB}/lean/libLean.a.export ${LIB}/lean/libleancpp.a ${LIB}/temp/libleanshell.a ${LIB}/temp/libleaninitialize.a
 	$(link-preamble)
@@ -162,7 +170,7 @@ else
 	$(LEANC_SH) -shared -o $(OUTLIB)/libleanshared_2$(SO) ${LIB}/temp/empty.c ${LEANSHARED_2_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
 	$(LEANC_SH) -shared -o $@ \
-  	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+  	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -Wl,-force_load,${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
 	$(LEANC_SH) -shared -o $@ \
   	  -Wl,--whole-archive ${LIB}/temp/Lean.*o.export ${LIB}/temp/libleanshell.a -Wl,--no-whole-archive -Wl,--start-group -lInit -lStd -lLean -lleancpp -Wl,--end-group ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
