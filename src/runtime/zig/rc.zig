@@ -32,21 +32,6 @@ extern fn lean_task_get(t: *anyopaque) callconv(.c) *anyopaque;
 
 const VisitMode = enum { mt, persistent };
 
-// Intrusive linked list for deletion cascade: overwrite the 8-byte
-// object header (m_rc, m_cs_sz, m_other, m_tag) with a next pointer.
-// This matches the C++ runtime's push_back/pop_back approach and makes
-// m_rc appear as a large positive value so a second decObject decrements
-// instead of re-enqueuing (preventing double-free).
-fn setNext(o: *anyopaque, next: ?*anyopaque) void {
-    const ptr: *?*anyopaque = @ptrCast(@alignCast(o));
-    ptr.* = next;
-}
-
-fn getNext(o: *anyopaque) ?*anyopaque {
-    const ptr: *?*anyopaque = @ptrCast(@alignCast(o));
-    return ptr.*;
-}
-
 fn opaqueFunPtr(fun: anytype) ?*anyopaque {
     return @ptrCast(@constCast(fun));
 }
@@ -144,69 +129,63 @@ fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque, mode: VisitMod
     }
 }
 
-fn decObject(todo: *?*anyopaque, child: ?*anyopaque) void {
+// Deletion cascade uses an ArrayList todo queue plus a side HashMap
+// to prevent duplicate enqueue. m_rc is NOT modified during queuing,
+// preserving lean_is_exclusive/lean_is_shared/lean_is_persistent
+// semantics for the elaborator and compiled Lean code.
+fn decObject(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), child: ?*anyopaque) void {
     if (child) |ptr| {
         if (object.lean_is_scalar(ptr)) return;
         const hdr = header(ptr);
         if (hdr.m_rc > 1) {
             hdr.m_rc -= 1;
         } else if (hdr.m_rc == 1) {
-            // Use intrusive linked list: overwrite the 8-byte header
-            // with the next pointer (like C++ push_back). This makes
-            // m_rc appear > 1 so a second dec takes the decrement branch.
-            setNext(ptr, todo.*);
-            todo.* = ptr;
+            if (queued.contains(ptr)) return;
+            queued.put(ptr, {}) catch @panic("out of memory");
+            todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
         } else if (hdr.m_rc < 0) {
             const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
             if (prev == -1) {
-                setNext(ptr, todo.*);
-                todo.* = ptr;
+                if (queued.contains(ptr)) return;
+                queued.put(ptr, {}) catch @panic("out of memory");
+                todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
             }
         }
     }
 }
 
-fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
+fn delCoreOther(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), o: *anyopaque, tag: u8) void {
     switch (tag) {
         lean.LeanClosure => {
             const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
             const slots = closureSlots(closure);
-            for (0..closure.m_num_fixed) |i| decObject(todo, slots[i]);
-            // Closures are allocated via lean_alloc_object (plain malloc).
-            // Use alloc.lean_free_object which dispatches to std.c.free for closures.
+            for (0..closure.m_num_fixed) |i| decObject(todo, queued, slots[i]);
             alloc.lean_free_object(o);
         },
         lean.LeanArray => {
             const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
             const slots = arraySlots(array);
-            for (0..array.m_size) |i| decObject(todo, slots[i]);
-            // Arrays are allocated via lean_alloc_object (plain malloc).
-            // Use alloc.lean_free_object which dispatches to std.c.free for arrays.
+            for (0..array.m_size) |i| decObject(todo, queued, slots[i]);
             alloc.lean_free_object(o);
         },
         lean.LeanScalarArray, lean.LeanString => {
-            // Scalar arrays and strings are allocated via lean_alloc_object (plain malloc).
-            // Use alloc.lean_free_object which dispatches to std.c.free for these tags.
             alloc.lean_free_object(o);
         },
         lean.LeanMPZ => {
-            // MPZ objects are allocated via lean_alloc_small_object (size-prefixed).
-            // Deinit the mpz value first, then use lean_free_small_object
-            // (matching C++ lean_del_core_other behavior).
             const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
             mpz_object.mpzValue(mpz_obj).deinit();
-            alloc.lean_free_small_object(o);
+            alloc.lean_free_object(o);
         },
         lean.LeanThunk => {
             const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(o));
-            decObject(todo, thunk.m_closure);
-            decObject(todo, thunk.m_value);
-            alloc.lean_free_small_object(o);
+            decObject(todo, queued, thunk.m_closure);
+            decObject(todo, queued, thunk.m_value);
+            alloc.lean_free_object(o);
         },
         lean.LeanRef => {
             const ref_obj: *lean.lean_ref_object = @ptrCast(@alignCast(o));
-            decObject(todo, ref_obj.m_value);
-            alloc.lean_free_small_object(o);
+            decObject(todo, queued, ref_obj.m_value);
+            alloc.lean_free_object(o);
         },
         lean.LeanPromise => {
             task_runtime.leanrt_task_deactivate_promise_impl(o);
@@ -216,22 +195,22 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
             leanrt_task_deactivate_task_impl(task);
         },
         lean.LeanExternal => {
-            alloc.lean_free_small_object(o);
+            alloc.lean_free_object(o);
         },
         else => @panic("unexpected object tag in delCoreOther"),
     }
 }
 
-fn delCore(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
+fn delCore(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), o: *anyopaque) void {
     const hdr = header(o);
     const tag = hdr.m_tag;
     if (tag <= lean.LeanMaxCtorTag) {
         const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(o));
         const slots = ctorSlots(ctor);
-        for (0..hdr.m_other) |i| decObject(todo, slots[i]);
-        alloc.lean_free_small_object(o);
+        for (0..hdr.m_other) |i| decObject(todo, queued, slots[i]);
+        alloc.lean_free_object(o);
     } else {
-        delCoreOther(todo, o, tag);
+        delCoreOther(todo, queued, o, tag);
     }
 }
 
@@ -273,22 +252,28 @@ pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
     var o = o_arg;
     const hdr = header(o);
     if (hdr.m_rc == 1) {
-        var todo: ?*anyopaque = null;
+        var todo: std.ArrayList(*anyopaque) = .empty;
+        defer todo.deinit(std.heap.page_allocator);
+        var queued = std.AutoHashMap(*anyopaque, void).init(std.heap.page_allocator);
+        defer queued.deinit();
+        queued.put(o, {}) catch @panic("out of memory");
         while (true) {
-            delCore(&todo, o);
-            if (todo == null) return;
-            o = todo.?;
-            todo = getNext(o);
+            delCore(&todo, &queued, o);
+            if (todo.items.len == 0) return;
+            o = todo.orderedRemove(todo.items.len - 1);
         }
     } else if (hdr.m_rc < 0) {
         const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
         if (prev == -1) {
-            var todo: ?*anyopaque = null;
+            var todo: std.ArrayList(*anyopaque) = .empty;
+            defer todo.deinit(std.heap.page_allocator);
+            var queued = std.AutoHashMap(*anyopaque, void).init(std.heap.page_allocator);
+            defer queued.deinit();
+            queued.put(o, {}) catch @panic("out of memory");
             while (true) {
-                delCore(&todo, o);
-                if (todo == null) return;
-                o = todo.?;
-                todo = getNext(o);
+                delCore(&todo, &queued, o);
+                if (todo.items.len == 0) return;
+                o = todo.orderedRemove(todo.items.len - 1);
             }
         }
     }

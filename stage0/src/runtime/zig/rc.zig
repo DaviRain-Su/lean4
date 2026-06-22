@@ -4,6 +4,7 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+const mpz_object = @import("mpz_object.zig");
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -128,58 +129,62 @@ fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque, mode: VisitMod
     }
 }
 
-fn decObject(todo: *std.ArrayList(*anyopaque), child: ?*anyopaque) void {
+// Deletion cascade uses an ArrayList todo queue plus a side HashMap
+// to prevent duplicate enqueue. m_rc is NOT modified during queuing,
+// preserving lean_is_exclusive/lean_is_shared/lean_is_persistent
+// semantics for the elaborator and compiled Lean code.
+fn decObject(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), child: ?*anyopaque) void {
     if (child) |ptr| {
         if (object.lean_is_scalar(ptr)) return;
         const hdr = header(ptr);
         if (hdr.m_rc > 1) {
             hdr.m_rc -= 1;
         } else if (hdr.m_rc == 1) {
-            // Mark as queued for deletion using a large positive sentinel.
-            // C++ uses an intrusive list that overwrites m_rc with a pointer
-            // (also > 1). We use a sentinel so a second decObject before the
-            // first delCore runs takes the m_rc > 1 branch and decrements
-            // harmlessly instead of re-enqueuing the same pointer (double-free).
-            hdr.m_rc = 0x7fff_0000;
+            if (queued.contains(ptr)) return;
+            queued.put(ptr, {}) catch @panic("out of memory");
             todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
         } else if (hdr.m_rc < 0) {
             const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
             if (prev == -1) {
+                if (queued.contains(ptr)) return;
+                queued.put(ptr, {}) catch @panic("out of memory");
                 todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
             }
         }
     }
 }
 
-fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
+fn delCoreOther(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), o: *anyopaque, tag: u8) void {
     switch (tag) {
         lean.LeanClosure => {
             const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
             const slots = closureSlots(closure);
-            for (0..closure.m_num_fixed) |i| decObject(todo, slots[i]);
+            for (0..closure.m_num_fixed) |i| decObject(todo, queued, slots[i]);
             alloc.lean_free_object(o);
         },
         lean.LeanArray => {
             const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
             const slots = arraySlots(array);
-            for (0..array.m_size) |i| decObject(todo, slots[i]);
+            for (0..array.m_size) |i| decObject(todo, queued, slots[i]);
             alloc.lean_free_object(o);
         },
         lean.LeanScalarArray, lean.LeanString => {
             alloc.lean_free_object(o);
         },
         lean.LeanMPZ => {
+            const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
+            mpz_object.mpzValue(mpz_obj).deinit();
             alloc.lean_free_object(o);
         },
         lean.LeanThunk => {
             const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(o));
-            decObject(todo, thunk.m_closure);
-            decObject(todo, thunk.m_value);
+            decObject(todo, queued, thunk.m_closure);
+            decObject(todo, queued, thunk.m_value);
             alloc.lean_free_object(o);
         },
         lean.LeanRef => {
             const ref_obj: *lean.lean_ref_object = @ptrCast(@alignCast(o));
-            decObject(todo, ref_obj.m_value);
+            decObject(todo, queued, ref_obj.m_value);
             alloc.lean_free_object(o);
         },
         lean.LeanPromise => {
@@ -196,16 +201,16 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
     }
 }
 
-fn delCore(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
+fn delCore(todo: *std.ArrayList(*anyopaque), queued: *std.AutoHashMap(*anyopaque, void), o: *anyopaque) void {
     const hdr = header(o);
     const tag = hdr.m_tag;
     if (tag <= lean.LeanMaxCtorTag) {
         const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(o));
         const slots = ctorSlots(ctor);
-        for (0..hdr.m_other) |i| decObject(todo, slots[i]);
+        for (0..hdr.m_other) |i| decObject(todo, queued, slots[i]);
         alloc.lean_free_object(o);
     } else {
-        delCoreOther(todo, o, tag);
+        delCoreOther(todo, queued, o, tag);
     }
 }
 
@@ -249,20 +254,26 @@ pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
     if (hdr.m_rc == 1) {
         var todo: std.ArrayList(*anyopaque) = .empty;
         defer todo.deinit(std.heap.page_allocator);
+        var queued = std.AutoHashMap(*anyopaque, void).init(std.heap.page_allocator);
+        defer queued.deinit();
+        queued.put(o, {}) catch @panic("out of memory");
         while (true) {
-            delCore(&todo, o);
+            delCore(&todo, &queued, o);
             if (todo.items.len == 0) return;
-            o = todo.pop().?;
+            o = todo.orderedRemove(todo.items.len - 1);
         }
     } else if (hdr.m_rc < 0) {
         const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
         if (prev == -1) {
             var todo: std.ArrayList(*anyopaque) = .empty;
             defer todo.deinit(std.heap.page_allocator);
+            var queued = std.AutoHashMap(*anyopaque, void).init(std.heap.page_allocator);
+            defer queued.deinit();
+            queued.put(o, {}) catch @panic("out of memory");
             while (true) {
-                delCore(&todo, o);
+                delCore(&todo, &queued, o);
                 if (todo.items.len == 0) return;
-                o = todo.pop().?;
+                o = todo.orderedRemove(todo.items.len - 1);
             }
         }
     }
