@@ -538,12 +538,14 @@ def parse_extern_after_attr(rest: str) -> tuple[str, list[str], str] | None:
         s = s[m.end():].lstrip()
 
     # Match declaration keyword and name (allow "unsafe def").
-    m = re.match(r"(?:protected\s+|private\s+)?(?:unsafe\s+)?(?:opaque|def|axiom)\s+([^\s:(]+)\s*", s)
+    m = re.match(r"(?:protected\s+|private\s+|public\s+)?(?:unsafe\s+)?(?:opaque|def|axiom)\s+([^\s:(]+)\s*", s)
     if not m:
         return None
     s = s[m.end():]
 
     # Parse explicit (...) and implicit {...} parameter groups, handling nested brackets.
+    # Only explicit (...) params are part of the runtime ABI; implicit {...} params
+    # (universe levels, type parameters) are erased by the compiler.
     arg_types: list[str] = []
     while s.startswith("(") or s.startswith("{"):
         open_ch = s[0]
@@ -561,7 +563,8 @@ def parse_extern_after_attr(rest: str) -> tuple[str, list[str], str] | None:
             return None
         group = s[: j - 1].strip()
         s = s[j:].lstrip()
-        arg_types.extend(parse_param_group(group))
+        if open_ch == "(":
+            arg_types.extend(parse_param_group(group))
 
     # Match colon and capture the return type, allowing multi-line indented types.
     if not s.startswith(":"):
@@ -603,7 +606,7 @@ def scan_stdlib_extern_decls() -> dict[str, tuple[str, list[str]]]:
     """Collect `@[extern "lean_..."]` declarations from Init and Std with inferred Zig signatures."""
     funcs: dict[str, tuple[str, list[str]]] = {}
     attr_pat = re.compile(r'@\[extern\s+"([^"]+)"[^\]]*\]')
-    for stdlib_root in (ROOT / "src" / "Init", ROOT / "src" / "Std"):
+    for stdlib_root in (ROOT / "src" / "Init", ROOT / "src" / "Std", ROOT / "src" / "Lean"):
         if not stdlib_root.is_dir():
             continue
         for path in stdlib_root.rglob("*.lean"):
@@ -664,14 +667,24 @@ def main() -> int:
         args = list(entry[2:])
         funcs[name] = (ret, args)
 
-    for name, sig in sorted(scan_stdlib_extern_decls().items()):
+    stdlib_sigs = scan_stdlib_extern_decls()
+    for name, sig in sorted(stdlib_sigs.items()):
         funcs.setdefault(name, sig)
 
     # Ensure zig-runtime-only exports are declared with signatures from the Zig sources.
     # Lean extern declarations take precedence because EmitZig follows the Lean-side call ABI
     # for IO externs whose runtime implementation still accepts an ignored world token.
-    for name, sig in sorted(zig_rt_export_signatures().items()):
-        funcs.setdefault(name, sig)
+    zig_sigs = zig_rt_export_signatures()
+    for name, sig in sorted(zig_sigs.items()):
+        if name in funcs:
+            # If the Zig runtime has an extra trailing LeanObj (IO world token)
+            # not present in the lean.h/stdlib signature, strip it to match
+            # EmitZig's call ABI (runtimeArgs drops void/erased params).
+            zig_args = sig[1]
+            if len(zig_args) == len(funcs[name][1]) + 1 and zig_args[-1] == "LeanObj":
+                funcs[name] = (sig[0], zig_args[:-1])
+        else:
+            funcs.setdefault(name, sig)
 
     decls: list[str] = []
     for name in sorted(funcs):
