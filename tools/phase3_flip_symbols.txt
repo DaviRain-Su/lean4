@@ -1090,3 +1090,8 @@ ZN4lean28finalize_library_core_moduleEv
 ZN4lean31initialize_constructions_moduleEv
 ZN4lean29finalize_constructions_moduleEv
 ZN4lean21init_default_print_fnEv
+
+# Kernel type checker — Lean-layer on-demand checks delegated to Zig
+lean_kernel_whnf
+lean_kernel_is_def_eq
+lean_kernel_check
