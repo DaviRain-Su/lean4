@@ -55,9 +55,15 @@ if [[ ! -f "$LEAN_RT_ZIG" ]]; then
 fi
 
 
+STUBS_SRC="$ROOT/src/runtime/zig/zigrt_stubs.c"
+STUBS_OBJ="$BUILD_DIR/runtime/zig/zigrt_stubs.o"
+zig cc -c "$STUBS_SRC" -o "$STUBS_OBJ" -O1 2>/dev/null || \
+  cc -c "$STUBS_SRC" -o "$STUBS_OBJ" -O1
+
 zig build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O Debug \
   -I "$BUILD_DIR/include" \
   "$ZIGRT_LIB" \
+  "$STUBS_OBJ" \
   -lgmp -luv -lc++ -lpthread \
   "${EXTRA_FLAGS[@]}" \
   -femit-bin="$OUTPUT"
