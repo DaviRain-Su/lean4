@@ -10,6 +10,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 
+const c = @cImport({
+    @cInclude("unistd.h");
+});
+
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const sync = @import("sync.zig");
@@ -84,7 +88,7 @@ pub fn enableDebugDialog(flag: bool) void {
     g_debug_dialog = flag;
 }
 
-pub fn invokeDebugger() noreturn {
+pub fn invokeDebugger() void {
     g_has_violations = true;
     if (!g_debug_dialog) {
         exception.throwUnreachableException();
@@ -93,8 +97,32 @@ pub fn invokeDebugger() noreturn {
         std.os.windows.kernel32.DebugBreak();
         unreachable;
     }
-    // Interactive debugger prompt is not implemented in the first pass.
-    std.debug.panic("interactive debugger invocation is not implemented in the Zig first pass", .{});
+    // Interactive debugger prompt: read commands from stdin.
+    // Mirrors C++ invoke_debugger in src/runtime/debug.cpp:88.
+    while (true) {
+        const stderr = std.debug.lockStderr(&.{});
+        stderr.file_writer.interface.writeAll("(C)ontinue, (A)bort/exit, (S)top/trap\n") catch {};
+        std.debug.unlockStderr();
+        var buf: [1]u8 = undefined;
+        const n = c.read(c.STDIN_FILENO, &buf, buf.len);
+        if (n <= 0) {
+            // EOF or error: exit
+            std.process.exit(1);
+        }
+        switch (buf[0]) {
+            'C', 'c' => return,
+            'A', 'a' => std.process.exit(1),
+            'S', 's' => {
+                // Force a trap (segfault in C++ version)
+                @trap();
+            },
+            else => {
+                const err = std.debug.lockStderr(&.{});
+                err.file_writer.interface.writeAll("INVALID COMMAND\n") catch {};
+                std.debug.unlockStderr();
+            },
+        }
+    }
 }
 
 fn leanStringCstr(o: *anyopaque) [*:0]const u8 {
@@ -149,7 +177,7 @@ fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
     return string.lean_mk_string("");
 }
 comptime {
-    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
+    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .strong });
 }
 
 // C++ mangled: lean::notify_assertion_violation(char const*, int, char const*)
@@ -158,5 +186,5 @@ fn cpp_notify_assertion_violation(file_name: [*:0]const u8, line: c_int, conditi
     notifyAssertionViolation(file_name, line, condition);
 }
 comptime {
-    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .strong });
+    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .weak });
 }

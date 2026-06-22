@@ -172,6 +172,7 @@ fn cpp_get_available_stack_size() callconv(.c) usize {
 }
 
 comptime {
-    @export(&cpp_save_stack_info, .{ .name = "_ZN4lean15save_stack_infoEb", .linkage = .strong });
-    @export(&cpp_get_available_stack_size, .{ .name = "_ZN4lean24get_available_stack_sizeEv", .linkage = .strong });
+    @export(&cpp_save_stack_info, .{ .name = "_ZN4lean15save_stack_infoEb", .linkage = .weak });
+    @export(&cpp_get_available_stack_size, .{ .name = "_ZN4lean24get_available_stack_sizeEv", .linkage = .weak });
 }
+

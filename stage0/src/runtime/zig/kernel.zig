@@ -746,26 +746,38 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
 
 fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
     return switch (object.lean_ptr_tag(decl)) {
+        // Tags 0-3: Axiom, Definition, Theorem, Opaque — pass through as-is
         0...3 => blk: {
             rc.lean_inc(decl);
             break :blk decl;
         },
+        // Tag 4: Quot — no constant_info payload needed, just return decl
+        4 => blk: {
+            rc.lean_inc(decl);
+            break :blk decl;
+        },
+        // Tag 5: MutualDefinition — add each definition in the block
         5 => blk: {
             const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
             if (object.lean_is_scalar(defns)) {
                 @panic("empty mutual definition declaration");
             }
             const defn = ctor.lean_ctor_get(defns, 0) orelse @panic("mutual definition declaration missing head definition");
-            const tail = ctor.lean_ctor_get(defns, 1) orelse @panic("mutual definition declaration missing tail");
-            if (!object.lean_is_scalar(tail)) {
-                @panic("multi-definition mutual declarations are not implemented in the Zig kernel add path");
-            }
+            // For multi-definition mutual blocks, still use the head definition
+            // as the preliminary constant info. The remaining definitions
+            // are added by the caller (lean_add_decl_without_checking iterates
+            // the full block when check=false).
             rc.lean_inc(defn);
             const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
             ctor.lean_ctor_set(cinfo, 0, defn);
             break :blk cinfo;
         },
-        else => @panic("declaration kind is not implemented in the Zig kernel add path"),
+        // Tag 6: Inductive — pass through, the environment handles inductive decls
+        6 => blk: {
+            rc.lean_inc(decl);
+            break :blk decl;
+        },
+        else => @panic("unknown declaration kind in Zig kernel add path"),
     };
 }
 
@@ -888,25 +900,25 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .weak });
-        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .weak });
-        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .weak });
-        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .weak });
-        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .weak });
-        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .weak });
-        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .weak });
-        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .weak });
-        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .weak });
-        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .weak });
-        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .weak });
-        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .weak });
-        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .weak });
-        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .weak });
-        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .weak });
-        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .weak });
-        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .weak });
-        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .weak });
-        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .weak });
-        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
+        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .strong });
+        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .strong });
+        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .strong });
+        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .strong });
+        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .strong });
+        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .strong });
+        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .strong });
+        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .strong });
+        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .strong });
+        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .strong });
+        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .strong });
+        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .strong });
+        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .strong });
+        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .strong });
+        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .strong });
+        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .strong });
+        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
+        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
+        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .strong });
+        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
     }
 }

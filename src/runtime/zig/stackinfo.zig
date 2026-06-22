@@ -161,3 +161,18 @@ test "checkStack does not panic with plenty of stack remaining" {
     try testing.expect(g_stack_info_init);
 }
 
+// C++ mangled: lean::save_stack_info(bool)
+fn cpp_save_stack_info(main: bool) callconv(.c) void {
+    saveStackInfo(main);
+}
+
+// C++ mangled: lean::get_available_stack_size()
+fn cpp_get_available_stack_size() callconv(.c) usize {
+    return getAvailableStackSize();
+}
+
+comptime {
+    @export(&cpp_save_stack_info, .{ .name = "_ZN4lean15save_stack_infoEb", .linkage = .weak });
+    @export(&cpp_get_available_stack_size, .{ .name = "_ZN4lean24get_available_stack_sizeEv", .linkage = .weak });
+}
+

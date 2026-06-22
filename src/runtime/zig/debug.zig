@@ -177,7 +177,7 @@ fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
     return string.lean_mk_string("");
 }
 comptime {
-    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
+    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .strong });
 }
 
 // C++ mangled: lean::notify_assertion_violation(char const*, int, char const*)
