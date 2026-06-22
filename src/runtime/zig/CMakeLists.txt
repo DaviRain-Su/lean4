@@ -108,7 +108,7 @@ if(ZIG)
   )
   if(STAGE EQUAL 0)
     list(APPEND LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
-      -Dexport-lean-helpers=true
+      -Dexport-lean-helpers=false
       -Dexport-allocator-symbols=true
     )
   else()
@@ -127,18 +127,24 @@ if(ZIG)
     VERBATIM
   )
   # Phase 2/3 cutover: weaken Zig symbols that duplicate C++ runtime, then
-  # flip specified symbols from C++ to Zig (Phase 3). Stage0 still links the
-  # C snapshot of the stdlib, so it needs the unmodified Zig runtime exports.
-  if(LEAN_ZIG_RT_CUTOVER AND NOT (STAGE EQUAL 0))
-    set(LEAN_ZIG_FLIP_FILE "${LEAN_SOURCE_DIR}/../tools/phase3_flip_symbols.txt")
+  # flip specified symbols from C++ to Zig (Phase 3). Both stage0 and stage1
+  # need weakening to avoid duplicate symbol errors when linking leanshared.
+  # Stage0's source is stage0/src, so tools are at ../../tools, not ../tools.
+  if(LEAN_ZIG_RT_CUTOVER)
+    if(STAGE EQUAL 0)
+      set(LEAN_TOOLS_DIR "${LEAN_SOURCE_DIR}/../../tools")
+    else()
+      set(LEAN_TOOLS_DIR "${LEAN_SOURCE_DIR}/../tools")
+    endif()
+    set(LEAN_ZIG_FLIP_FILE "${LEAN_TOOLS_DIR}/phase3_flip_symbols.txt")
     add_custom_command(
       OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
-      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/weaken_zig_symbols.py
+      COMMAND python3 ${LEAN_TOOLS_DIR}/weaken_zig_symbols.py
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
-      COMMAND python3 ${LEAN_SOURCE_DIR}/../tools/flip_to_zig.py
+      COMMAND python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
         "${LEAN_ZIG_FLIP_FILE}"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
