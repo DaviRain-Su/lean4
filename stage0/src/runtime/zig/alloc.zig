@@ -281,8 +281,12 @@ fn freeLarge(ptr: *anyopaque) void {
 }
 
 fn freeLegacySmall(ptr: *anyopaque) void {
-    const lean_alloc = @import("lean_allocator");
-    lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
+    if (!cpp_use_mimalloc) {
+        freeLegacySmallNoMimalloc(ptr);
+    } else {
+        const lean_alloc = @import("lean_allocator");
+        lean_alloc.vtable.free(@ptrCast(ptr), 0, 1);
+    }
 }
 
 fn freeLegacyRaw(ptr: *anyopaque) void {

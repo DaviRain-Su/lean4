@@ -135,6 +135,12 @@ fn decObject(todo: *std.ArrayList(*anyopaque), child: ?*anyopaque) void {
         if (hdr.m_rc > 1) {
             hdr.m_rc -= 1;
         } else if (hdr.m_rc == 1) {
+            // Mark as queued for deletion using a large positive sentinel.
+            // C++ uses an intrusive list that overwrites m_rc with a pointer
+            // (also > 1). We use a sentinel so a second decObject before the
+            // first delCore runs takes the m_rc > 1 branch and decrements
+            // harmlessly instead of re-enqueuing the same pointer (double-free).
+            hdr.m_rc = 0x7fff_0000;
             todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
         } else if (hdr.m_rc < 0) {
             const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
@@ -159,7 +165,10 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
             for (0..array.m_size) |i| decObject(todo, slots[i]);
             alloc.lean_free_object(o);
         },
-        lean.LeanScalarArray, lean.LeanString, lean.LeanMPZ => {
+        lean.LeanScalarArray, lean.LeanString => {
+            alloc.lean_free_object(o);
+        },
+        lean.LeanMPZ => {
             alloc.lean_free_object(o);
         },
         lean.LeanThunk => {
