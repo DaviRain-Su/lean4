@@ -5,6 +5,7 @@ set(
   mpz.cpp
   utf8.cpp
   object.cpp
+  apply.cpp
   exception.cpp
   interrupt.cpp
   stackinfo.cpp
@@ -19,7 +20,6 @@ else()
   # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
   list(APPEND RUNTIME_OBJS
     alloc.cpp
-    apply.cpp
     uv/net_addr.cpp
     uv/zig_link_compat.cpp
     io.cpp
