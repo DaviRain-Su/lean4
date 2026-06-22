@@ -48,6 +48,9 @@ moreLeanArgs = [${LEAN_EXTRA_OPTS_TOML}]
 
 moreLeancArgs = [${LEAN_MORE_LEANC_ARGS_TOML}]
 
+# When true, Lake emits and compiles Zig instead of C for module native code.
+useZigCodegen = ${LEAN_ZIG_CODEGEN_TOML}
+
 ${LEAN_EXTRA_LAKEFILE_TOML}
 
 [[lean_lib]]

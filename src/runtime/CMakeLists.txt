@@ -1,21 +1,20 @@
-set(
-  RUNTIME_OBJS
-  debug.cpp
-  thread.cpp
-  mpz.cpp
-  object.cpp
-  apply.cpp
-  exception.cpp
-  interrupt.cpp
-  stackinfo.cpp
-  compact.cpp
-  sharecommon.cpp
-  object_ref.cpp
-)
 if(LEAN_ZIG_RT_CUTOVER)
-  # Shims that fill gaps left by removing io.cpp/platform.cpp.
-  list(APPEND RUNTIME_OBJS io_error_helpers.cpp)
+  # All runtime symbols are provided by the Zig archive (pure Zig + thin C++ shims).
+  set(RUNTIME_OBJS runtime_cutover_stub.c)
 else()
+  set(
+    RUNTIME_OBJS
+    debug.cpp
+    thread.cpp
+    mpz.cpp
+    object.cpp
+    exception.cpp
+    interrupt.cpp
+    stackinfo.cpp
+    compact.cpp
+    sharecommon.cpp
+    object_ref.cpp
+  )
   # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
   list(APPEND RUNTIME_OBJS
     alloc.cpp

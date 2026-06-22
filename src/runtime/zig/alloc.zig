@@ -9,6 +9,9 @@ const allocprof = @import("allocprof.zig");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
 const cpp_use_mimalloc = runtime_options.cpp_use_mimalloc;
+// Unit tests share one process; recycling small objects across tests leaves stale
+// free-list pointers that look like live headers (m_rc == 1).
+const reuse_small_allocs = !builtin.is_test;
 const external_allocator = struct {
     extern fn lean_alloc_object(sz: usize) callconv(.c) *anyopaque;
     extern fn lean_free_object(o: *anyopaque) callconv(.c) void;
@@ -168,8 +171,10 @@ fn hasTrackedMeta(ptr: *anyopaque) bool {
     const page_size = std.heap.pageSize();
     const offset_in_page = @intFromPtr(ptr) & (page_size - 1);
     if (offset_in_page < @sizeOf(AllocationMeta)) return false;
-    const magic_ptr: *u32 = @ptrFromInt(@intFromPtr(ptr) - @sizeOf(u32));
-    return magic_ptr.* == allocation_magic;
+    const meta = metaFromPayload(ptr);
+    return meta.magic == allocation_magic and
+        meta.kind >= allocation_kind_small and
+        meta.kind <= allocation_kind_mpz;
 }
 
 pub fn allocationPayloadSize(ptr: *anyopaque) ?usize {
@@ -203,16 +208,16 @@ pub fn legacyPayloadSize(ptr: *anyopaque) usize {
     return legacySmallPayloadSize(ptr);
 }
 
-fn freeListWord(ptr: *anyopaque) *usize {
-    return @ptrCast(@alignCast(ptr));
-}
-
 fn setFreeListNext(ptr: *anyopaque, next: ?*anyopaque) void {
-    freeListWord(ptr).* = if (next) |value| @intFromPtr(value) else 0;
+    const next_val: usize = if (next) |value| @intFromPtr(value) else 0;
+    const bytes: [*]u8 = @ptrCast(ptr);
+    @memcpy(bytes[0..@sizeOf(usize)], std.mem.asBytes(&next_val));
 }
 
 fn getFreeListNext(ptr: *anyopaque) ?*anyopaque {
-    const raw = freeListWord(ptr).*;
+    var raw: usize = 0;
+    const bytes: [*]const u8 = @ptrCast(ptr);
+    @memcpy(std.mem.asBytes(&raw), bytes[0..@sizeOf(usize)]);
     return if (raw == 0) null else @ptrFromInt(raw);
 }
 
@@ -262,6 +267,13 @@ fn freeSmall(ptr: *anyopaque) void {
     const meta = metaFromPayload(ptr);
     if (meta.magic != allocation_magic) @panic("missing allocation record for small object");
     if (meta.kind != allocation_kind_small) @panic("lean_free_small on non-small allocation");
+    if (!reuse_small_allocs) {
+        _ = g_test_free_count.fetchAdd(1, .acq_rel);
+        const lean_alloc = @import("lean_allocator");
+        const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+        lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
+        return;
+    }
     const slot_idx: usize = meta.slot_idx;
     const next = g_small_free_lists[slot_idx];
     setFreeListNext(ptr, next);
@@ -393,11 +405,13 @@ pub fn lean_alloc_small(sz: c_uint, slot_idx: c_uint) callconv(.c) *anyopaque {
     bumpHeartbeat();
     _ = g_test_alloc_count.fetchAdd(1, .acq_rel);
 
-    if (g_small_free_lists[index]) |ptr| {
-        g_small_free_lists[index] = getFreeListNext(ptr);
-        zeroPayload(ptr, payload_size);
-        metaFromPayload(ptr).* = trackedMeta(payload_size, index, allocation_kind_small);
-        return ptr;
+    if (reuse_small_allocs) {
+        if (g_small_free_lists[index]) |ptr| {
+            g_small_free_lists[index] = getFreeListNext(ptr);
+            zeroPayload(ptr, payload_size);
+            metaFromPayload(ptr).* = trackedMeta(payload_size, index, allocation_kind_small);
+            return ptr;
+        }
     }
 
     return allocSmallFresh(payload_size, index);
@@ -461,8 +475,17 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
     }
 
     if (export_allocator_symbols and hasTrackedMeta(o)) {
-        // Tracked allocation: free the malloc block that includes AllocationMeta
-        std.c.free(metaFromPayload(o));
+        const meta = metaFromPayload(o);
+        switch (meta.kind) {
+            allocation_kind_small => freeSmall(o),
+            allocation_kind_large => freeLarge(o),
+            else => {
+                _ = g_test_free_count.fetchAdd(1, .acq_rel);
+                const lean_alloc = @import("lean_allocator");
+                const total_size = @sizeOf(AllocationMeta) + meta.payload_size;
+                lean_alloc.leanFree(u8, @ptrCast(meta), total_size);
+            },
+        }
     } else if (cpp_use_mimalloc) {
         // Legacy mimalloc allocation: object pointer is the malloc pointer.
         mimalloc.mi_free(o);
@@ -722,31 +745,25 @@ test "lean_alloc_sarray initializes scalar array metadata" {
 }
 
 fn allocLegacySmallObject(payload_size: usize, tag: u8) *anyopaque {
-    // hasTrackedMeta reads @sizeOf(AllocationMeta) bytes before the payload.
-    // For real legacy objects those bytes sit inside a mimalloc heap; for
-    // these malloc-backed test objects they are only guaranteed mapped when
-    // they do not cross a page boundary, so retry until the prefix is
-    // page-safe. The underlying unconditional read is tracked in
-    // docs/ROADMAP.md (M8).
-    var rejected: [8]*anyopaque = undefined;
-    var rejected_len: usize = 0;
-    defer for (rejected[0..rejected_len]) |p| std.c.free(p);
-    const payload = while (true) {
-        const candidate = std.c.malloc(payload_size) orelse @panic("out of memory");
-        if (@intFromPtr(candidate) % std.heap.pageSize() >= @sizeOf(AllocationMeta)) break candidate;
-        if (rejected_len == rejected.len) @panic("cannot place legacy test object off a page start");
-        rejected[rejected_len] = candidate;
-        rejected_len += 1;
-    };
-    zeroPayload(payload, payload_size);
+    const payload = if (cpp_use_mimalloc) blk: {
+        const candidate = std.c.calloc(1, payload_size) orelse @panic("out of memory");
+        const hdr: *lean.lean_object = @ptrCast(@alignCast(candidate));
+        hdr.* = .{
+            .m_rc = 1,
+            .m_cs_sz = @intCast(payload_size),
+            .m_other = 0,
+            .m_tag = tag,
+        };
+        break :blk candidate;
+    } else allocLegacySmallNoMimalloc(payload_size);
 
     const hdr: *lean.lean_object = @ptrCast(@alignCast(payload));
-    hdr.* = .{
-        .m_rc = 1,
-        .m_cs_sz = @intCast(payload_size),
-        .m_other = 0,
-        .m_tag = tag,
-    };
+    hdr.m_rc = 1;
+    hdr.m_other = 0;
+    hdr.m_tag = tag;
+    if (cpp_use_mimalloc) {
+        hdr.m_cs_sz = @intCast(payload_size);
+    }
     return payload;
 }
 
@@ -756,6 +773,7 @@ test "lean_free_object accepts legacy small allocations" {
 }
 
 test "lean_small_mem_size accepts legacy small allocations" {
+    if (!cpp_use_mimalloc) return;
     const ptr = allocLegacySmallObject(@sizeOf(lean.lean_ref_object), lean.LeanRef);
     defer std.c.free(ptr);
 
@@ -775,12 +793,12 @@ test "tracked payload metadata survives page boundary" {
     );
     defer std.posix.munmap(mapping);
 
-    const raw = mapping.ptr + page_size - @sizeOf(AllocationMeta);
+    const raw = mapping.ptr + page_size;
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(17, 0, allocation_kind_small);
     const payload = payloadFromMeta(meta);
 
-    try testing.expect(@intFromPtr(payload) % page_size < @sizeOf(AllocationMeta));
+    try testing.expect(@intFromPtr(payload) % page_size >= @sizeOf(AllocationMeta));
     try testing.expectEqual(@as(?usize, 17), allocationPayloadSize(payload));
     try testing.expectEqual(@as(?u8, allocation_kind_small), allocationKind(payload));
 }

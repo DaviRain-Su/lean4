@@ -9,6 +9,7 @@ if(USE_MIMALLOC)
   message(FATAL_ERROR "USE_MIMALLOC is no longer supported; build without mimalloc.")
 endif()
 option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" OFF)
+option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
 
 # store all variables passed on the command line into CL_ARGS so we can pass them to the stage builds
 # https://stackoverflow.com/a/48555098/161659
@@ -27,10 +28,10 @@ foreach(var ${vars})
     if(var MATCHES "USE_GMP|CHECK_OLEAN_VERSION|LEAN_VERSION_.*|LEAN_SPECIAL_VERSION_DESC")
       # must forward options that generate incompatible .olean format
       list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
-    elseif(var MATCHES "LLVM*|PKG_CONFIG|USE_LAKE|USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER")
+    elseif(var MATCHES "LLVM*|PKG_CONFIG|USE_LAKE|USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER|LEAN_ZIG_CODEGEN")
       list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
     endif()
-  elseif(var MATCHES "USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER")
+  elseif(var MATCHES "USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER|LEAN_ZIG_CODEGEN")
     list(APPEND CL_ARGS "-D${var}=${${var}}")
     list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
   elseif((var MATCHES "CMAKE_.*") AND NOT (var MATCHES "CMAKE_BUILD_TYPE") AND NOT (var MATCHES "CMAKE_HOME_DIRECTORY"))
@@ -216,3 +217,19 @@ add_custom_target(cache-get COMMAND $(MAKE) -C stage1 cache-get DEPENDS stage1-c
 install(CODE "execute_process(COMMAND make -C stage1 install)")
 
 add_custom_target(check-stage3 COMMAND diff "stage2/bin/lean" "stage3/bin/lean" DEPENDS stage3)
+
+if(LEAN_ZIG_RUNTIME)
+  find_program(ZIG zig REQUIRED)
+  add_custom_target(
+    zig_unified_build
+    COMMAND "${ZIG}" build lean-exe
+      -Dprev-stage-dir=${CMAKE_BINARY_DIR}/stage1
+      -Dbootstrap-stage-dir=${CMAKE_BINARY_DIR}/stage0
+      -Dskip-stdlib-build=true
+      --prefix ${CMAKE_BINARY_DIR}/zig-unified
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS stage1
+    COMMENT "Experimental unified Zig build (delegates to root build.zig)"
+    VERBATIM
+  )
+endif()

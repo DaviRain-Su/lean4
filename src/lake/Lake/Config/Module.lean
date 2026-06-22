@@ -128,6 +128,13 @@ public abbrev pkg (self : Module) : Package :=
 @[inline] public def cFile (self : Module) : FilePath :=
   self.irPath "c"
 
+@[inline] public def zigFile (self : Module) : FilePath :=
+  self.irPath "zig"
+
+/-- Native IR file produced by `lean` for this module (C or Zig). -/
+@[inline] public def nativeSourceFile (self : Module) : FilePath :=
+  if self.pkg.useZigCodegen then self.zigFile else self.cFile
+
 @[inline] public def coExportFile (self : Module) : FilePath :=
   self.irPath "c.o.export"
 

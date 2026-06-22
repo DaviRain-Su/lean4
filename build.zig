@@ -27,6 +27,7 @@ pub fn build(b: *std.Build) void {
     const zig_rt_lib = b.fmt("{s}/lib/libleanrt_zig.a", .{zig_rt_prefix});
     const zig_rt_helperless_prefix = b.fmt("{s}/zig-runtime-helperless", .{b.install_path});
     const zig_rt_helperless_lib = b.fmt("{s}/lib/libleanrt_zig.a", .{zig_rt_helperless_prefix});
+    const zig_rt_kernel_entrypoints_lib = b.fmt("{s}/lib/libkernel_entrypoints.a", .{zig_rt_helperless_prefix});
     const stage1_rt_archive = resolveRootedPath(b, prev_stage_dir, "runtime/libleanrt_initial-exec.a");
     const stage1_cpp_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleancpp.a");
     const stage1_cpp_1_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleancpp_1.a");
@@ -49,6 +50,8 @@ pub fn build(b: *std.Build) void {
                 "-Dexport-lean-helpers=false",
                 "-Dexport-allocator-symbols=false",
                 "-Dexport-kernel-symbols=true",
+                "-Dcompile-cpp-cutover=true",
+                b.fmt("-Dlean-include-dir={s}", .{prev_stage_include_dir}),
             });
             zig_rt.setCwd(b.path("src/runtime/zig"));
 
@@ -138,29 +141,32 @@ pub fn build(b: *std.Build) void {
         needs_uv: bool = false,
     };
 
+    const cutover_rt_files = [_][]const u8{"src/runtime/runtime_cutover_stub.c"};
+    const full_rt_files = [_][]const u8{
+        "src/runtime/debug.cpp",       "src/runtime/thread.cpp",
+        "src/runtime/mpz.cpp",         "src/runtime/utf8.cpp",
+        "src/runtime/object.cpp",      "src/runtime/apply.cpp",
+        "src/runtime/exception.cpp",   "src/runtime/interrupt.cpp",
+        "src/runtime/stackinfo.cpp",   "src/runtime/compact.cpp",
+        "src/runtime/alloc.cpp",       "src/runtime/sharecommon.cpp",
+        "src/runtime/object_ref.cpp",
+        "src/runtime/io_error_helpers.cpp",
+        "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
+    };
+    const initial_exec_rt_files = [_][]const u8{
+        "src/runtime/alloc.cpp",       "src/runtime/compact.cpp",
+        "src/runtime/object.cpp",      "src/runtime/object_ref.cpp",
+        "src/runtime/apply.cpp",       "src/runtime/exception.cpp",
+        "src/runtime/interrupt.cpp",   "src/runtime/stackinfo.cpp",
+        "src/runtime/mpz.cpp",         "src/runtime/utf8.cpp",
+        "src/runtime/sharecommon.cpp", "src/runtime/debug.cpp",
+        "src/runtime/thread.cpp",
+        "src/runtime/io_error_helpers.cpp",
+        "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
+    };
     const libs = [_]LibSpec{
-        .{ .name = "leanrt", .needs_uv = true, .files = &.{
-            "src/runtime/debug.cpp",       "src/runtime/thread.cpp",
-            "src/runtime/mpz.cpp",         "src/runtime/utf8.cpp",
-            "src/runtime/object.cpp",      "src/runtime/apply.cpp",
-            "src/runtime/exception.cpp",   "src/runtime/interrupt.cpp",
-            "src/runtime/stackinfo.cpp",   "src/runtime/compact.cpp",
-            "src/runtime/alloc.cpp",       "src/runtime/sharecommon.cpp",
-            "src/runtime/object_ref.cpp",
-            "src/runtime/io_error_helpers.cpp",
-            "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
-        } },
-        .{ .name = "leanrt_initial-exec", .needs_uv = true, .files = &.{
-            "src/runtime/alloc.cpp",       "src/runtime/compact.cpp",
-            "src/runtime/object.cpp",      "src/runtime/object_ref.cpp",
-            "src/runtime/apply.cpp",       "src/runtime/exception.cpp",
-            "src/runtime/interrupt.cpp",   "src/runtime/stackinfo.cpp",
-            "src/runtime/mpz.cpp",         "src/runtime/utf8.cpp",
-            "src/runtime/sharecommon.cpp", "src/runtime/debug.cpp",
-            "src/runtime/thread.cpp",
-            "src/runtime/io_error_helpers.cpp",
-            "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
-        } },
+        .{ .name = "leanrt", .needs_uv = true, .files = if (lean_zig_rt_cutover) &cutover_rt_files else &full_rt_files },
+        .{ .name = "leanrt_initial-exec", .needs_uv = true, .files = if (lean_zig_rt_cutover) &cutover_rt_files else &initial_exec_rt_files },
         .{ .name = "kernel", .files = &.{
             "src/kernel/level.cpp",        "src/kernel/expr.cpp",
             "src/kernel/expr_eq_fn.cpp",   "src/kernel/for_each_fn.cpp",
@@ -240,10 +246,11 @@ pub fn build(b: *std.Build) void {
     const lean_bin = resolveRootedPath(b, bootstrap_stage_dir, "bin/lean");
     const lean_mk_dir = resolveRootedPath(b, bootstrap_stage_dir, "share/lean");
     const leanc_bin = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "leanc-bin", "Path to leanc (C compiler for .c→.o)") orelse "build/zig-out/bin/zigleanc" }) catch unreachable;
-    const stdlib_out = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "stdlib-out", "Output root for stdlib build") orelse "build/release/stage1" }) catch unreachable;
+    const stdlib_out = b.option([]const u8, "stdlib-out", "Output root for stdlib build") orelse prev_stage_dir;
     const olean_out = std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{stdlib_out}) catch unreachable;
     const temp_out = std.fmt.allocPrint(b.allocator, "{s}/lib/temp", .{stdlib_out}) catch unreachable;
 
+    const skip_stdlib_build = b.option(bool, "skip-stdlib-build", "Skip leanmake stdlib rebuild and reuse prev-stage-dir artifacts") orelse true;
     const lean_compile_step = b.step("lean-compile", "Compile .lean stdlib to .olean/.c/.o using leanmake");
 
     // Package build order: Init → Std → Lean → Lake
@@ -265,7 +272,8 @@ pub fn build(b: *std.Build) void {
     var pkg_steps: std.StringHashMap(*std.Build.Step) = .init(b.allocator);
     defer pkg_steps.deinit();
 
-    for (stdlib_pkgs) |pkg| {
+    if (!skip_stdlib_build) {
+        for (stdlib_pkgs) |pkg| {
         const make_cmd = b.addSystemCommand(&.{leanmake_bin});
         // -f lean.mk to use the configured makefile
         make_cmd.addArg("-f");
@@ -317,20 +325,27 @@ pub fn build(b: *std.Build) void {
 
         lean_compile_step.dependOn(&make_cmd.step);
         pkg_steps.put(pkg.name, &make_cmd.step) catch {};
+        }
     }
     const install_stdlib_dir = b.addInstallDirectory(.{
         .source_dir = .{ .cwd_relative = olean_out },
         .install_dir = .lib,
         .install_subdir = "lean",
     });
-    install_stdlib_dir.step.dependOn(lean_compile_step);
+    if (!skip_stdlib_build) {
+        install_stdlib_dir.step.dependOn(lean_compile_step);
+    }
 
     // ── Step 5: Link libleanshared ─────────────────────────────────────────
     // Combines the stage1 stdlib archives with the cutover runtime.
     const link_step = b.step("link", "Link libleanshared from all static libraries");
+    const mkdir_lib = b.addSystemCommand(&.{ "mkdir", "-p" });
+    mkdir_lib.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib", .{b.install_path}) catch unreachable);
+    link_step.dependOn(&mkdir_lib.step);
 
     // On macOS: link all archives into a shared library
     const link_cmd = b.addSystemCommand(&.{ "zig", "c++", "-shared" });
+    link_cmd.step.dependOn(&mkdir_lib.step);
     link_cmd.addArg("-o");
     link_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/libleanshared.dylib", .{b.install_path}) catch unreachable);
     link_cmd.addArg("-Wl,-install_name,@rpath/libleanshared.dylib");
@@ -343,6 +358,7 @@ pub fn build(b: *std.Build) void {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/lean/libLean.a", .{stdlib_out}));
             link_cmd.addArg(stage1_cpp_archive);
             link_cmd.addArg(rt_lib);
+            link_cmd.addArg(zig_rt_kernel_entrypoints_lib);
             link_cmd.addArg(stage1_rt_archive);
         } else {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}", .{rt_lib}));
@@ -361,12 +377,18 @@ pub fn build(b: *std.Build) void {
     }
     link_cmd.addArgs(&.{ "-L/opt/homebrew/lib", "-luv", "-lpthread", "-lm", "-lgmp", "-lc++" });
     link_step.dependOn(&link_cmd.step);
-    link_cmd.step.dependOn(lean_compile_step);
+    if (!skip_stdlib_build) {
+        link_cmd.step.dependOn(lean_compile_step);
+    }
     if (zig_rt_step) |rt| link_cmd.step.dependOn(&rt.step);
 
     // ── Step 6: Build lean executable ───────────────────────────────────────
     const lean_exe_step = b.step("lean-exe", "Build lean executable");
+    const mkdir_bin = b.addSystemCommand(&.{ "mkdir", "-p" });
+    mkdir_bin.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin", .{b.install_path}) catch unreachable);
+    lean_exe_step.dependOn(&mkdir_bin.step);
     const lean_exe_cmd = b.addSystemCommand(&.{ "zig", "c++" });
+    lean_exe_cmd.step.dependOn(&mkdir_bin.step);
     lean_exe_cmd.addArg("-o");
     lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
     lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/libleanshared.dylib", .{b.install_path}) catch unreachable);
@@ -375,6 +397,7 @@ pub fn build(b: *std.Build) void {
     lean_exe_step.dependOn(&lean_exe_cmd.step);
     lean_exe_cmd.step.dependOn(link_step);
     lean_exe_cmd.step.dependOn(&install_stdlib_dir.step);
+    b.getInstallStep().dependOn(lean_exe_step);
 
     // ── Test step ──────────────────────────────────────────────────────────
     const test_step = b.step("test", "Run Zig runtime tests");

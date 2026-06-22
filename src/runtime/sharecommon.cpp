@@ -10,6 +10,7 @@ Author: Leonardo de Moura
 
 namespace lean {
 
+#ifndef LEAN_ZIG_RT_CUTOVER
 extern "C" LEAN_EXPORT uint8 lean_sharecommon_eq(b_obj_arg o1, b_obj_arg o2) {
     lean_assert(!lean_is_scalar(o1));
     lean_assert(!lean_is_scalar(o2));
@@ -44,6 +45,7 @@ extern "C" LEAN_EXPORT uint64_t lean_sharecommon_hash(b_obj_arg o) {
         return hash_str(sz - header_sz, reinterpret_cast<unsigned char const *>(o) + header_sz, init);
     }
 }
+#endif
 
 static obj_res mk_pair(obj_arg a, obj_arg b) {
     object * r = alloc_cnstr(0, 2, 0);
@@ -283,11 +285,12 @@ public:
     }
 };
 
+#ifndef LEAN_ZIG_RT_CUTOVER
 // def State.shareCommon {α} {σ : @& StateFactory} (s : State σ) (a : α) : α × State σ
 extern "C" LEAN_EXPORT obj_res lean_state_sharecommon(b_obj_arg tc, obj_arg s, obj_arg a) {
     return sharecommon_fn(tc, s)(a);
 }
-
+#endif
 
 /*
   We do not increment reference counters when inserting Lean objects at `m_cache` and `m_set`.
@@ -439,10 +442,12 @@ lean_object * sharecommon_quick_fn::visit(lean_object * a) {
     }
 }
 
+#ifndef LEAN_ZIG_RT_CUTOVER
 // def ShareCommon.shareCommon' (a : A) : A := a
 extern "C" LEAN_EXPORT obj_res lean_sharecommon_quick(obj_arg a) {
     return sharecommon_quick_fn()(a);
 }
+#endif
 
 lean_object * sharecommon_persistent_fn::operator()(lean_object * e) {
     lean_object * r = check_cache(e);

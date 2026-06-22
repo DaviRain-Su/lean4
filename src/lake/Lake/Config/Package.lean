@@ -324,6 +324,10 @@ public def id? (self : Package) : Option PkgId :=
 @[inline] public def weakLeanArgs (self : Package) : Array String :=
   self.config.weakLeanArgs
 
+/-- Whether Lake should use the Zig codegen backend for this package's modules. -/
+@[inline] public def useZigCodegen (self : Package) : Bool :=
+  self.config.useZigCodegen
+
 /-- The package's `moreLeancArgs` configuration. -/
 @[inline] public def moreLeancArgs (self : Package) : Array String :=
   self.config.moreLeancArgs

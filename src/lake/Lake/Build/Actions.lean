@@ -46,7 +46,10 @@ public def compileLeanModule
   if !postponeCompile then
     if let some cFile := arts.c? then
       createParentDirs cFile
-      args := args ++ #["-c", cFile.toString]
+      if cFile.toString.endsWith ".zig" then
+        args := args ++ #["-z", cFile.toString]
+      else
+        args := args ++ #["-c", cFile.toString]
   if let some bcFile := arts.bc? then
     createParentDirs bcFile
     args := args ++ #["-b", bcFile.toString]

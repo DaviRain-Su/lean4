@@ -211,10 +211,10 @@ fn cpp_scope_cancel_tk_dtor(this: *FletObjPtr) callconv(.c) void {
 }
 
 comptime {
-    @export(&cpp_scope_max_heartbeat_ctor, .{ .name = "_ZN4lean19scope_max_heartbeatC1Em", .linkage = .weak });
-    @export(&cpp_scope_max_heartbeat_dtor, .{ .name = "_ZN4lean19scope_max_heartbeatD1Ev", .linkage = .weak });
-    @export(&cpp_scope_cancel_tk_ctor, .{ .name = "_ZN4lean15scope_cancel_tkC1EP11lean_object", .linkage = .weak });
-    @export(&cpp_scope_cancel_tk_dtor, .{ .name = "_ZN4lean15scope_cancel_tkD1Ev", .linkage = .weak });
+    @export(&cpp_scope_max_heartbeat_ctor, .{ .name = "_ZN4lean19scope_max_heartbeatC1Em", .linkage = .strong });
+    @export(&cpp_scope_max_heartbeat_dtor, .{ .name = "_ZN4lean19scope_max_heartbeatD1Ev", .linkage = .strong });
+    @export(&cpp_scope_cancel_tk_ctor, .{ .name = "_ZN4lean15scope_cancel_tkC1EP11lean_object", .linkage = .strong });
+    @export(&cpp_scope_cancel_tk_dtor, .{ .name = "_ZN4lean15scope_cancel_tkD1Ev", .linkage = .strong });
 }
 
 // C++ mangled: lean::check_system(char const*, bool)
@@ -222,7 +222,7 @@ fn cpp_check_system(component_name: [*:0]const u8, do_check_interrupted: bool) c
     checkSystem(component_name, do_check_interrupted);
 }
 comptime {
-    @export(&cpp_check_system, .{ .name = "_ZN4lean12check_systemEPKcb", .linkage = .weak });
+    @export(&cpp_check_system, .{ .name = "_ZN4lean12check_systemEPKcb", .linkage = .strong });
 }
 
 // C++ mangled: lean::reset_heartbeat()
@@ -241,7 +241,7 @@ fn cpp_set_max_heartbeat(max: usize) callconv(.c) void {
 }
 
 comptime {
-    @export(&cpp_reset_heartbeat, .{ .name = "_ZN4lean15reset_heartbeatEv", .linkage = .weak });
-    @export(&cpp_get_max_heartbeat, .{ .name = "_ZN4lean17get_max_heartbeatEv", .linkage = .weak });
-    @export(&cpp_set_max_heartbeat, .{ .name = "_ZN4lean17set_max_heartbeatEm", .linkage = .weak });
+    @export(&cpp_reset_heartbeat, .{ .name = "_ZN4lean15reset_heartbeatEv", .linkage = .strong });
+    @export(&cpp_get_max_heartbeat, .{ .name = "_ZN4lean17get_max_heartbeatEv", .linkage = .strong });
+    @export(&cpp_set_max_heartbeat, .{ .name = "_ZN4lean17set_max_heartbeatEm", .linkage = .strong });
 }

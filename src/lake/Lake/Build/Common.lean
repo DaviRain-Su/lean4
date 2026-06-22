@@ -863,7 +863,14 @@ public def buildLeanO
       let lean ← getLeanInstall
       let includeDir := leanIncludeDir?.getD lean.includeDir
       let args := #["-I", includeDir.toString] ++ lean.ccFlags ++ weakArgs ++ traceArgs
-      compileO oFile srcFile args lean.cc
+      if srcFile.toString.endsWith ".zig" then
+        let zig := (← IO.getEnv "ZIG").getD "zig"
+        proc {
+          cmd := zig
+          args := #["cc", "-c", "-o", oFile.toString, srcFile.toString] ++ args
+        }
+      else
+        compileO oFile srcFile args lean.cc
     return art.path
 
 /-- Build a static library from object file jobs using the Lean toolchain's `ar`. -/

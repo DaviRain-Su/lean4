@@ -10,3 +10,6 @@ cadical/
 leantar.tar.gz
 leantar/
 *.bak
+.pi
+tmp
+.zig-cache

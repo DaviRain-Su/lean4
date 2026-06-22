@@ -140,20 +140,16 @@ export fn lean_float32_to_bits(d: f32) callconv(.c) u32 {
     return @bitCast(d);
 }
 
-test "usize roundtrip covers tagged and boxed representations" {
-    const large = std.math.maxInt(usize) - 1;
-    const values = [_]usize{ 0, 1, @intCast(taggedScalarLimit()), large };
+test "usize roundtrip covers heap boxed representations" {
+    const values = [_]usize{ 0, 1, @intCast(taggedScalarLimit()), std.math.maxInt(usize) - 1 };
 
     for (values) |value| {
         const boxed = lean_box_usize(value);
         defer maybeFree(boxed);
 
         try testing.expectEqual(value, lean_unbox_usize(boxed));
-        if (value <= taggedScalarLimit()) {
-            try testing.expect(object.lean_is_scalar(boxed));
-        } else {
-            try testing.expect(!object.lean_is_scalar(boxed));
-        }
+        // lean_box_usize matches C++ lean.h: always allocates a heap ctor.
+        try testing.expect(!object.lean_is_scalar(boxed));
     }
 }
 
@@ -192,7 +188,7 @@ test "uint16 zig helper roundtrip preserves boundary values" {
     }
 }
 
-test "uint64 roundtrip uses heap fallback above tagged-scalar range" {
+test "uint64 roundtrip always uses heap boxing" {
     const limit = taggedScalarLimit();
     const values = [_]u64{ 0, 1, limit, limit + 1, std.math.maxInt(u64) };
 
@@ -201,11 +197,8 @@ test "uint64 roundtrip uses heap fallback above tagged-scalar range" {
         defer maybeFree(boxed);
 
         try testing.expectEqual(value, lean_unbox_uint64(boxed));
-        if (value <= limit) {
-            try testing.expect(object.lean_is_scalar(boxed));
-        } else {
-            try testing.expect(!object.lean_is_scalar(boxed));
-        }
+        // lean_box_uint64 matches C++ lean.h: always allocates a heap ctor.
+        try testing.expect(!object.lean_is_scalar(boxed));
     }
 }
 

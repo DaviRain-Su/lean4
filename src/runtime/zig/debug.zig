@@ -177,7 +177,7 @@ fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
     return string.lean_mk_string("");
 }
 comptime {
-    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .strong });
+    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
 }
 
 // C++ mangled: lean::notify_assertion_violation(char const*, int, char const*)
@@ -186,5 +186,5 @@ fn cpp_notify_assertion_violation(file_name: [*:0]const u8, line: c_int, conditi
     notifyAssertionViolation(file_name, line, condition);
 }
 comptime {
-    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .weak });
+    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .strong });
 }

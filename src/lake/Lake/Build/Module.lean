@@ -613,7 +613,7 @@ public def Module.clearOutputArtifacts (mod : Module) : IO PUnit := do
     removeFileIfExists mod.oleanPrivateFile
     removeFileIfExists mod.ileanFile
     removeFileIfExists mod.irFile
-    removeFileIfExists mod.cFile
+    removeFileIfExists mod.nativeSourceFile
     removeFileIfExists mod.bcFile
   catch e =>
     error s!"failed to remove output artifacts: {e}"
@@ -627,7 +627,7 @@ public def Module.clearOutputHashes (mod : Module) : IO PUnit := do
     clearFileHash mod.oleanPrivateFile
     clearFileHash mod.ileanFile
     clearFileHash mod.irFile
-    clearFileHash mod.cFile
+    clearFileHash mod.nativeSourceFile
     clearFileHash mod.bcFile
   catch e =>
     error s!"failed to remove output hashes: {e}"
@@ -644,7 +644,7 @@ public def Module.cacheOutputHashes (mod : Module) : IO PUnit := do
   cacheFileHash mod.ileanFile
   if (← mod.irFile.pathExists)  then
     cacheFileHash mod.irFile
-  cacheFileHash mod.cFile
+  cacheFileHash mod.nativeSourceFile
   if Lean.Internal.hasLLVMBackend () then
     cacheFileHash mod.bcFile
 
@@ -715,7 +715,7 @@ def Module.cacheOutputArtifacts
     oleanPrivate? := ← cacheIf? isModule mod.oleanPrivateFile "olean.private"
     ir? := ← cacheIf? isModule mod.irFile "ir"
     ilean := ← cache mod.ileanFile "ilean"
-    c := ← cache mod.cFile "c"
+    c := ← cache mod.nativeSourceFile (if mod.pkg.useZigCodegen then "zig" else "c")
     bc? := ← cacheIf? (Lean.Internal.hasLLVMBackend ()) mod.bcFile "bc"
     ltar? := ← cacheIf? (← mod.ltarFile.pathExists) mod.ltarFile "ltar"
   }
@@ -743,7 +743,7 @@ def Module.restoreAllArtifacts (mod : Module) (cached : ModuleOutputArtifacts) :
     oleanPrivate? := ← restoreSome mod.oleanPrivateFile cached.oleanPrivate?
     ilean := ← restoreArtifact mod.ileanFile cached.ilean
     ir? := ← restoreSome mod.irFile cached.ir?
-    c := ← restoreArtifact mod.cFile cached.c
+    c := ← restoreArtifact mod.nativeSourceFile cached.c
     bc? := ← restoreSome mod.bcFile cached.bc?
     ltar? := ← restoreSome mod.ltarFile cached.ltar?
   }
@@ -753,7 +753,7 @@ where
 public def Module.checkArtifactsExist (self : Module) (isModule : Bool) : BaseIO Bool := do
   unless (← self.oleanFile.pathExists) do return false
   unless (← self.ileanFile.pathExists) do return false
-  unless (← self.cFile.pathExists) do return false
+  unless (← self.nativeSourceFile.pathExists) do return false
   if Lean.Internal.hasLLVMBackend () then
     unless (← self.bcFile.pathExists) do return false
   if isModule then
@@ -773,7 +773,7 @@ public protected def Module.getMTime (self : Module) (isModule : Bool) : IO MTim
     let mut mtime :=
       (← getMTime self.oleanFile)
       |> max (← getMTime self.ileanFile)
-      |> max (← getMTime self.cFile)
+      |> max (← getMTime self.nativeSourceFile)
     if Lean.Internal.hasLLVMBackend () then
       mtime := max mtime (← getMTime self.bcFile)
     if isModule then
@@ -808,7 +808,7 @@ def Module.mkArtifacts (mod : Module) (srcFile : FilePath) (isModule : Bool) : M
   oleanPrivate? := if isModule then some mod.oleanPrivateFile else none
   ilean? := mod.ileanFile
   ir? := if isModule then some mod.irFile else none
-  c? := mod.cFile
+  c? := mod.nativeSourceFile
   bc? := if Lean.Internal.hasLLVMBackend () then some mod.bcFile else none
 
 def Module.computeArtifacts (mod : Module) (isModule : Bool) : FetchM ModuleOutputArtifacts :=
@@ -819,7 +819,7 @@ def Module.computeArtifacts (mod : Module) (isModule : Bool) : FetchM ModuleOutp
     oleanPrivate? := ← computeIf isModule mod.oleanPrivateFile "olean.private"
     ilean := ← compute mod.ileanFile "ilean"
     ir? := ← computeIf isModule mod.irFile "ir"
-    c := ← compute mod.cFile "c"
+    c := ← compute mod.nativeSourceFile (if mod.pkg.useZigCodegen then "zig" else "c")
     bc? := ← computeIf (Lean.Internal.hasLLVMBackend ()) mod.bcFile "bc"
   }
 where

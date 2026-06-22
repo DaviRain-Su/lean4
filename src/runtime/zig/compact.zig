@@ -216,7 +216,9 @@ pub const Compactor = struct {
         new_str.m_size = sz;
         new_str.m_capacity = sz;
         new_str.m_length = len;
-        @memcpy(new_str.m_data[0..sz], str.m_data[0..sz]);
+        const src_data = @as([*]const u8, @ptrCast(&str.m_data));
+        const dst_data = @as([*]u8, @ptrCast(&new_str.m_data));
+        @memcpy(dst_data[0..sz], src_data[0..sz]);
         return self.toOffset(dst);
     }
 
@@ -230,7 +232,9 @@ pub const Compactor = struct {
         setNonHeapHeader(@ptrCast(dst), obj_sz, lean.LeanScalarArray, @intCast(elem_sz));
         new_arr.m_size = sz;
         new_arr.m_capacity = sz;
-        @memcpy(new_arr.m_data[0 .. elem_sz * sz], arr.m_data[0 .. elem_sz * sz]);
+        const src_data = @as([*]const u8, @ptrCast(&arr.m_data));
+        const dst_data = @as([*]u8, @ptrCast(&new_arr.m_data));
+        @memcpy(dst_data[0 .. elem_sz * sz], src_data[0 .. elem_sz * sz]);
         return self.toOffset(dst);
     }
 

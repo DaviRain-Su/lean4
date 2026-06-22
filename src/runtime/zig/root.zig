@@ -28,6 +28,7 @@ pub const expr_accessors = @import("expr_accessors.zig");
 pub const expr_lt = @import("expr_lt.zig");
 pub const float = @import("float.zig");
 pub const gmp_alloc_compat = @import("gmp_alloc_compat.zig");
+pub const gmp_mpz_compat = @import("gmp_mpz_compat.zig");
 pub const hash = @import("hash.zig");
 pub const inductive = @import("inductive.zig");
 pub const init = @import("init.zig");
@@ -192,5 +193,6 @@ comptime {
     _ = uv_udp.force_link;
     _ = inline_exports.force_link;
     _ = gmp_alloc_compat;
+    _ = gmp_mpz_compat;
     _ = dynlib.force_link;
 }
