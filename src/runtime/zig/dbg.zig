@@ -152,15 +152,17 @@ fn sleepThunk(unit: ?*anyopaque) callconv(.c) ?*anyopaque {
     return box(7);
 }
 
+extern fn lean_apply_1(f: *anyopaque, a: *anyopaque) callconv(.c) ?*anyopaque;
+
 export fn lean_dbg_trace(s: *anyopaque, fn_obj: *anyopaque) callconv(.c) ?*anyopaque {
     writeTrace("", s);
     rc.lean_dec(s);
-    return runThunk(fn_obj);
+    return lean_apply_1(fn_obj, box(0));
 }
 
 export fn lean_dbg_sleep(ms: u32, fn_obj: *anyopaque) callconv(.c) ?*anyopaque {
     std.Io.sleep(std.Options.debug_io, .fromMilliseconds(@as(i64, ms)), .awake) catch {};
-    return runThunk(fn_obj);
+    return lean_apply_1(fn_obj, box(0));
 }
 
 export fn lean_dbg_trace_if_shared(s: *anyopaque, a: *anyopaque) callconv(.c) ?*anyopaque {

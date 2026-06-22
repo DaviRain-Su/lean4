@@ -71,7 +71,7 @@ pub fn build(b: *std.Build) void {
     // these avoids duplicate-symbol collisions at link time.
     if (export_lean_helpers) {
         root_mod.addCSourceFiles(.{
-            .files = &.{"io_error_weak_exports.c"},
+            .files = &.{ "io_error_weak_exports.c", "rc_barrier.c" },
             .flags = &.{
                 "-std=c11",
                 "-O2",
@@ -80,6 +80,18 @@ pub fn build(b: *std.Build) void {
             },
         });
     }
+
+    // RC barrier must always be compiled (even in helperless builds) because
+    // the Zig ZCU optimizer eliminates inc/dec pairs otherwise.
+    root_mod.addCSourceFile(.{
+        .file = b.path("rc_barrier.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
 
     root_mod.linkSystemLibrary("uv", .{});
 
@@ -105,7 +117,7 @@ pub fn build(b: *std.Build) void {
     zigrt_mod.linkSystemLibrary("c++", .{});
     if (export_lean_helpers) {
         zigrt_mod.addCSourceFiles(.{
-            .files = &.{"io_error_weak_exports.c"},
+            .files = &.{ "io_error_weak_exports.c", "rc_barrier.c" },
             .flags = &.{
                 "-std=c11",
                 "-O2",
@@ -114,6 +126,17 @@ pub fn build(b: *std.Build) void {
             },
         });
     }
+
+    // RC barrier must always be compiled (even in helperless builds).
+    zigrt_mod.addCSourceFile(.{
+        .file = b.path("rc_barrier.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
     zigrt_mod.linkSystemLibrary("uv", .{});
 
     const zigrt_lib = b.addLibrary(.{
