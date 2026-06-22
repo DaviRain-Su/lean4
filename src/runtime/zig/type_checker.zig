@@ -51,6 +51,7 @@ extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callcon
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_elab_environment_to_kernel_env(env: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
@@ -1461,7 +1462,9 @@ const TypeChecker = struct {
 
 // ── Entry points ────────────────────────────────────────────────────────────
 
-fn leanKernelWhnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+fn leanKernelWhnf(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+    const env = lean_elab_environment_to_kernel_env(obj_env);
+    defer rc.lean_dec(env);
     const page_alloc = std.heap.page_allocator;
     var st = State{
         .env = env,
@@ -1488,7 +1491,9 @@ fn leanKernelWhnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c)
     return tc.whnf(a);
 }
 
-fn leanKernelIsDefEq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn leanKernelIsDefEq(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    const env = lean_elab_environment_to_kernel_env(obj_env);
+    defer rc.lean_dec(env);
     const page_alloc = std.heap.page_allocator;
     var st = State{
         .env = env,
@@ -1515,7 +1520,9 @@ fn leanKernelIsDefEq(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyop
     return if (tc.isDefEq(a, b)) 1 else 0;
 }
 
-fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+fn leanKernelCheck(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+    const env = lean_elab_environment_to_kernel_env(obj_env);
+    defer rc.lean_dec(env);
     const page_alloc = std.heap.page_allocator;
     var st = State{
         .env = env,

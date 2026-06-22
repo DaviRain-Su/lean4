@@ -81,8 +81,11 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // RC barrier must always be compiled (even in helperless builds) because
-    // the Zig ZCU optimizer eliminates inc/dec pairs otherwise.
+    // RC barrier and env barrier must always be compiled (even in helperless
+    // builds) because the ZCU optimizer eliminates inc/dec pairs and env
+    // conversion calls otherwise. These C files are compiled by cc separately
+    // from the Zig compilation unit, preventing the ZCU optimizer from
+    // inlining and eliminating the calls.
     root_mod.addCSourceFile(.{
         .file = b.path("rc_barrier.c"),
         .flags = &.{
@@ -92,6 +95,33 @@ pub fn build(b: *std.Build) void {
             "-I../..",
         },
     });
+    // env_barrier.c is compiled as a SEPARATE static library to prevent
+    // the ZCU optimizer from inlining and eliminating the env conversion.
+    // When added via addCSourceFile to the module, the ZCU optimizer can
+    // still see through it. A separate library forces a real ABI boundary.
+    const env_barrier_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    env_barrier_mod.addCSourceFile(.{
+        .file = b.path("env_barrier.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
+    const env_barrier_lib = b.addLibrary(.{
+        .name = "env_barrier",
+        .root_module = env_barrier_mod,
+        .linkage = .static,
+    });
+    b.installArtifact(env_barrier_lib);
+    // DO NOT use root_mod.linkLibrary — the ZCU optimizer can see through
+    // linked libraries and inline/eliminate calls. The env_barrier.a is
+    // linked directly by CMake at final link time.
 
     root_mod.linkSystemLibrary("uv", .{});
 
@@ -127,7 +157,7 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    // RC barrier must always be compiled (even in helperless builds).
+    // RC barrier and env barrier must always be compiled (even in helperless builds).
     zigrt_mod.addCSourceFile(.{
         .file = b.path("rc_barrier.c"),
         .flags = &.{
@@ -137,6 +167,7 @@ pub fn build(b: *std.Build) void {
             "-I../..",
         },
     });
+    // env_barrier.a is linked by CMake, not here (to prevent ZCU visibility)
     zigrt_mod.linkSystemLibrary("uv", .{});
 
     const zigrt_lib = b.addLibrary(.{
