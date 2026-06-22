@@ -5,7 +5,8 @@ fn resolveRootedPath(b: *std.Build, root: []const u8, rel: []const u8) []const u
 }
 
 fn requireExistingPath(path: []const u8, what: []const u8) void {
-    std.fs.cwd().access(path, .{}) catch {
+    const io = std.Io.Threaded.global_single_threaded.io();
+    std.Io.Dir.accessAbsolute(io, path, .{}) catch {
         std.debug.panic("missing required {s}: {s}", .{ what, path });
     };
 }
