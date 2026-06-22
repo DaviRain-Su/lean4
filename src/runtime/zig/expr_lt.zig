@@ -13,6 +13,7 @@ const object = @import("object.zig");
 const ctor = @import("ctor.zig");
 const ea = @import("expr_accessors.zig");
 const rt = @import("lean_rt.zig");
+const rc = @import("rc.zig");
 const util_name = @import("util_name.zig");
 
 extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
@@ -213,14 +214,22 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
 }
 
 pub export fn lean_expr_quick_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    // Keep the "quick" entry point functionally correct by delegating to the
-    // non-hash ordering. The previous hash-shortcut path (`use_hash = true`)
-    // diverged from C++ ordering semantics for some Expr shapes and corrupted
-    // elaborator caches. We can reintroduce the hashed fast path once the Zig
-    // implementation is proven bit-for-bit compatible with `expr_lt.cpp`.
-    return @intFromBool(isLtExpr(a, b, false));
+    // Match C++ semantics: expr(a, true) does inc(a), destructor does dec.
+    // Without this, a worker thread can free the expression (or a
+    // sub-expression) while isLtExpr is still traversing it.
+    rc.lean_inc(a);
+    rc.lean_inc(b);
+    const r = isLtExpr(a, b, true);
+    rc.lean_dec(a);
+    rc.lean_dec(b);
+    return @intFromBool(r);
 }
 
 pub export fn lean_expr_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    return @intFromBool(isLtExpr(a, b, false));
+    rc.lean_inc(a);
+    rc.lean_inc(b);
+    const r = isLtExpr(a, b, false);
+    rc.lean_dec(a);
+    rc.lean_dec(b);
+    return @intFromBool(r);
 }

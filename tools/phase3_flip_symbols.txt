@@ -1,27 +1,3 @@
-
-# Array / sarray / slice operations (25) — tested with zigrt Array/FloatArray + stdlib StdlibArray
-# Core hot-path call convention. Tested with zigrt Closure/Cases + stdlib
-# due to SIGSEGV/SIGBUS crashes. The root cause was a signature mismatch in
-# Float (18)
-# Function application primitives (18) — lean_apply_1..16, lean_apply_m, lean_apply_n
-# int_big symbols now work correctly.
-# Internal / debug / panic (25) — runtime state, debug, panic paths
-# Internal info (2)
-# lean_alloc_mpz (C++ takes mpz_t v, Zig takes no args). Fixed by delegating
-# matching C++ m_cs_sz = aligned_total_size semantics.
-# Nat/int big arithmetic (23) — tested with zigrt Nat/Recursion + stdlib StdlibNatBig
-# Phase 3: Verified safe symbols to flip (168 symbols)
-# Platform info (4)
-# Pure computation / comparison (4)
-# Requires lean_alloc_ctor to delegate to C++ lean_alloc_ctor_memory in mimalloc mode,
-# Sharecommon (4) — hash/eq/quick/state for ShareCommon tactic
-# String operations (15) — tested with zigrt String/StringHelpers/StringEscapes + stdlib StdlibString
-# Tested with emitzig zigrt (clean stdlib cache) + all 15 core tests passing.
-# Tested with zigrt Smoke/Closure/Nat/Recursion/Loop/Cases + stdlib
-# The 5 int_big symbols (add/sub/mul/neg/div_exact) were previously removed
-# to C++ lean_alloc_object when export_allocator_symbols is false. All 5
-# Uses mpz_zig.zig (GMP wrapper), so arithmetic semantics match exactly.
-# UTF8 (2)
 lean_align
 lean_alloc_ctor_memory
 lean_alloc_external
@@ -155,17 +131,23 @@ lean_decode_uv_error
 lean_dynlib_get
 lean_dynlib_load
 lean_dynlib_symbol_run_as_init
+lean_emit_llvm
 lean_ensure_exclusive_array
 lean_event_loop_is_alive
 lean_event_loop_lock
 lean_event_loop_loop
 lean_event_loop_unlock
 lean_expr_data
+lean_expr_lt
+lean_expr_mk_app_data
+lean_expr_mk_data
 lean_extract_mpz_value
 lean_finalize_openssl
 lean_finalize_stack_overflow
 lean_finalize_task_manager
 lean_finalize_thread
+lean_find_expr
+lean_find_ext_expr
 lean_float_add
 lean_float_array_cptr
 lean_float_array_data
@@ -241,8 +223,12 @@ lean_get_external_class
 lean_get_external_data
 lean_get_githash
 lean_get_internal_linker_flags
+lean_get_internal_linker_flags
+lean_get_leanc_extra_flags
 lean_get_leanc_extra_flags
 lean_get_leanc_internal_flags
+lean_get_leanc_internal_flags
+lean_get_linker_flags
 lean_get_linker_flags
 lean_get_max_ctor_fields
 lean_get_max_ctor_scalars_size
@@ -264,6 +250,7 @@ lean_inc_heartbeat
 lean_inc_n
 lean_inc_ref
 lean_inc_ref_n
+lean_init_llvm
 lean_init_task_manager
 lean_init_task_manager_using
 lean_initialize_runtime_module
@@ -411,6 +398,10 @@ lean_internal_get_believer_trust_level
 lean_internal_get_build_type
 lean_internal_get_default_max_heartbeat
 lean_internal_get_default_max_memory
+lean_internal_get_default_options
+lean_internal_get_default_options
+lean_internal_get_default_verbose
+lean_internal_get_default_verbose
 lean_internal_get_default_verbose
 lean_internal_get_hardware_concurrency
 lean_internal_has_address_sanitizer
@@ -554,6 +545,10 @@ lean_isize_to_int64
 lean_isize_to_int8
 lean_isize_xor
 lean_kernel_cheap_beta_reduce
+lean_kernel_check
+lean_kernel_is_def_eq
+lean_kernel_whnf
+lean_level_mk_data
 lean_libuv_version
 lean_list_cons
 lean_manual_get_root
@@ -1045,52 +1040,14 @@ lean_zig_socket_address_to_sockaddr_storage
 lean_zig_uv_event_loop_init
 lean_zig_uv_event_loop_run
 lean_zig_uv_initialize
-# Kernel symbols (Zig kernel port) — partial cutover
-# lean_add_decl
-# lean_add_decl_without_checking
-# lean_expr_instantiate1
-# lean_expr_abstract
-# lean_expr_abstract_range
-# lean_expr_instantiate
-# lean_expr_instantiate_range
-# lean_expr_instantiate_rev
-# lean_expr_instantiate_rev_range
-# lean_expr_lift_loose_bvars
-# lean_expr_lower_loose_bvars
-lean_expr_mk_app_data
-lean_expr_mk_data
-lean_find_expr
-lean_find_ext_expr
-# lean_level_eq
-# lean_level_eqv
-lean_level_mk_data
-# lean_replace_expr
-# Library/util C ABI symbols
-lean_expr_quick_lt
-lean_expr_lt
-lean_init_llvm
-lean_emit_llvm
-lean_internal_get_default_verbose
-lean_internal_get_default_options
-lean_get_leanc_extra_flags
-lean_get_leanc_internal_flags
-lean_get_linker_flags
-lean_get_internal_linker_flags
-lean_internal_get_default_verbose
-lean_internal_get_default_options
-ZN4lean24initialize_kernel_moduleEv
+ZN4lean20finalize_util_moduleEv
+ZN4lean21init_default_print_fnEv
 ZN4lean22finalize_kernel_moduleEv
 ZN4lean22initialize_util_moduleEv
-ZN4lean20finalize_util_moduleEv
-ZN4lean25initialize_library_moduleEv
 ZN4lean23finalize_library_moduleEv
-ZN4lean30initialize_library_core_moduleEv
+ZN4lean24initialize_kernel_moduleEv
+ZN4lean25initialize_library_moduleEv
 ZN4lean28finalize_library_core_moduleEv
-ZN4lean31initialize_constructions_moduleEv
 ZN4lean29finalize_constructions_moduleEv
-ZN4lean21init_default_print_fnEv
-
-# Kernel type checker — Lean-layer on-demand checks delegated to Zig
-lean_kernel_whnf
-lean_kernel_is_def_eq
-lean_kernel_check
+ZN4lean30initialize_library_core_moduleEv
+ZN4lean31initialize_constructions_moduleEv
