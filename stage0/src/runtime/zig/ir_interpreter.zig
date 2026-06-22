@@ -484,7 +484,7 @@ fn boxT(v: Value, t: IRType) *anyopaque {
         .USize => box.lean_box_usize(@as(usize, @intCast(v.num))).?,
         .Irrelevant, .Void => object.lean_box(0).?,
         .Object, .Tagged, .TObject => v.obj orelse object.lean_box(0).?,
-        .Struct, .Union => @panic("box_t: struct/union not implemented"),
+        .Struct, .Union => @panic("not implemented yet"),
     };
 }
 
@@ -499,7 +499,7 @@ fn unboxT(o: *anyopaque, t: IRType) Value {
         .USize => Value.fromNum(box.lean_unbox_usize(o)),
         .Irrelevant, .Void => Value.fromNum(0),
         .Object, .Tagged, .TObject => Value.fromObj(o),
-        .Struct, .Union => @panic("unbox_t: struct/union not implemented"),
+        .Struct, .Union => @panic("not implemented yet"),
     };
 }
 
@@ -1083,7 +1083,7 @@ const Interpreter = struct {
                 .UInt64 => Value.fromNum(@as(*u64, @ptrCast(@alignCast(addr))).*),
                 .USize => Value.fromNum(@as(*usize, @ptrCast(@alignCast(addr))).*),
                 .Object, .Tagged, .TObject, .Irrelevant, .Void => Value.fromObj(@as(*?*anyopaque, @ptrCast(@alignCast(addr))).* orelse object.lean_box(0).?),
-                else => @panic("load: struct/union not implemented"),
+                else => @panic("not implemented yet"),
             };
         }
         // No native code: interpret IR

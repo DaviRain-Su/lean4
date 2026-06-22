@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
     const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse true;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
+    const compile_cpp_cutover = b.option(bool, "compile-cpp-cutover", "Compile remaining C++ runtime shims into the Zig archive") orelse false;
     const cpp_use_mimalloc = b.option(bool, "cpp-use-mimalloc", "Whether the C++/generated-code side uses LEAN_MIMALLOC layout and mi_* allocators") orelse false;
     const cpp_build_type = b.option([]const u8, "cpp-build-type", "C++ CMAKE_BUILD_TYPE for .olean compatibility (Debug, Release, RelWithDebInfo, MinSizeRel)") orelse "Release";
     const leanc_extra_cc_flags = b.option([]const u8, "leanc-extra-cc-flags", "Extra CC flags for leanc") orelse "";
@@ -61,8 +62,55 @@ pub fn build(b: *std.Build) void {
     // final link time (handled by the CMake build, not the Zig build).
     root_mod.linkSystemLibrary("c++", .{});
 
+    if (compile_cpp_cutover) {
+        var cpp_flags: [12][]const u8 = undefined;
+        var cpp_n: usize = 0;
+        cpp_flags[cpp_n] = "-std=c++17";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-stdlib=libc++";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-O2";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-DLEAN_MULTI_THREAD";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-DLEAN_ZIG_RT_CUTOVER";
+        cpp_n += 1;
+        if (use_gmp) {
+            cpp_flags[cpp_n] = "-DLEAN_USE_GMP";
+            cpp_n += 1;
+        }
+        if (cpp_use_mimalloc) {
+            cpp_flags[cpp_n] = "-DLEAN_MIMALLOC";
+            cpp_n += 1;
+        }
+        cpp_flags[cpp_n] = b.fmt("-I{s}", .{lean_include_dir});
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-I../..";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-I../../util";
+        cpp_n += 1;
+        root_mod.addCSourceFiles(.{
+            .files = &.{
+                "../compact.cpp",
+                "../sharecommon.cpp",
+                "../thread.cpp",
+                "../mpz.cpp",
+                "../exception.cpp",
+                "../object_ref.cpp",
+                "../io_error_helpers.cpp",
+                "object_shim.cpp",
+                "libcxx_hash_compat.cpp",
+            },
+            .flags = cpp_flags[0..cpp_n],
+        });
+        if (use_gmp) {
+            root_mod.linkSystemLibrary("gmp", .{});
+        }
+        root_mod.linkSystemLibrary("c++abi", .{});
+    }
+
     // All UV subsystems (event_loop, timer, dns, signal, net_addr, tcp, udp,
-    // system) are now pure Zig. No C++ sources are compiled into libleanrt_zig.
+    // system) are now pure Zig.
 
     // Weak C wrappers that bridge runtime C++ callers (uv_compat.cpp, dns.cpp)
     // to the Zig io_error implementations. Only emit them when helper symbols
@@ -71,7 +119,7 @@ pub fn build(b: *std.Build) void {
     // these avoids duplicate-symbol collisions at link time.
     if (export_lean_helpers) {
         root_mod.addCSourceFiles(.{
-            .files = &.{"io_error_weak_exports.c"},
+            .files = &.{ "io_error_weak_exports.c", "rc_barrier.c" },
             .flags = &.{
                 "-std=c11",
                 "-O2",
@@ -80,6 +128,45 @@ pub fn build(b: *std.Build) void {
             },
         });
     }
+
+    // RC barrier and env barrier must always be compiled (even in helperless
+    // builds) because the ZCU optimizer eliminates inc/dec pairs and env
+    // conversion calls otherwise. These C files are compiled by cc separately
+    // from the Zig compilation unit, preventing the ZCU optimizer from
+    // inlining and eliminating the calls.
+    root_mod.addCSourceFile(.{
+        .file = b.path("rc_barrier.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
+    // kernel_entrypoints.zig is compiled as a SEPARATE Zig module (not part
+    // of the ZCU) to prevent the ZCU optimizer from inlining and eliminating
+    // the lean_elab_environment_to_kernel_env conversion call. The ZCU
+    // optimizer inlines rc.lean_inc/lean_dec (ZCU functions), sees inc+dec=0,
+    // then eliminates the extern fn call as "unused". By compiling in a
+    // separate module, the optimizer cannot see through the extern fn
+    // boundary and the conversion is preserved.
+    //
+    // This module exports lean_kernel_check, lean_kernel_whnf, and
+    // lean_kernel_is_def_eq. It does NOT link to the ZCU module — it only
+    // uses extern fn declarations. The symbols are resolved at final link
+    // time by CMake.
+    const kernel_entrypoints_mod = b.createModule(.{
+        .root_source_file = b.path("kernel_entrypoints.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const kernel_entrypoints_lib = b.addLibrary(.{
+        .name = "kernel_entrypoints",
+        .root_module = kernel_entrypoints_mod,
+        .linkage = .static,
+    });
+    b.installArtifact(kernel_entrypoints_lib);
 
     root_mod.linkSystemLibrary("uv", .{});
 
@@ -103,9 +190,55 @@ pub fn build(b: *std.Build) void {
         zigrt_mod.linkSystemLibrary("gmp", .{});
     }
     zigrt_mod.linkSystemLibrary("c++", .{});
+    if (compile_cpp_cutover) {
+        var cpp_flags: [12][]const u8 = undefined;
+        var cpp_n: usize = 0;
+        cpp_flags[cpp_n] = "-std=c++17";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-stdlib=libc++";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-O2";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-DLEAN_MULTI_THREAD";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-DLEAN_ZIG_RT_CUTOVER";
+        cpp_n += 1;
+        if (use_gmp) {
+            cpp_flags[cpp_n] = "-DLEAN_USE_GMP";
+            cpp_n += 1;
+        }
+        if (cpp_use_mimalloc) {
+            cpp_flags[cpp_n] = "-DLEAN_MIMALLOC";
+            cpp_n += 1;
+        }
+        cpp_flags[cpp_n] = b.fmt("-I{s}", .{lean_include_dir});
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-I../..";
+        cpp_n += 1;
+        cpp_flags[cpp_n] = "-I../../util";
+        cpp_n += 1;
+        zigrt_mod.addCSourceFiles(.{
+            .files = &.{
+                "../compact.cpp",
+                "../sharecommon.cpp",
+                "../thread.cpp",
+                "../mpz.cpp",
+                "../exception.cpp",
+                "../object_ref.cpp",
+                "../io_error_helpers.cpp",
+                "object_shim.cpp",
+                "libcxx_hash_compat.cpp",
+            },
+            .flags = cpp_flags[0..cpp_n],
+        });
+        if (use_gmp) {
+            zigrt_mod.linkSystemLibrary("gmp", .{});
+        }
+        zigrt_mod.linkSystemLibrary("c++abi", .{});
+    }
     if (export_lean_helpers) {
         zigrt_mod.addCSourceFiles(.{
-            .files = &.{"io_error_weak_exports.c"},
+            .files = &.{ "io_error_weak_exports.c", "rc_barrier.c" },
             .flags = &.{
                 "-std=c11",
                 "-O2",
@@ -114,6 +247,18 @@ pub fn build(b: *std.Build) void {
             },
         });
     }
+
+    // RC barrier and env barrier must always be compiled (even in helperless builds).
+    zigrt_mod.addCSourceFile(.{
+        .file = b.path("rc_barrier.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
+    // kernel_entrypoints.a is linked by CMake, not here (prevents ZCU visibility)
     zigrt_mod.linkSystemLibrary("uv", .{});
 
     const zigrt_lib = b.addLibrary(.{
@@ -147,6 +292,16 @@ pub fn build(b: *std.Build) void {
             },
         });
     }
+    // Stubs for stdlib-only symbols pulled in by init.zig and name hashing tests.
+    zigrt_test_mod.addCSourceFile(.{
+        .file = b.path("zigrt_stubs.c"),
+        .flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        },
+    });
     zigrt_test_mod.linkSystemLibrary("uv", .{});
 
     const tests = b.addTest(.{

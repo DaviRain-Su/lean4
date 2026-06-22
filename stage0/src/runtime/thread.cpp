@@ -51,6 +51,7 @@ void reset_thread_local() {
 
 using runnable = std::function<void()>;
 
+#ifndef LEAN_ZIG_RT_CUTOVER
 extern "C" LEAN_EXPORT void lean_initialize_thread() {
 #ifdef LEAN_SMALL_ALLOCATOR
     init_thread_heap();
@@ -61,6 +62,7 @@ extern "C" LEAN_EXPORT void lean_finalize_thread() {
     run_thread_finalizers();
     run_post_thread_finalizers();
 }
+#endif
 
 static void thread_main(void * p) {
     lean_initialize_thread();
@@ -164,6 +166,7 @@ lthread::~lthread() {}
 void lthread::join() { m_imp->join(); }
 #endif
 
+#ifndef LEAN_ZIG_RT_CUTOVER
 /* setThreadStackSize (sz : USize) : BaseIO Unit */
 extern "C" LEAN_EXPORT lean_obj_res lean_internal_set_thread_stack_size(size_t sz) {
     lthread::set_thread_stack_size(sz);
@@ -193,6 +196,7 @@ extern "C" LEAN_EXPORT lean_object * lean_run_main(lean_object * (*main_fn)(int,
     return main_fn(argc, argv);
 #endif
 }
+#endif
 
 LEAN_THREAD_VALUE(bool, g_finalizing, false);
 

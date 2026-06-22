@@ -123,6 +123,10 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
 if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+  # GMP-free path: Zig big_int + gmp_mpz_compat provide __mpz_struct layout and
+  # arithmetic; C++ mpz.cpp is compiled without LEAN_USE_GMP in the cutover archive.
+  set(USE_GMP OFF CACHE BOOL "USE_GMP" FORCE)
+  message(STATUS "LEAN_ZIG_RT_CUTOVER: USE_GMP=OFF (GMP-free Zig big_int runtime)")
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
@@ -700,8 +704,7 @@ if(USE_LAKE AND STAGE EQUAL 0)
   set(USE_LAKE OFF)
 endif()
 if(LEAN_ZIG_CODEGEN AND USE_LAKE)
-  message(STATUS "Disabling Lake stdlib build because Lake does not support the Zig backend")
-  set(USE_LAKE OFF)
+  message(STATUS "Lake + Zig codegen enabled (useZigCodegen in lakefile.toml)")
 endif()
 
 # Windows uses ";" as a path separator. We use `LEAN_PATH_SEPARATOR` on scripts such as lean.mk.in
@@ -869,6 +872,11 @@ endif()
 if(LEAN_ZIG_CODEGEN AND STAGE GREATER 0)
   find_program(ZIG zig REQUIRED)
   string(APPEND EXTRA_LEANMAKE_OPTS " USE_ZIG=1 ZIG=${ZIG}")
+  set(LEAN_ZIG_CODEGEN_TOML "true")
+  set(STDLIB_ZIG "${ZIG}")
+else()
+  set(LEAN_ZIG_CODEGEN_TOML "false")
+  set(STDLIB_ZIG "zig")
 endif()
 
 set(
@@ -883,6 +891,14 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   list(APPEND STDLIBS Lake LeanChecker)
 endif()
 
+if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  # Lake's parallel stdlib build can exhaust the default 256/8192 fd limit on macOS.
+  set(LEAN_STDLIB_BUILD_COMMAND
+    bash -c "ulimit -n 65536 2>/dev/null || true; exec \"${MAKE}\" -f \"${CMAKE_BINARY_DIR}/stdlib.make\" ${STDLIBS}"
+  )
+else()
+  set(LEAN_STDLIB_BUILD_COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make ${STDLIBS})
+endif()
 add_custom_target(
   make_stdlib
   ALL
@@ -890,7 +906,7 @@ add_custom_target(
   # The actual rule is in a separate makefile because we want to prefix it with '+' to use the Make job server
   # for a parallelized nested build, but CMake doesn't let us do that.
   # We use `lean` from the previous stage, but `leanc`, headers, etc. from the current stage
-  COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make ${STDLIBS}
+  COMMAND ${LEAN_STDLIB_BUILD_COMMAND}
   VERBATIM
 )
 

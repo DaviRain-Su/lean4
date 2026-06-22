@@ -46,9 +46,20 @@ if(ZIG)
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/udp.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../uv/udp.h"
   )
+  set(LEAN_ZIG_RUNTIME_CPP_CUTOVER_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/../compact.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../sharecommon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../thread.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../mpz.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../exception.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../object_ref.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../io_error_helpers.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/object_shim.cpp"
+  )
   set(LEAN_ZIG_RUNTIME_SOURCES
     ${LEAN_ZIG_RUNTIME_LOCAL_SOURCES}
     ${LEAN_ZIG_RUNTIME_UV_SOURCES}
+    ${LEAN_ZIG_RUNTIME_CPP_CUTOVER_SOURCES}
   )
   set(LEAN_ZIG_RUNTIME_BUILD_OPTIONS
     --prefix "${LEAN_ZIG_RUNTIME_PREFIX}"
@@ -66,6 +77,8 @@ if(ZIG)
   )
   if(LEAN_ZIG_RT_CUTOVER)
     list(APPEND LEAN_ZIG_RUNTIME_BUILD_OPTIONS "-Dexport-kernel-symbols=true")
+    list(APPEND LEAN_ZIG_RUNTIME_BUILD_OPTIONS "-Dcompile-cpp-cutover=true")
+    list(APPEND LEAN_ZIG_RUNTIME_BUILD_OPTIONS "-Duse-gmp=$<IF:$<BOOL:${USE_GMP}>,true,false>")
   endif()
 
   add_custom_command(
@@ -91,6 +104,7 @@ if(ZIG)
   set(LEAN_ZIG_HELPERLESS_OPTIMIZE "ReleaseFast")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zig-out-helperless")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libleanrt_zig.a")
+  set(LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libkernel_entrypoints.a")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
     --prefix "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}"
     --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
@@ -100,6 +114,8 @@ if(ZIG)
     -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
     -Dcpp-build-type=${CMAKE_BUILD_TYPE}
     -Dcpp-use-mimalloc=$<IF:$<BOOL:${USE_MIMALLOC}>,true,false>
+    -Dcompile-cpp-cutover=$<IF:$<BOOL:${LEAN_ZIG_RT_CUTOVER}>,true,false>
+    -Duse-gmp=$<IF:$<BOOL:${USE_GMP}>,true,false>
     -Dleanc-extra-cc-flags=${LEANC_EXTRA_CC_FLAGS}
     -Dleanc-internal-flags=${LEANC_INTERNAL_FLAGS}
     -Dleanc-static-linker-flags=${LEANC_STATIC_LINKER_FLAGS}
@@ -118,9 +134,10 @@ if(ZIG)
     )
   endif()
   add_custom_command(
-    OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}"
     COMMAND "${ZIG}" build ${LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}"
     DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building Lean Zig runtime library (helperless)"
@@ -146,12 +163,13 @@ if(ZIG)
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
       COMMAND python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+        "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}"
         "${LEAN_ZIG_FLIP_FILE}"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
       COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
-      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" leanrt_initial-exec leancpp leancpp_1 "${LEAN_ZIG_FLIP_FILE}"
+      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}" leanrt_initial-exec leancpp leancpp_1 "${LEAN_ZIG_FLIP_FILE}"
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       COMMENT "Weakening Zig duplicates + flipping Phase 3 symbols to Zig"
       VERBATIM
