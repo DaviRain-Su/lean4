@@ -13,3 +13,40 @@ leantar/
 .pi
 tmp
 .zig-cache
+
+# CMake root-level artifacts
+/CMakeCache.txt
+/CMakeFiles/
+lake-manifest.json
+src/lake-manifest.json
+src/lakefile.toml
+
+# Test scratch files
+test_*.lean
+test_*.o
+test_noinline.o
+
+# Lake build artifacts
+tests/**/lake-manifest.json
+tests/**/.lake/
+
+# EmitZig test binaries
+tests/emitzig/Array*
+tests/emitzig/Cases*
+tests/emitzig/Closure*
+tests/emitzig/Hello*
+tests/emitzig/Nat*
+tests/emitzig/String*
+tests/emitzig/Struct*
+tests/emitzig/TC*
+
+# Build stage0 artifacts
+stage0/initialize/
+stage0/kernel/
+stage0/leanc.sh
+stage0/runtime/
+stage0/shell/
+stage0/temp/
+stage0/util/
+stage0/lean
+stage0/githash.h
