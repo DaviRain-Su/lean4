@@ -4,6 +4,7 @@ const testing = std.testing;
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+const mpz_object = @import("mpz_object.zig");
 const task_runtime = if (builtin.is_test)
     struct {
         fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void {
@@ -30,6 +31,21 @@ extern fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) cal
 extern fn lean_task_get(t: *anyopaque) callconv(.c) *anyopaque;
 
 const VisitMode = enum { mt, persistent };
+
+// Intrusive linked list for deletion cascade: overwrite the 8-byte
+// object header (m_rc, m_cs_sz, m_other, m_tag) with a next pointer.
+// This matches the C++ runtime's push_back/pop_back approach and makes
+// m_rc appear as a large positive value so a second decObject decrements
+// instead of re-enqueuing (preventing double-free).
+fn setNext(o: *anyopaque, next: ?*anyopaque) void {
+    const ptr: *?*anyopaque = @ptrCast(@alignCast(o));
+    ptr.* = next;
+}
+
+fn getNext(o: *anyopaque) ?*anyopaque {
+    const ptr: *?*anyopaque = @ptrCast(@alignCast(o));
+    return ptr.*;
+}
 
 fn opaqueFunPtr(fun: anytype) ?*anyopaque {
     return @ptrCast(@constCast(fun));
@@ -128,24 +144,23 @@ fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque, mode: VisitMod
     }
 }
 
-fn decObject(todo: *std.ArrayList(*anyopaque), child: ?*anyopaque) void {
+fn decObject(todo: *?*anyopaque, child: ?*anyopaque) void {
     if (child) |ptr| {
         if (object.lean_is_scalar(ptr)) return;
         const hdr = header(ptr);
         if (hdr.m_rc > 1) {
             hdr.m_rc -= 1;
         } else if (hdr.m_rc == 1) {
-            // Mark as queued for deletion using a large positive sentinel.
-            // C++ uses an intrusive list that overwrites m_rc with a pointer
-            // (also > 1). We use a sentinel so a second decObject before the
-            // first delCore runs takes the m_rc > 1 branch and decrements
-            // harmlessly instead of re-enqueuing the same pointer (double-free).
-            hdr.m_rc = 0x7fff_0000;
-            todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
+            // Use intrusive linked list: overwrite the 8-byte header
+            // with the next pointer (like C++ push_back). This makes
+            // m_rc appear > 1 so a second dec takes the decrement branch.
+            setNext(ptr, todo.*);
+            todo.* = ptr;
         } else if (hdr.m_rc < 0) {
             const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
             if (prev == -1) {
-                todo.append(std.heap.page_allocator, ptr) catch @panic("out of memory");
+                setNext(ptr, todo.*);
+                todo.* = ptr;
             }
         }
     }
@@ -157,18 +172,29 @@ fn delCoreOther(todo: *std.ArrayList(*anyopaque), o: *anyopaque, tag: u8) void {
             const closure: *lean.lean_closure_object = @ptrCast(@alignCast(o));
             const slots = closureSlots(closure);
             for (0..closure.m_num_fixed) |i| decObject(todo, slots[i]);
-            alloc.lean_free_small_object(o);
+            // Closures are allocated via lean_alloc_object (plain malloc).
+            // Use alloc.lean_free_object which dispatches to std.c.free for closures.
+            alloc.lean_free_object(o);
         },
         lean.LeanArray => {
             const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
             const slots = arraySlots(array);
             for (0..array.m_size) |i| decObject(todo, slots[i]);
-            alloc.lean_free_small_object(o);
+            // Arrays are allocated via lean_alloc_object (plain malloc).
+            // Use alloc.lean_free_object which dispatches to std.c.free for arrays.
+            alloc.lean_free_object(o);
         },
         lean.LeanScalarArray, lean.LeanString => {
-            alloc.lean_free_small_object(o);
+            // Scalar arrays and strings are allocated via lean_alloc_object (plain malloc).
+            // Use alloc.lean_free_object which dispatches to std.c.free for these tags.
+            alloc.lean_free_object(o);
         },
         lean.LeanMPZ => {
+            // MPZ objects are allocated via lean_alloc_small_object (size-prefixed).
+            // Deinit the mpz value first, then use lean_free_small_object
+            // (matching C++ lean_del_core_other behavior).
+            const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
+            mpz_object.mpzValue(mpz_obj).deinit();
             alloc.lean_free_small_object(o);
         },
         lean.LeanThunk => {
@@ -247,22 +273,22 @@ pub export fn lean_dec_ref_cold(o_arg: *anyopaque) callconv(.c) void {
     var o = o_arg;
     const hdr = header(o);
     if (hdr.m_rc == 1) {
-        var todo: std.ArrayList(*anyopaque) = .empty;
-        defer todo.deinit(std.heap.page_allocator);
+        var todo: ?*anyopaque = null;
         while (true) {
             delCore(&todo, o);
-            if (todo.items.len == 0) return;
-            o = todo.pop().?;
+            if (todo == null) return;
+            o = todo.?;
+            todo = getNext(o);
         }
     } else if (hdr.m_rc < 0) {
         const prev = @atomicRmw(i32, &hdr.m_rc, .Add, 1, .seq_cst);
         if (prev == -1) {
-            var todo: std.ArrayList(*anyopaque) = .empty;
-            defer todo.deinit(std.heap.page_allocator);
+            var todo: ?*anyopaque = null;
             while (true) {
                 delCore(&todo, o);
-                if (todo.items.len == 0) return;
-                o = todo.pop().?;
+                if (todo == null) return;
+                o = todo.?;
+                todo = getNext(o);
             }
         }
     }

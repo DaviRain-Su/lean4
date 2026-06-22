@@ -119,46 +119,53 @@ fn fixArgs(f: *anyopaque, provided: []const Obj) *anyopaque {
     return result_ptr;
 }
 
-fn applySlice(f: *anyopaque, provided: []const Obj) Obj {
-    if (provided.len == 0) @panic("lean_apply_n requires at least one argument");
+fn applySlice(f_in: *anyopaque, provided_in: []const Obj) Obj {
+    if (provided_in.len == 0) @panic("lean_apply_n requires at least one argument");
 
-    if (object.lean_is_scalar(f)) {
-        for (provided) |arg| rc.lean_dec(arg);
-        return f;
-    }
-
-    const closure = closurePtr(f);
-    const arity: usize = closure.m_arity;
-    const fixed: usize = closure.m_num_fixed;
-    const total = fixed + provided.len;
-
-    if (total < arity) {
-        return fixArgs(f, provided);
-    }
-
-    var stack: [max_direct_args]Obj = undefined;
-    const args = initCallArgs(arity, &stack);
-    defer deinitCallArgs(arity, args);
-
-    if (total == arity) {
-        const exclusive = rc.lean_is_exclusive(f);
-        copyExistingFixed(args, closureSlots(closure), fixed, exclusive);
-        fillProvidedArgs(args, fixed, provided, provided.len);
-        const result = callFunction(closure.m_fun, args);
-        if (exclusive) {
-            freeMovedClosureShell(f);
-        } else {
-            rc.lean_dec_ref(f);
+    var f = f_in;
+    var provided = provided_in;
+    while (true) {
+        if (object.lean_is_scalar(f)) {
+            for (provided) |arg| rc.lean_dec(arg);
+            return f;
         }
-        return result;
-    }
 
-    copyExistingFixed(args, closureSlots(closure), fixed, false);
-    const consumed_from_provided = arity - fixed;
-    fillProvidedArgs(args, fixed, provided, consumed_from_provided);
-    const next = callFunction(closure.m_fun, args) orelse @panic("closure application returned null");
-    rc.lean_dec_ref(f);
-    return applySlice(next, provided[consumed_from_provided..]);
+        const closure = closurePtr(f);
+        const arity: usize = closure.m_arity;
+        const fixed: usize = closure.m_num_fixed;
+        const total = fixed + provided.len;
+
+        if (total < arity) {
+            return fixArgs(f, provided);
+        }
+
+        var stack: [max_direct_args]Obj = undefined;
+        const args = initCallArgs(arity, &stack);
+        const heap_allocated = arity > max_direct_args;
+
+        if (total == arity) {
+            const exclusive = rc.lean_is_exclusive(f);
+            copyExistingFixed(args, closureSlots(closure), fixed, exclusive);
+            fillProvidedArgs(args, fixed, provided, provided.len);
+            const result = callFunction(closure.m_fun, args);
+            if (heap_allocated) deinitCallArgs(arity, args);
+            if (exclusive) {
+                freeMovedClosureShell(f);
+            } else {
+                rc.lean_dec_ref(f);
+            }
+            return result;
+        }
+
+        copyExistingFixed(args, closureSlots(closure), fixed, false);
+        const consumed_from_provided = arity - fixed;
+        fillProvidedArgs(args, fixed, provided, consumed_from_provided);
+        const next = callFunction(closure.m_fun, args) orelse @panic("closure application returned null");
+        if (heap_allocated) deinitCallArgs(arity, args);
+        rc.lean_dec_ref(f);
+        f = next;
+        provided = provided[consumed_from_provided..];
+    }
 }
 
 pub export fn lean_apply_1(f: *anyopaque, a1: *anyopaque) callconv(.c) Obj {
