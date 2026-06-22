@@ -10,11 +10,8 @@ set(
   interrupt.cpp
   stackinfo.cpp
   compact.cpp
-  alloc.cpp
   sharecommon.cpp
   object_ref.cpp
-  uv/net_addr.cpp
-  uv/zig_link_compat.cpp
 )
 if(LEAN_ZIG_RT_CUTOVER)
   # Shims that fill gaps left by removing io.cpp/platform.cpp.
@@ -22,6 +19,9 @@ if(LEAN_ZIG_RT_CUTOVER)
 else()
   # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
   list(APPEND RUNTIME_OBJS
+    alloc.cpp
+    uv/net_addr.cpp
+    uv/zig_link_compat.cpp
     io.cpp
     memory.cpp
     hash.cpp
