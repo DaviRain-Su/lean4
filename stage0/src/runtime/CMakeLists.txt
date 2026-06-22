@@ -1,6 +1,7 @@
 set(
   RUNTIME_OBJS
   debug.cpp
+  thread.cpp
   mpz.cpp
   utf8.cpp
   object.cpp
@@ -19,7 +20,6 @@ else()
   list(APPEND RUNTIME_OBJS
     alloc.cpp
     apply.cpp
-    thread.cpp
     uv/net_addr.cpp
     uv/zig_link_compat.cpp
     io.cpp

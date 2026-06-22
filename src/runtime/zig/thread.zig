@@ -335,34 +335,3 @@ test "spawn uses LEAN_STACK_SIZE_KB when stack size is omitted" {
     try testing.expect(state.observed_stack_size + page_size >= 512 * 1024);
     try testing.expect(state.observed_stack_size <= 512 * 1024 + page_size);
 }
-
-/// C++ mangled shims for symbols referenced by compiler code (init.cpp, stackinfo.cpp).
-/// The C++ thread.cpp had a full finalizer manager; the Zig runtime uses a simpler
-/// model where thread cleanup happens via finalizeThreadSubsystems. These shims
-/// provide the C++ ABI entry points needed by the compiler's initializer destructor.
-fn cpp_run_thread_finalizers() callconv(.c) void {
-    // Zig runtime doesn't use the C++ finalizer registration system.
-    // Thread cleanup is handled by finalizeThreadSubsystems().
-}
-
-fn cpp_run_post_thread_finalizers() callconv(.c) void {
-    // No-op: Zig runtime doesn't have post-thread finalizers.
-}
-
-fn cpp_delete_thread_finalizer_manager() callconv(.c) void {
-    // No-op in C++ as well (empty function body in thread.cpp).
-}
-
-fn cpp_get_thread_stack_size() callconv(.c) usize {
-    // C++ default is 1GB (LEAN_DEFAULT_THREAD_STACK_SIZE). Return the Zig
-    // default if not explicitly set via lean_internal_set_thread_stack_size.
-    if (g_thread_stack_size != 0) return g_thread_stack_size;
-    return default_stack_size_kb * 1024;
-}
-
-comptime {
-    @export(&cpp_run_thread_finalizers, .{ .name = "_ZN4lean21run_thread_finalizersEv", .linkage = .strong });
-    @export(&cpp_run_post_thread_finalizers, .{ .name = "_ZN4lean26run_post_thread_finalizersEv", .linkage = .strong });
-    @export(&cpp_delete_thread_finalizer_manager, .{ .name = "_ZN4lean31delete_thread_finalizer_managerEv", .linkage = .strong });
-    @export(&cpp_get_thread_stack_size, .{ .name = "_ZN4lean7lthread21get_thread_stack_sizeEv", .linkage = .strong });
-}
