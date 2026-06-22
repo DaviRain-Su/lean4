@@ -13,14 +13,13 @@ set(
   alloc.cpp
   sharecommon.cpp
   object_ref.cpp
-  byteslice.cpp
   mimalloc_compat.cpp
   uv/net_addr.cpp
   uv/zig_link_compat.cpp
 )
 if(LEAN_ZIG_RT_CUTOVER)
   # Shims that fill gaps left by removing io.cpp/platform.cpp.
-  list(APPEND RUNTIME_OBJS githash.cpp io_error_helpers.cpp)
+  list(APPEND RUNTIME_OBJS io_error_helpers.cpp)
 else()
   # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
   list(APPEND RUNTIME_OBJS
@@ -36,6 +35,7 @@ else()
     process.cpp
     libuv.cpp
     openssl.cpp
+    byteslice.cpp
     uv/dns.cpp
     uv/event_loop.cpp
     uv/signal.cpp
