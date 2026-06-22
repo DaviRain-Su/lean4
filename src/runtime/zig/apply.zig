@@ -306,6 +306,35 @@ export fn lean_apply_m(f: *anyopaque, n: c_uint, args: [*]Obj) callconv(.c) Obj 
     return applySlice(f, args[0..n]);
 }
 
+// C++ mangled: lean::curry(void*, unsigned int, lean_object**)
+// Takes a raw function pointer and dispatches based on arity, matching the C++ apply.cpp implementation.
+fn cpp_curry(f: *anyopaque, n: c_uint, as: [*]Obj) callconv(.c) Obj {
+    return switch (n) {
+        0 => @panic("lean::curry: n == 0"),
+        1 => castFun(Fn1, f)(as[0]),
+        2 => castFun(Fn2, f)(as[0], as[1]),
+        3 => castFun(Fn3, f)(as[0], as[1], as[2]),
+        4 => castFun(Fn4, f)(as[0], as[1], as[2], as[3]),
+        5 => castFun(Fn5, f)(as[0], as[1], as[2], as[3], as[4]),
+        6 => castFun(Fn6, f)(as[0], as[1], as[2], as[3], as[4], as[5]),
+        7 => castFun(Fn7, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6]),
+        8 => castFun(Fn8, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7]),
+        9 => castFun(Fn9, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8]),
+        10 => castFun(Fn10, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9]),
+        11 => castFun(Fn11, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10]),
+        12 => castFun(Fn12, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11]),
+        13 => castFun(Fn13, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11], as[12]),
+        14 => castFun(Fn14, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11], as[12], as[13]),
+        15 => castFun(Fn15, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11], as[12], as[13], as[14]),
+        16 => castFun(Fn16, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11], as[12], as[13], as[14], as[15]),
+        else => castFun(Fnn, f)(as),
+    };
+}
+
+comptime {
+    @export(&cpp_curry, .{ .name = "_ZN4lean5curryEPvjPP11lean_object", .linkage = .strong });
+}
+
 fn testFn2(a1: Obj, a2: Obj) callconv(.c) Obj {
     return object.lean_box(object.lean_unbox(a1) + object.lean_unbox(a2));
 }
