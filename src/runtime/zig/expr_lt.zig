@@ -197,7 +197,12 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
 }
 
 pub export fn lean_expr_quick_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
-    return @intFromBool(isLtExpr(a, b, true));
+    // Keep the "quick" entry point functionally correct by delegating to the
+    // non-hash ordering. The previous hash-shortcut path (`use_hash = true`)
+    // diverged from C++ ordering semantics for some Expr shapes and corrupted
+    // elaborator caches. We can reintroduce the hashed fast path once the Zig
+    // implementation is proven bit-for-bit compatible with `expr_lt.cpp`.
+    return @intFromBool(isLtExpr(a, b, false));
 }
 
 pub export fn lean_expr_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {

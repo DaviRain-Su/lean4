@@ -1,9 +1,24 @@
 const std = @import("std");
 
+fn resolveRootedPath(b: *std.Build, root: []const u8, rel: []const u8) []const u8 {
+    return std.fs.path.join(b.allocator, &.{ root, rel }) catch unreachable;
+}
+
+fn requireExistingPath(path: []const u8, what: []const u8) void {
+    std.fs.cwd().access(path, .{}) catch {
+        std.debug.panic("missing required {s}: {s}", .{ what, path });
+    };
+}
+
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const root = b.pathFromRoot(".");
+    const prev_stage_dir_rel = b.option([]const u8, "prev-stage-dir", "Path to the previously built stage used for helperless cutover inputs") orelse "build/release/stage1";
+    const prev_stage_dir = resolveRootedPath(b, root, prev_stage_dir_rel);
+    const bootstrap_stage_dir_rel = b.option([]const u8, "bootstrap-stage-dir", "Path to the bootstrap stage used for leanmake/lean/lean.mk inputs") orelse "build/release/stage0";
+    const bootstrap_stage_dir = resolveRootedPath(b, root, bootstrap_stage_dir_rel);
 
     const lean_zig_runtime = b.option(bool, "lean-zig-runtime", "Build Zig runtime") orelse true;
     const lean_zig_rt_cutover = b.option(bool, "lean-zig-rt-cutover", "Link Zig helperless runtime into leanshared") orelse true;
@@ -11,10 +26,17 @@ pub fn build(b: *std.Build) void {
     const zig_rt_lib = b.fmt("{s}/lib/libleanrt_zig.a", .{zig_rt_prefix});
     const zig_rt_helperless_prefix = b.fmt("{s}/zig-runtime-helperless", .{b.install_path});
     const zig_rt_helperless_lib = b.fmt("{s}/lib/libleanrt_zig.a", .{zig_rt_helperless_prefix});
-    const stage1_rt_archive = std.fs.path.join(b.allocator, &.{ root, "build/release/stage1/runtime/libleanrt_initial-exec.a" }) catch unreachable;
-    const stage1_cpp_archive = std.fs.path.join(b.allocator, &.{ root, "build/release/stage1/lib/lean/libleancpp.a" }) catch unreachable;
-    const stage1_cpp_1_archive = std.fs.path.join(b.allocator, &.{ root, "build/release/stage1/lib/temp/libleancpp_1.a" }) catch unreachable;
-    const stage1_shell_archive = std.fs.path.join(b.allocator, &.{ root, "build/release/stage1/lib/temp/libleanshell.a" }) catch unreachable;
+    const stage1_rt_archive = resolveRootedPath(b, prev_stage_dir, "runtime/libleanrt_initial-exec.a");
+    const stage1_cpp_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleancpp.a");
+    const stage1_cpp_1_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleancpp_1.a");
+    const stage1_shell_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleanshell.a");
+    const prev_stage_include_dir = resolveRootedPath(b, prev_stage_dir, "include");
+
+    requireExistingPath(stage1_rt_archive, "previous-stage runtime archive");
+    requireExistingPath(stage1_cpp_archive, "previous-stage libleancpp.a");
+    requireExistingPath(stage1_cpp_1_archive, "previous-stage libleancpp_1.a");
+    requireExistingPath(stage1_shell_archive, "previous-stage libleanshell.a");
+    requireExistingPath(prev_stage_include_dir, "previous-stage include directory");
 
     // ── Step 1: Build Zig runtime ──────────────────────────────────────────
     var zig_rt_step: ?*std.Build.Step.Run = null;
@@ -173,7 +195,6 @@ pub fn build(b: *std.Build) void {
             "src/util/lbool.cpp",          "src/util/list_fn.cpp",
             "src/util/map_foreach.cpp",    "src/util/option_declarations.cpp",
             "src/util/options.cpp",        "src/util/shell.cpp",
-            "src/util/timeit.cpp",         "src/util/timer.cpp",
         } },
         .{ .name = "leanshell", .files = &.{
             "src/util/shell.cpp",
@@ -195,7 +216,7 @@ pub fn build(b: *std.Build) void {
         });
         mod.addIncludePath(b.path("src/include"));
         mod.addIncludePath(b.path("src"));
-        mod.addIncludePath(b.path("build/release/stage1/include"));
+        mod.addIncludePath(.{ .cwd_relative = prev_stage_include_dir });
         mod.addConfigHeader(config_h);
         mod.addConfigHeader(version_h);
         mod.addIncludePath(write_githash.getDirectory());
@@ -214,9 +235,9 @@ pub fn build(b: *std.Build) void {
 
     // ── Step 4: Lean bootstrap (.lean → .olean + .c → .o) ─────────────────
     // Uses leanmake (Make + lean.mk) for proper dependency tracking via lean --deps.
-    const leanmake_bin = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "leanmake-bin", "Path to leanmake") orelse "build/release/stage0/bin/leanmake" }) catch unreachable;
-    const lean_bin = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "lean-bin", "Path to bootstrap lean binary") orelse "build/release/stage0/bin/lean" }) catch unreachable;
-    const lean_mk_dir = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "lean-mk-dir", "Path to dir containing lean.mk") orelse "build/release/stage0/share/lean" }) catch unreachable;
+    const leanmake_bin = resolveRootedPath(b, bootstrap_stage_dir, "bin/leanmake");
+    const lean_bin = resolveRootedPath(b, bootstrap_stage_dir, "bin/lean");
+    const lean_mk_dir = resolveRootedPath(b, bootstrap_stage_dir, "share/lean");
     const leanc_bin = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "leanc-bin", "Path to leanc (C compiler for .c→.o)") orelse "build/zig-out/bin/zigleanc" }) catch unreachable;
     const stdlib_out = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "stdlib-out", "Output root for stdlib build") orelse "build/release/stage1" }) catch unreachable;
     const olean_out = std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{stdlib_out}) catch unreachable;

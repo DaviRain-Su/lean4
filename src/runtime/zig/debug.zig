@@ -10,6 +10,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const testing = std.testing;
 
+const c = @cImport({
+    @cInclude("unistd.h");
+});
+
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const sync = @import("sync.zig");
@@ -84,7 +88,7 @@ pub fn enableDebugDialog(flag: bool) void {
     g_debug_dialog = flag;
 }
 
-pub fn invokeDebugger() noreturn {
+pub fn invokeDebugger() void {
     g_has_violations = true;
     if (!g_debug_dialog) {
         exception.throwUnreachableException();
@@ -93,8 +97,32 @@ pub fn invokeDebugger() noreturn {
         std.os.windows.kernel32.DebugBreak();
         unreachable;
     }
-    // Interactive debugger prompt is not implemented in the first pass.
-    std.debug.panic("interactive debugger invocation is not implemented in the Zig first pass", .{});
+    // Interactive debugger prompt: read commands from stdin.
+    // Mirrors C++ invoke_debugger in src/runtime/debug.cpp:88.
+    while (true) {
+        const stderr = std.debug.lockStderr(&.{});
+        stderr.file_writer.interface.writeAll("(C)ontinue, (A)bort/exit, (S)top/trap\n") catch {};
+        std.debug.unlockStderr();
+        var buf: [1]u8 = undefined;
+        const n = c.read(c.STDIN_FILENO, &buf, buf.len);
+        if (n <= 0) {
+            // EOF or error: exit
+            std.process.exit(1);
+        }
+        switch (buf[0]) {
+            'C', 'c' => return,
+            'A', 'a' => std.process.exit(1),
+            'S', 's' => {
+                // Force a trap (segfault in C++ version)
+                @trap();
+            },
+            else => {
+                const err = std.debug.lockStderr(&.{});
+                err.file_writer.interface.writeAll("INVALID COMMAND\n") catch {};
+                std.debug.unlockStderr();
+            },
+        }
+    }
 }
 
 fn leanStringCstr(o: *anyopaque) [*:0]const u8 {

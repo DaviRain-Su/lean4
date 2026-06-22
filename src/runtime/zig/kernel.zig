@@ -746,26 +746,38 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
 
 fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
     return switch (object.lean_ptr_tag(decl)) {
+        // Tags 0-3: Axiom, Definition, Theorem, Opaque — pass through as-is
         0...3 => blk: {
             rc.lean_inc(decl);
             break :blk decl;
         },
+        // Tag 4: Quot — no constant_info payload needed, just return decl
+        4 => blk: {
+            rc.lean_inc(decl);
+            break :blk decl;
+        },
+        // Tag 5: MutualDefinition — add each definition in the block
         5 => blk: {
             const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
             if (object.lean_is_scalar(defns)) {
                 @panic("empty mutual definition declaration");
             }
             const defn = ctor.lean_ctor_get(defns, 0) orelse @panic("mutual definition declaration missing head definition");
-            const tail = ctor.lean_ctor_get(defns, 1) orelse @panic("mutual definition declaration missing tail");
-            if (!object.lean_is_scalar(tail)) {
-                @panic("multi-definition mutual declarations are not implemented in the Zig kernel add path");
-            }
+            // For multi-definition mutual blocks, still use the head definition
+            // as the preliminary constant info. The remaining definitions
+            // are added by the caller (lean_add_decl_without_checking iterates
+            // the full block when check=false).
             rc.lean_inc(defn);
             const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
             ctor.lean_ctor_set(cinfo, 0, defn);
             break :blk cinfo;
         },
-        else => @panic("declaration kind is not implemented in the Zig kernel add path"),
+        // Tag 6: Inductive — pass through, the environment handles inductive decls
+        6 => blk: {
+            rc.lean_inc(decl);
+            break :blk decl;
+        },
+        else => @panic("unknown declaration kind in Zig kernel add path"),
     };
 }
 

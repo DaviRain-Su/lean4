@@ -144,6 +144,13 @@ fn getAppNumArgs(e: *anyopaque) usize {
     return n;
 }
 
+/// Check if an expression is `Prop`, i.e. `Sort 0` (Sort with level zero).
+inline fn isPropExpr(e: *anyopaque) bool {
+    if (!ea.isSort(e)) return false;
+    return object.lean_is_scalar(ea.sortLevel(e)) and
+        object.lean_unbox(ea.sortLevel(e)) == 0;
+}
+
 // ── is_nat_lit / is_string_lit ──────────────────────────────────────────────
 
 pub fn isNatLit(e: *anyopaque) bool {
@@ -180,19 +187,24 @@ pub fn natLitToConstructor(e: *anyopaque) *anyopaque {
 // Converts a string literal to String.mk (List.ofList (List.cons Char ...))
 
 pub fn stringLitToConstructor(e: *anyopaque) *anyopaque {
-    // Get the string value
     const lv = ea.litValue(e);
     const str_obj = ctor.lean_ctor_get(lv, 0) orelse @panic("stringLitToConstructor: missing string");
-    // Build list of Char.ofNat (char_code)
     var r = rc.lean_inc_ret(getListNilChar());
-    // For simplicity, we iterate the string bytes in reverse
-    // TODO: proper UTF-8 decode to Unicode codepoints
+    // Decode UTF-8 codepoints and build list of Char.ofNat in reverse
     const str_len = getStringByteLen(str_obj);
-    var i: usize = str_len;
+    var codepoints = std.ArrayListUnmanaged(u32).empty;
+    defer codepoints.deinit(std.heap.page_allocator);
+    {
+        var pos: usize = 0;
+        while (pos < str_len) {
+            const cp = nextUtf8(str_obj, str_len, &pos);
+            codepoints.append(std.heap.page_allocator, cp) catch @panic("stringLitToConstructor: OOM");
+        }
+    }
+    var i: usize = codepoints.items.len;
     while (i > 0) {
         i -= 1;
-        const byte = getStringByte(str_obj, i);
-        const char_nat = object.lean_box(byte).?;
+        const char_nat = object.lean_box(codepoints.items[i]).?;
         const char_lit = lean_expr_mk_lit(char_nat);
         const char_of_nat = getCharOfNat();
         const ch = lean_expr_mk_app(char_of_nat, char_lit);
@@ -200,6 +212,50 @@ pub fn stringLitToConstructor(e: *anyopaque) *anyopaque {
         r = lean_expr_mk_app(lean_expr_mk_app(cons, ch), r);
     }
     return lean_expr_mk_app(getStringMk(), r);
+}
+
+/// Decode a single UTF-8 codepoint starting at `pos`, advancing `pos` past
+/// the consumed bytes.  Mirrors C++ `next_utf8` in src/runtime/utf8.cpp:165.
+fn nextUtf8(str_obj: *anyopaque, str_len: usize, pos: *usize) u32 {
+    const c: u32 = getStringByte(str_obj, pos.*);
+    // 0xxxxxxx (0 to 0x7F)
+    if ((c & 0x80) == 0) {
+        pos.* += 1;
+        return c;
+    }
+    // 110xxxxx 10xxxxxx (0x80 to 0x7FF)
+    if ((c & 0xE0) == 0xC0 and pos.* + 1 < str_len) {
+        const c1: u32 = getStringByte(str_obj, pos.* + 1);
+        const r = ((c & 0x1F) << 6) | (c1 & 0x3F);
+        if (r >= 0x80) {
+            pos.* += 2;
+            return r;
+        }
+    }
+    // 1110xxxx 10xxxxxx 10xxxxxx (0x800 to 0xFFFF, excluding surrogates)
+    if ((c & 0xF0) == 0xE0 and pos.* + 2 < str_len) {
+        const c1: u32 = getStringByte(str_obj, pos.* + 1);
+        const c2: u32 = getStringByte(str_obj, pos.* + 2);
+        const r = ((c & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+        if (r >= 0x800 and (r < 0xD800 or r > 0xDFFF)) {
+            pos.* += 3;
+            return r;
+        }
+    }
+    // 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx (0x10000 to 0x10FFFF)
+    if ((c & 0xF8) == 0xF0 and pos.* + 3 < str_len) {
+        const c1: u32 = getStringByte(str_obj, pos.* + 1);
+        const c2: u32 = getStringByte(str_obj, pos.* + 2);
+        const c3: u32 = getStringByte(str_obj, pos.* + 3);
+        const r = ((c & 0x07) << 18) | ((c1 & 0x3F) << 12) | ((c2 & 0x3F) << 6) | (c3 & 0x3F);
+        if (r >= 0x10000 and r <= 0x10FFFF) {
+            pos.* += 4;
+            return r;
+        }
+    }
+    // Invalid UTF-8: return the raw byte and advance by 1
+    pos.* += 1;
+    return c;
 }
 
 inline fn lean_string_size(s: *anyopaque) usize {
@@ -452,8 +508,19 @@ fn toCnstrWhenK(
         return rc.lean_inc_ret(e);
     }
 
-    // Check for mvar in index args (skip for now)
-    // TODO: has_expr_mvar check
+    // Check for mvar in index args: if app_type has expr metavars,
+    // check each index arg (past the params) and bail if any has metavars.
+    if (ea.hasExprMVar(app_type)) {
+        const args = getAppArgs(app_type, std.heap.page_allocator) catch
+            return rc.lean_inc_ret(e);
+        defer std.heap.page_allocator.free(args);
+        const num_params = ka.recValNumParams(rec_val_ci);
+        var idx: usize = num_params;
+        while (idx < args.len) : (idx += 1) {
+            if (ea.hasExprMVar(args[idx]))
+                return rc.lean_inc_ret(e);
+        }
+    }
 
     const new_cnstr_app = mkNullaryCnstr(env, app_type, ka.recValNumParams(rec_val_ci)) orelse
         return rc.lean_inc_ret(e);
@@ -483,11 +550,11 @@ fn toCnstrWhenStructure(
     if (!ea.isConst(e_type_fn) or lean_name_eq(ea.constName(e_type_fn), induct_name) == 0) {
         return rc.lean_inc_ret(e);
     }
-    // Check if type is Prop (skip if so)
+    // Check if type is Prop: if e_type's type is Prop, skip eta expansion
     const e_type_type = whnf_fn(env, lctx, infer_type_fn(env, lctx, e_type));
-    // TODO: check if e_type_type == Prop
-    // For now, just proceed
-    _ = e_type_type;
+    defer rc.lean_dec(e_type_type);
+    if (isPropExpr(e_type_type))
+        return rc.lean_inc_ret(e);
     return expandEtaStruct(env, e_type, e);
 }
 
