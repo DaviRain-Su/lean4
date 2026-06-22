@@ -1165,6 +1165,14 @@ static inline lean_obj_res lean_alloc_string(size_t size, size_t capacity, size_
 }
 LEAN_EXPORT size_t lean_utf8_strlen(char const * str);
 LEAN_EXPORT size_t lean_utf8_n_strlen(char const * str, size_t n);
+LEAN_EXPORT size_t lean_get_utf8_size(unsigned char c);
+LEAN_EXPORT unsigned lean_utf8_to_unicode(unsigned char const * begin, unsigned char const * end);
+LEAN_EXPORT unsigned lean_next_utf8(char const * str, size_t size, size_t * i);
+LEAN_EXPORT bool lean_validate_utf8_one(uint8_t const * str, size_t size, size_t * pos);
+LEAN_EXPORT bool lean_validate_utf8(uint8_t const * str, size_t size, size_t * pos, size_t * count);
+LEAN_EXPORT unsigned lean_push_unicode_scalar(char * dest, unsigned code);
+LEAN_EXPORT unsigned lean_get_utf8_first_byte_opt(unsigned char c);
+LEAN_EXPORT bool lean_is_utf8_next(unsigned char c);
 static inline size_t lean_string_capacity(lean_object * o) { return lean_to_string(o)->m_capacity; }
 static inline size_t lean_string_byte_size(lean_object * o) { return sizeof(lean_string_object) + lean_string_capacity(o); }
 /* instance : inhabited char := ⟨'A'⟩ */

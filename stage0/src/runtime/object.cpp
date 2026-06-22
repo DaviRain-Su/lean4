@@ -13,7 +13,6 @@ Author: Leonardo de Moura
 #include <lean/lean.h>
 #include "runtime/object.h"
 #include "runtime/thread.h"
-#include "runtime/utf8.h"
 #include "runtime/alloc.h"
 #include "runtime/debug.h"
 #include "runtime/hash.h"
@@ -2003,7 +2002,7 @@ object * lean_mk_string_lossy_recover(char const * s, size_t sz, size_t pos, siz
     std::string str(s, pos);
     size_t start = pos;
     while (pos < sz) {
-        if (!validate_utf8_one((const uint8_t *)s, sz, pos)) {
+        if (!lean_validate_utf8_one((const uint8_t *)s, sz, &pos)) {
             str.append(s + start, pos - start);
             str.append("\ufffd"); // U+FFFD REPLACEMENT CHARACTER
             do pos++; while (pos < sz && (s[pos] & 0xc0) == 0x80);
@@ -2017,7 +2016,7 @@ object * lean_mk_string_lossy_recover(char const * s, size_t sz, size_t pos, siz
 
 extern "C" LEAN_EXPORT object * lean_mk_string_from_bytes(char const * s, size_t sz) {
     size_t pos = 0, i = 0;
-    if (validate_utf8((const uint8_t *)s, sz, pos, i)) {
+    if (lean_validate_utf8((const uint8_t *)s, sz, &pos, &i)) {
         return lean_mk_string_unchecked(s, pos, i);
     } else {
         return lean_mk_string_lossy_recover(s, sz, pos, i);
@@ -2025,7 +2024,7 @@ extern "C" LEAN_EXPORT object * lean_mk_string_from_bytes(char const * s, size_t
 }
 
 extern "C" LEAN_EXPORT object * lean_mk_string_from_bytes_unchecked(char const * s, size_t sz) {
-    return lean_mk_string_unchecked(s, sz, utf8_strlen(s, sz));
+    return lean_mk_string_unchecked(s, sz, lean_utf8_n_strlen(s, sz));
 }
 
 extern "C" LEAN_EXPORT object * lean_mk_string(char const * s) {
@@ -2049,7 +2048,7 @@ extern "C" LEAN_EXPORT obj_res lean_string_from_utf8_unchecked(obj_arg a) {
 
 extern "C" LEAN_EXPORT uint8 lean_string_validate_utf8(b_obj_arg a) {
     size_t pos = 0, i = 0;
-    return validate_utf8(lean_sarray_cptr(a), lean_sarray_size(a), pos, i);
+    return lean_validate_utf8(lean_sarray_cptr(a), lean_sarray_size(a), &pos, &i);
 }
 
 extern "C" LEAN_EXPORT obj_res lean_string_to_utf8(b_obj_arg s) {
@@ -2087,7 +2086,7 @@ extern "C" LEAN_EXPORT object * lean_string_push(object * s, unsigned c) {
     } else {
         r = string_ensure_capacity(s, 5);
     }
-    unsigned consumed = push_unicode_scalar(w_string_cstr(r) + sz - 1, c);
+    unsigned consumed = lean_push_unicode_scalar(w_string_cstr(r) + sz - 1, c);
     lean_to_string(r)->m_size   = sz + consumed;
     lean_to_string(r)->m_length++;
     w_string_cstr(r)[sz + consumed - 1] = 0;
@@ -2153,7 +2152,10 @@ extern "C" LEAN_EXPORT uint8_t lean_string_compare(b_obj_arg s1, b_obj_arg s2) {
 
 static obj_res string_to_list_core(std::string const & s, bool reverse = false) {
     std::vector<unsigned> tmp;
-    utf8_decode(s, tmp);
+    size_t pos = 0;
+    while (pos < s.size()) {
+        tmp.push_back(lean_next_utf8(s.data(), s.size(), &pos));
+    }
     if (reverse)
         std::reverse(tmp.begin(), tmp.end());
     obj_res  r = lean_box_uint32(0);
@@ -2173,7 +2175,9 @@ extern "C" LEAN_EXPORT obj_res lean_string_mk(obj_arg cs) {
     b_obj_arg o = cs;
     size_t len = 0;
     while (!lean_is_scalar(o)) {
-        push_unicode_scalar(s, lean_unbox_uint32(lean_ctor_get(o, 0)));
+        char buf[4];
+        unsigned consumed = lean_push_unicode_scalar(buf, lean_unbox_uint32(lean_ctor_get(o, 0)));
+        s.append(buf, consumed);
         o = lean_ctor_get(o, 1);
         len++;
     }
@@ -2426,11 +2430,8 @@ extern "C" LEAN_EXPORT obj_res lean_string_utf8_prev(b_obj_arg s, b_obj_arg i0) 
 }
 
 static unsigned get_utf8_char_size_at(std::string const & s, usize i) {
-    if (auto sz = get_utf8_first_byte_opt(s[i])) {
-        return *sz;
-    } else {
-        return 1;
-    }
+    unsigned sz = lean_get_utf8_first_byte_opt(s[i]);
+    return sz > 0 ? sz : 1;
 }
 
 extern "C" LEAN_EXPORT obj_res lean_string_utf8_set(obj_arg s, b_obj_arg i0, uint32 c) {
@@ -2452,7 +2453,9 @@ extern "C" LEAN_EXPORT obj_res lean_string_utf8_set(obj_arg s, b_obj_arg i0, uin
     /* TODO(Leo): improve performance of other special cases.
        Example: is_exclusive(s) and new and old characters have the same size; etc. */
     std::string tmp;
-    push_unicode_scalar(tmp, c);
+    char buf[4];
+    unsigned consumed = lean_push_unicode_scalar(buf, c);
+    tmp.append(buf, consumed);
     std::string new_s = string_to_std(s);
     usize len = lean_string_len(s);
     dec(s);

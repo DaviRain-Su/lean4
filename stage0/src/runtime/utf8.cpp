@@ -327,3 +327,36 @@ void push_unicode_scalar(std::string & s, unsigned code) {
     push_unicode_scalar_core(s, code);
 }
 }
+
+extern "C" LEAN_EXPORT size_t lean_get_utf8_size(unsigned char c) {
+    return get_utf8_size(c);
+}
+
+extern "C" LEAN_EXPORT unsigned lean_utf8_to_unicode(unsigned char const * begin, unsigned char const * end) {
+    return utf8_to_unicode(begin, end);
+}
+
+extern "C" LEAN_EXPORT unsigned lean_next_utf8(char const * str, size_t size, size_t * i) {
+    return next_utf8(str, size, *i);
+}
+
+extern "C" LEAN_EXPORT bool lean_validate_utf8_one(uint8_t const * str, size_t size, size_t * pos) {
+    return validate_utf8_one(str, size, *pos);
+}
+
+extern "C" LEAN_EXPORT bool lean_validate_utf8(uint8_t const * str, size_t size, size_t * pos, size_t * count) {
+    return validate_utf8(str, size, *pos, *count);
+}
+
+extern "C" LEAN_EXPORT unsigned lean_push_unicode_scalar(char * dest, unsigned code) {
+    return push_unicode_scalar(dest, code);
+}
+
+extern "C" LEAN_EXPORT unsigned lean_get_utf8_first_byte_opt(unsigned char c) {
+    auto r = get_utf8_first_byte_opt(c);
+    return r ? *r : 0;
+}
+
+extern "C" LEAN_EXPORT bool lean_is_utf8_next(unsigned char c) {
+    return is_utf8_next(c);
+}

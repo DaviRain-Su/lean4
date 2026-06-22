@@ -13,7 +13,6 @@ Author: Leonardo de Moura
 #include "runtime/thread.h"
 #include "runtime/debug.h"
 #include "runtime/sstream.h"
-#include "runtime/utf8.h"
 #include "runtime/hash.h"
 #include "runtime/buffer.h"
 #include "util/name.h"
@@ -49,14 +48,14 @@ bool is_sub_script_alnum_unicode(unsigned u) {
 bool is_id_first(unsigned char const * begin, unsigned char const * end) {
     if (std::isalpha(*begin) || *begin == '_')
         return true;
-    unsigned u = utf8_to_unicode(begin, end);
+    unsigned u = lean_utf8_to_unicode(begin, end);
     return u == id_begin_escape || is_letter_like_unicode(u);
 }
 
 bool is_id_rest(unsigned char const * begin, unsigned char const * end) {
     if (std::isalnum(*begin) || *begin == '_' || *begin == '\'' || *begin == '?' || *begin == '!')
         return true;
-    unsigned u = utf8_to_unicode(begin, end);
+    unsigned u = lean_utf8_to_unicode(begin, end);
     return is_letter_like_unicode(u) || is_sub_script_alnum_unicode(u);
 }
 
@@ -79,7 +78,7 @@ static void display_name_core(std::ostream & out, name const & n, bool escape, c
             // don't escape names produced by server::display_decl
             if (must_escape && str[0] == '?')  // TODO(Kha, Leo): do we need this hack
                 must_escape = false;
-            for (size_t i = get_utf8_size(str[0]); !must_escape && i < sz; i += get_utf8_size(str[i])) {
+            for (size_t i = lean_get_utf8_size(str[0]); !must_escape && i < sz; i += lean_get_utf8_size(str[i])) {
                 if (!is_id_rest(str.data() + i, str.data() + sz))
                     must_escape = true;
             }

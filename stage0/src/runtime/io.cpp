@@ -44,7 +44,6 @@ Authors: Leonardo de Moura, Sebastian Ullrich
 #include "util/io.h"
 #include "runtime/alloc.h"
 #include "runtime/io.h"
-#include "runtime/utf8.h"
 #include "runtime/object.h"
 #include "runtime/thread.h"
 #include "runtime/allocprof.h"

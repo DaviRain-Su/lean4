@@ -169,6 +169,97 @@ pub export fn lean_utf8_n_strlen(str: [*:0]const u8, n: usize) callconv(.c) usiz
     return count;
 }
 
+pub export fn lean_get_utf8_size(c: u8) callconv(.c) usize {
+    return getUtf8Size(c);
+}
+
+pub export fn lean_utf8_to_unicode(begin: [*]const u8, end: [*]const u8) callconv(.c) c_uint {
+    if (begin == end) return 0;
+    var it = begin;
+    var c: u32 = it[0];
+    it += 1;
+    if (c < 0x80) return c;
+    const mask: u32 = (1 << 6) - 1;
+    var hmask: u32 = mask;
+    var shift: u5 = 0;
+    var num_bits: u5 = 0;
+    var result: u32 = 0;
+    while ((c & 0xC0) == 0xC0) {
+        c = (c << 1) & 0xff;
+        num_bits +%= 6;
+        hmask >>= 1;
+        shift +%= 1;
+        result <<= 6;
+        if (it == end) return 0;
+        result |= @as(u32, it[0]) & mask;
+        it += 1;
+    }
+    result |= ((c >> shift) & hmask) << num_bits;
+    return @intCast(result);
+}
+
+pub export fn lean_next_utf8(str: [*]const u8, size: usize, i: *usize) callconv(.c) c_uint {
+    const c: u32 = str[i.*];
+    if ((c & 0x80) == 0) {
+        i.* += 1;
+        return @intCast(c);
+    }
+    if ((c & 0xe0) == 0xc0 and i.* + 1 < size) {
+        const c1: u32 = str[i.* + 1];
+        const r = ((c & 0x1f) << 6) | (c1 & 0x3f);
+        if (r >= 0x80) {
+            i.* += 2;
+            return @intCast(r);
+        }
+    }
+    if ((c & 0xf0) == 0xe0 and i.* + 2 < size) {
+        const c1: u32 = str[i.* + 1];
+        const c2: u32 = str[i.* + 2];
+        const r = ((c & 0x0f) << 12) | ((c1 & 0x3f) << 6) | (c2 & 0x3f);
+        if (r >= 0x800 and (r < 0xD800 or r > 0xDFFF)) {
+            i.* += 3;
+            return @intCast(r);
+        }
+    }
+    if ((c & 0xf8) == 0xf0 and i.* + 3 < size) {
+        const c1: u32 = str[i.* + 1];
+        const c2: u32 = str[i.* + 2];
+        const c3: u32 = str[i.* + 3];
+        const r = ((c & 0x07) << 18) | ((c1 & 0x3f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f);
+        if (r >= 0x10000 and r <= 0x10FFFF) {
+            i.* += 4;
+            return @intCast(r);
+        }
+    }
+    i.* += 1;
+    return @intCast(c);
+}
+
+pub export fn lean_validate_utf8_one(str: [*]const u8, size: usize, pos: *usize) callconv(.c) bool {
+    return validateUtf8One(str, size, pos);
+}
+
+pub export fn lean_validate_utf8(str: [*]const u8, size: usize, pos: *usize, count: *usize) callconv(.c) bool {
+    return validateUtf8(str, size, pos, count);
+}
+
+pub export fn lean_push_unicode_scalar(dest: [*]u8, code: c_uint) callconv(.c) c_uint {
+    return @intCast(pushUnicodeScalar(dest, code));
+}
+
+/// Returns byte count for first UTF-8 byte, or 0 if invalid continuation byte.
+pub export fn lean_get_utf8_first_byte_opt(c: u8) callconv(.c) c_uint {
+    if ((c & 0x80) == 0) return 1;
+    if ((c & 0xe0) == 0xc0) return 2;
+    if ((c & 0xf0) == 0xe0) return 3;
+    if ((c & 0xf8) == 0xf0) return 4;
+    return 0;
+}
+
+pub export fn lean_is_utf8_next(c: u8) callconv(.c) bool {
+    return (c & 0xC0) == 0x80;
+}
+
 test "utf8 strlen counts ASCII and multibyte codepoints" {
     try testing.expectEqual(@as(usize, 12), lean_utf8_strlen("hello, world"));
     try testing.expectEqual(@as(usize, 5), lean_utf8_strlen("héllo"));

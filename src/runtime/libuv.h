@@ -14,7 +14,6 @@ Author: Markus Himmel, Sofia Rodrigues
 #include "runtime/uv/signal.h"
 #include "runtime/alloc.h"
 #include "runtime/io.h"
-#include "runtime/utf8.h"
 #include "runtime/object.h"
 #include "runtime/thread.h"
 #include "runtime/allocprof.h"

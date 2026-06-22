@@ -5,7 +5,6 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Author: Leonardo de Moura
 */
 #include "runtime/sstream.h"
-#include "runtime/utf8.h"
 #include "util/name_generator.h"
 #include "kernel/environment.h"
 #include "kernel/type_checker.h"
@@ -1200,8 +1199,12 @@ expr nat_lit_to_constructor(expr const & e) {
 expr string_lit_to_constructor(expr const & e) {
     lean_assert(is_string_lit(e));
     string_ref const & s = lit_value(e).get_string();
+    std::string str = s.to_std_string();
     std::vector<unsigned> cs;
-    utf8_decode(s.to_std_string(), cs);
+    size_t pos = 0;
+    while (pos < str.size()) {
+        cs.push_back(lean_next_utf8(str.data(), str.size(), &pos));
+    }
     expr r = *g_list_nil_char;
     unsigned i = cs.size();
     while (i > 0) {
