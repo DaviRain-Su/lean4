@@ -1,5 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
+const runtime_options = @import("runtime_options");
 const alloc = @import("alloc.zig");
 const apply = @import("apply.zig");
 const ctor = @import("ctor.zig");
@@ -13,6 +14,8 @@ const task_tls = @import("task_tls.zig");
 const libc_c = @cImport({
     @cInclude("unistd.h");
 });
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
+
 
 fn taskPtr(t: *anyopaque) *lean.lean_task_object {
     return @ptrCast(@alignCast(t));
@@ -72,9 +75,17 @@ fn setTaskHeader(task: *lean.lean_task_object) void {
         .m_tag = lean.LeanTask,
     };
 }
+fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
+
 
 fn allocTaskImp(closure: ?*anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_task_imp {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_task_imp));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_task_imp));
     const imp: *lean.lean_task_imp = @ptrCast(@alignCast(ptr));
     imp.* = .{
         .m_closure = closure,
@@ -89,9 +100,6 @@ fn allocTaskImp(closure: ?*anyopaque, prio: c_uint, keep_alive: bool) *lean.lean
 }
 
 fn freeTaskImp(imp: *lean.lean_task_imp) void {
-    if (imp.m_closure) |closure| {
-        rc.lean_dec(closure);
-    }
     alloc.lean_free_small_object(@ptrCast(imp));
 }
 
@@ -107,7 +115,7 @@ inline fn storeImp(task: anytype, imp: ?*lean.lean_task_imp) void {
 
 fn allocTask(closure: *anyopaque, prio: c_uint, keep_alive: bool) *lean.lean_task_object {
     rc.lean_mark_mt(closure);
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_task_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_task_object));
     const task = taskPtr(ptr);
     alloc.noteTaskObjectAllocation();
     setTaskHeader(task);
@@ -133,22 +141,17 @@ fn freeTask(task: *lean.lean_task_object) void {
 }
 
 fn allocFinishedTask(value: *anyopaque) *lean.lean_task_object {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_task_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_task_object));
     const task = taskPtr(ptr);
     alloc.noteTaskObjectAllocation();
-    task.m_header = .{
-        .m_rc = 1,
-        .m_cs_sz = 0,
-        .m_other = 0,
-        .m_tag = lean.LeanTask,
-    };
+    setStHeader(&task.m_header, lean.LeanTask, 0);
     task.m_value = value;
     storeImp(task, null);
     return task;
 }
 
 fn allocPromiseTask() *lean.lean_task_object {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_task_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_task_object));
     const task = taskPtr(ptr);
     alloc.noteTaskObjectAllocation();
     setTaskHeader(task);
@@ -158,17 +161,10 @@ fn allocPromiseTask() *lean.lean_task_object {
 }
 
 fn allocPromiseObject() *lean.lean_promise_object {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_promise_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_promise_object));
     const promise: *lean.lean_promise_object = @ptrCast(@alignCast(ptr));
-    promise.* = .{
-        .m_header = .{
-            .m_rc = 1,
-            .m_cs_sz = 0,
-            .m_other = 0,
-            .m_tag = lean.LeanPromise,
-        },
-        .m_result = allocPromiseTask(),
-    };
+    setStHeader(&promise.m_header, lean.LeanPromise, 0);
+    promise.m_result = allocPromiseTask();
     return promise;
 }
 
@@ -470,12 +466,7 @@ export fn lean_task_pure(a: *anyopaque) callconv(.c) *anyopaque {
 }
 
 fn taskGetOwn(t: *anyopaque) *anyopaque {
-    const task = taskPtr(t);
-    if (taskValue(task) == null) {
-        const manager = task_manager.runtimeManager() orelse @panic("task manager unavailable");
-        manager.waitForCompletion(task);
-    }
-    const value = taskValue(task) orelse @panic("task_get_own observed unfinished task");
+    const value = lean_task_get(t);
     rc.lean_inc(value);
     rc.lean_dec(t);
     return value;
@@ -645,20 +636,23 @@ pub export fn lean_io_promise_result_opt(promise: *anyopaque) callconv(.c) *anyo
     return @ptrCast(task);
 }
 
-extern fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void;
-extern fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void;
-
-pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+/// Task deactivation. Exported as `lean_deactivate_task` so that the C++
+/// runtime (which has `g_task_manager`) overrides it in `libleanshared`.
+/// In zigrt mode (no C++), this Zig version is used directly.
+pub export fn lean_deactivate_task(task: *lean.lean_task_object) callconv(.c) void {
     if (task_manager.runtimeManager()) |manager| {
-        manager.deactivateTask(task_obj);
+        manager.deactivateTask(task);
         return;
     }
-
-    // No Zig task manager — delegate to C++ which has its own g_task_manager.
-    lean_deactivate_task(task_obj);
+    // No task manager: match C++ deactivate_task — dec the value (if any)
+    // and free the task. freeTask handles null m_value safely.
+    freeTask(task);
 }
 
-pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
+/// Promise deactivation. Exported as `lean_deactivate_promise` so that the
+/// C++ runtime overrides it in `libleanshared`. In zigrt mode this Zig
+/// version is used directly.
+pub export fn lean_deactivate_promise(promise: *anyopaque) callconv(.c) void {
     if (task_manager.runtimeManager() != null) {
         const promise_obj = promisePtr(promise);
         const task = promise_obj.m_result orelse @panic("promise missing backing task");
@@ -667,8 +661,15 @@ pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(
         alloc.lean_free_small_object(promise);
         return;
     }
+    // No task manager: just free the promise object.
+    alloc.lean_free_small_object(promise);
+}
 
-    // No Zig task manager — delegate to C++ which has its own g_task_manager.
+pub export fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void {
+    lean_deactivate_task(task_obj);
+}
+
+pub export fn leanrt_task_deactivate_promise_impl(promise: *anyopaque) callconv(.c) void {
     lean_deactivate_promise(promise);
 }
 
@@ -1088,6 +1089,42 @@ test "lean_task_pure releases its owned value when the task is freed" {
     alloc.resetTestCounters();
     rc.lean_dec(task);
 
+    try testing.expectEqual(@as(usize, 2), alloc.testFreeCount());
+}
+
+test "lean_mark_mt on a finished task also marks the published value" {
+    const value = allocPlainObject();
+    const task = lean_task_pure(value);
+
+    try testing.expectEqual(@as(i32, 1), taskPtr(task).m_header.m_rc);
+    try testing.expectEqual(@as(i32, 1), asLeanObject(value).m_rc);
+
+    rc.lean_mark_mt(task);
+
+    try testing.expectEqual(@as(i32, -1), taskPtr(task).m_header.m_rc);
+    try testing.expectEqual(@as(i32, -1), asLeanObject(value).m_rc);
+
+    alloc.resetTestCounters();
+    rc.lean_dec(task);
+    try testing.expectEqual(@as(usize, 2), alloc.testFreeCount());
+}
+
+test "lean_mark_persistent on a finished task also marks the published value" {
+    const value = allocPlainObject();
+    const task = lean_task_pure(value);
+
+    try testing.expectEqual(@as(i32, 1), taskPtr(task).m_header.m_rc);
+    try testing.expectEqual(@as(i32, 1), asLeanObject(value).m_rc);
+
+    rc.lean_mark_persistent(task);
+
+    try testing.expectEqual(@as(i32, 0), taskPtr(task).m_header.m_rc);
+    try testing.expectEqual(@as(i32, 0), asLeanObject(value).m_rc);
+
+    taskPtr(task).m_header.m_rc = 1;
+    asLeanObject(value).m_rc = 1;
+    alloc.resetTestCounters();
+    rc.lean_dec(task);
     try testing.expectEqual(@as(usize, 2), alloc.testFreeCount());
 }
 

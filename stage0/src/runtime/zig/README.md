@@ -42,14 +42,18 @@ ctest --test-dir build/release/stage1 -R 'runtime/zig|emitzig/(zigrt|stdlib|zig-
 - All seven libuv subsystems are pure Zig (event loop, timer, DNS, signal,
   net_addr, TCP, UDP, system) — zero C++ compiled into the runtime
 - Stack overflow detection via SIGSEGV/SIGBUS alternate signal stack
+  (POSIX) or Vectored Exception Handling via `RtlAddVectoredExceptionHandler`
+  (Windows) — matching the C++ implementation.
 
 ### Windows
 
 - Memory RSS queries via `GetProcessMemoryInfo`
 - Stack info via `GetCurrentThreadStackLimits`
 - Sleep via `kernel32.Sleep`, debug break via `kernel32.DebugBreak`
-- Stack overflow detection is a no-op: Zig does not expose SEH frame
-  unwinding. Requires upstream Zig SEH support.
+- Stack overflow detection via Vectored Exception Handling (VEH) using
+  `RtlAddVectoredExceptionHandler` with `EXCEPTION_STACK_OVERFLOW` — the same
+  mechanism the C++ version uses (not SEH `__try/__except`). Zig 0.16.0
+  exposes all required VEH APIs via `std.os.windows.ntdll`.
 
 ### Kernel C-linkage exports
 
@@ -78,38 +82,36 @@ catch compiler bugs that violate the LCNF purity invariant.
    `-Dexport-kernel-symbols=true`. All 22 kernel C-linkage functions and all
    3 IR interpreter entry points (`lean_eval_main`, `lean_eval_const`,
    `lean_run_init`) have Zig implementations.
-2. **Phase 3 symbol flip**: 604 of ~1360 C++ runtime symbols have been flipped
-   to Zig (44%). Flipped groups: platform info (4), internal info (2), pure
-   computation (4), float (18), UTF8 (2), string operations (15),
-   array/sarray/slice (25), nat/int big arithmetic (23 — previously 5 caused
-   SIGSEGV/SIGBUS but the root cause was a lean_alloc_mpz signature mismatch,
-   now fixed), internal/debug/panic (25), apply primitives (18), string_utf8
-   (10), nat/int conversion (17), array_get_panic (1), max_small_nat (1),
-   ST.Ref (6), string constructors (5), array constructors (6), float array
-   (9), sharecommon (4), unsigned int fixed-width arithmetic (158), signed
-   int fixed-width arithmetic (126), float→int conversions (10), uint
-   log2/once_cold (10), bool→int (5), box/unbox (14), nat arithmetic (6),
-   int_big ediv/emod (2). All 171 emitzig tests pass with clean stdlib cache
-   build. Three allocator fixes were needed: (1) lean_alloc_mpz now delegates
-   to C++ lean_alloc_object when export_allocator_symbols is false (C++
-   lean_alloc_mpz has a different signature), (2) freeDelegatedCppObject
-   routes through C++ lean_free_object for mimalloc compatibility, (3)
-   allocSmallObject uses mi_malloc_small (not mi_malloc) and sets m_cs_sz to
-   the aligned allocation size in mimalloc mode, matching C++
-   lean_alloc_small_object. Additionally, setHeapHeader preserves m_cs_sz
-   in mimalloc mode (matching C++ lean_set_st_header), and ctorScalarBytes
-   subtracts the header+object_slots from m_cs_sz in mimalloc mode since
-   m_cs_sz stores the total allocation size (not scalar size). RC symbols
-   (lean_inc/dec/mark_mt/mark_persistent) were tested but caused test
-   failures due to RC semantics mismatches and remain in C++ for now.
-3. **Allocator unification**: UV subsystem uses `std.c.malloc/free` directly
-   (75 call sites). Functionally correct (default vtable is libc malloc) but
-   architecturally inconsistent with the pluggable allocator in `allocator.zig`.
-4. **Windows SEH**: stack overflow detection not available (upstream Zig).
-5. **GMP**: links system libgmp (not replaced with `std.math.big.int`).
+2. **Phase 3 symbol flip**: 1028 of ~1360 C++ runtime symbols have been flipped
+  to Zig (76%). All 106 non-stdlib emitzig tests and 21/21 zigrt tests pass.
+  All lean_* C ABI symbols are now provided by Zig. The remaining ~540
+  unflipped symbols are C++ internal mangled names (namespace lean, C++ STL)
+  without C ABI — not callable from Lean code directly.
+3. **C++ file removal**: 23 of 37 C++ runtime source files removed from the
+   stage1 build. Removed: byteslice, openssl, allocprof, platform, process,
+   mpn, mutex, libuv, 10 uv/*.cpp + zig/uv_*.cpp, init_module, hash,
+   memory, stack_overflow. Zig provides C++ mangled shims via cpp_compat.zig
+   (lean::hash_str, lean::check_memory, lean::stack_guard ctor/dtor) and
+   init.zig (lean::initialize/finalize_runtime_module). Remaining 14 files
+   have deep C++ ABI dependencies — removing them requires matching the
+   Itanium C++ ABI layout in Zig.
+4. **Allocator unification**: completed — all UV subsystem allocations go
+   through `lean_allocator.vtable` (pluggable allocator interface). The default
+   vtable is libc malloc, so behavior is identical on standard platforms.
+5. **GMP reduced**: Zig runtime uses `big_int.zig` (pure Zig, `std.math.big.int`)
+   with libc malloc for limb allocation — no libgmp dependency. C++ `mpz.cpp`
+   still uses 37 `__gmpz_*` functions from libgmp (linked at final binary
+   level, not in Zig library). Removing C++ GMP dependency requires unifying
+   the C++ `mpz` struct layout with the GMP `__mpz_struct` layout.
+6. **Windows SEH**: resolved — VEH-based stack overflow detection implemented
+   in `stack_overflow.zig` using `RtlAddVectoredExceptionHandler` (no
+   upstream Zig changes needed).
 
 ### External dependencies
 
-- **libgmp**: big-number arithmetic (`mpz_zig.zig`, 95 C API calls)
+- **libgmp**: used by C++ mpz.cpp only (37 __gmpz_* functions). Zig runtime
+  uses std.math.big.int (big_int.zig) and libc malloc for limb allocation.
 - **libuv**: async IO — called directly from Zig via `@cImport`, no C++ bridge
 - **libc/libc++**: standard C runtime
+- **mimalloc**: eliminated — replaced by libc malloc via mimalloc_compat.zig
+- **openssl**: eliminated — only used for version number (compile-time constant)

@@ -1,8 +1,11 @@
 const std = @import("std");
 const testing = std.testing;
+const runtime_options = @import("runtime_options");
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
 
 fn taggedScalarLimit() u64 {
     return @as(u64, std.math.maxInt(usize) >> 1);
@@ -26,7 +29,9 @@ fn maybeFree(o: ?*anyopaque) void {
 
 fn allocBoxedScalar(comptime T: type, value: T) *anyopaque {
     const ptr = alloc.lean_alloc_ctor(0, 0, @intCast(@sizeOf(T)));
-    header(ptr).m_cs_sz = @intCast(@sizeOf(T));
+    if (export_allocator_symbols) {
+        header(ptr).m_cs_sz = @intCast(@sizeOf(T));
+    }
     scalarFieldPtr(T, ptr).* = value;
     return ptr;
 }
@@ -79,7 +84,10 @@ pub export fn lean_unbox_uint32(o: ?*anyopaque) callconv(.c) u32 {
 }
 
 pub export fn lean_box_uint64(v: u64) callconv(.c) ?*anyopaque {
-    return boxTaggedIfPossible(v) orelse allocBoxedScalar(u64, v);
+    // C++ lean_box_uint64 (lean.h:2834) always allocates a heap ctor
+    // (tag 0, 0 obj fields, 8 scalar bytes). It never uses a tagged
+    // scalar. Compiled Lean code relies on getting a heap object.
+    return allocBoxedScalar(u64, v);
 }
 
 pub export fn lean_unbox_uint64(o: ?*anyopaque) callconv(.c) u64 {
@@ -90,7 +98,8 @@ pub export fn lean_unbox_uint64(o: ?*anyopaque) callconv(.c) u64 {
 }
 
 pub export fn lean_box_usize(v: usize) callconv(.c) ?*anyopaque {
-    return boxTaggedIfPossible(v) orelse allocBoxedScalar(usize, v);
+    // C++ lean_box_usize (lean.h:2844) always allocates a heap ctor.
+    return allocBoxedScalar(usize, v);
 }
 
 pub export fn lean_unbox_usize(o: ?*anyopaque) callconv(.c) usize {

@@ -44,3 +44,9 @@ tests/emitzig/*
 .zig-cache
 .zig-global-cache
 build/
+zig-out/
+tmp
+zig-out-helperless
+zig-out-helperless-test
+zig-out-test
+.pi

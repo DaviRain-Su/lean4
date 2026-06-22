@@ -10,6 +10,8 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const runtime_options = @import("runtime_options");
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
+extern fn l_Lean_Name_hash___override(n: *anyopaque) callconv(.c) u64;
+
 
 fn header(o: *anyopaque) *lean.lean_object {
     return @ptrCast(@alignCast(o));
@@ -32,6 +34,29 @@ fn asCtor(o: *anyopaque) *lean.lean_ctor_object {
 fn ctorSlots(o: *anyopaque) [*]?*anyopaque {
     return @ptrCast(&asCtor(o).m_objs);
 }
+fn isAnonymousNameLike(o: ?*anyopaque) bool {
+    return o != null and object.lean_is_scalar(o) and object.lean_unbox(o.?) == 0;
+}
+
+fn isNatLike(o: ?*anyopaque) bool {
+    if (o == null) return false;
+    if (object.lean_is_scalar(o)) return true;
+    return object.lean_ptr_tag(o.?) == lean.LeanMPZ;
+}
+
+fn isPlainNameLike(o: ?*anyopaque) bool {
+    if (isAnonymousNameLike(o)) return true;
+    if (o == null or object.lean_is_scalar(o)) return false;
+    const name = o.?;
+    if (ctorNumObjs(name) != 2) return false;
+    const slots = ctorSlots(name);
+    return switch (header(name).m_tag) {
+        1 => isPlainNameLike(slots[0]) and slots[1] != null and !object.lean_is_scalar(slots[1].?) and object.lean_ptr_tag(slots[1].?) == lean.LeanString,
+        2 => isPlainNameLike(slots[0]) and isNatLike(slots[1]),
+        else => false,
+    };
+}
+
 
 pub fn ctorNumObjs(o: *anyopaque) usize {
     return header(o).m_other;
@@ -41,7 +66,7 @@ fn ctorObjectBytes(o: *anyopaque) usize {
     return ctorNumObjs(o) * @sizeOf(?*anyopaque);
 }
 
-fn ctorScalarBytes(o: *anyopaque) usize {
+pub fn ctorScalarBytes(o: *anyopaque) usize {
     const hdr = header(o);
     const object_bytes = ctorObjectBytes(o);
     const scalar_start = @sizeOf(lean.lean_ctor_object) + object_bytes;

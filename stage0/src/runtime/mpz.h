@@ -6,10 +6,18 @@ Author: Leonardo de Moura
 */
 #pragma once
 #include <cstddef>
+#include <cstdint>
 #ifdef LEAN_USE_GMP
 #include <gmp.h>
 #else
-#include "runtime/mpn.h"
+// Match GMP's __mpz_struct layout for ABI compatibility
+typedef uint64_t mp_limb_t;
+typedef struct {
+    int _mp_alloc;
+    int _mp_size;  // negative = negative number
+    mp_limb_t *_mp_d;
+} __mpz_struct;
+typedef __mpz_struct mpz_t[1];
 #endif
 #include <string>
 #include <iostream>
@@ -24,32 +32,11 @@ namespace lean {
 class LEAN_EXPORT mpz {
     friend class object_compactor;
     friend class region_reader;
-#ifdef LEAN_USE_GMP
     mpz_t m_val;
-    mpz(__mpz_struct const * v) { mpz_init_set(m_val, v); }
-#else
-    bool        m_sign;
-    size_t      m_size;
-    mpn_digit * m_digits;
-    void allocate(size_t s);
-    void init();
-    void init_str(char const * v);
-    void init_uint(unsigned int v);
-    void init_int(int v);
-    void init_uint64(uint64 v);
-    void init_int64(int64 v);
-    void init_mpz(mpz const & v);
-    void set(size_t sz, mpn_digit const * digits);
-    mpz & add(bool sign, size_t sz, mpn_digit const * digits);
-    mpz & mul(bool sign, size_t sz, mpn_digit const * digits);
-    mpz & div(bool sign, size_t sz, mpn_digit const * digits);
-    mpz & rem(size_t sz, mpn_digit const * digits);
-#endif
+    mpz(__mpz_struct const * v);
 public:
     mpz();
-#ifdef LEAN_USE_GMP
     explicit mpz(mpz_t v);
-#endif
     explicit mpz(char const * v);
     explicit mpz(unsigned int v);
     explicit mpz(int v);
@@ -65,18 +52,12 @@ public:
     mpz(mpz && s) noexcept;
     ~mpz();
 
-#ifdef LEAN_USE_GMP
     void set(mpz_t r) const;
-#endif
 
     friend void swap(mpz & a, mpz & b) noexcept;
 
     unsigned hash() const {
-#ifdef LEAN_USE_GMP
-        return static_cast<unsigned>(mpz_get_si(m_val));
-#else
-        return m_digits[0];
-#endif
+        return m_val[0]._mp_size == 0 ? 0 : static_cast<unsigned>(m_val[0]._mp_d[0]);
     }
 
     int sgn() const;
@@ -84,27 +65,15 @@ public:
     friend int sgn(mpz const & a) { return a.sgn(); }
 
     bool is_pos() const {
-#ifdef LEAN_USE_GMP
-        return sgn() > 0;
-#else
-        return !m_sign && (m_size > 1 || m_digits[0] != 0);
-#endif
+        return m_val[0]._mp_size > 0;
     }
 
     bool is_neg() const {
-#ifdef LEAN_USE_GMP
-        return sgn() < 0;
-#else
-        return m_sign;
-#endif
+        return m_val[0]._mp_size < 0;
     }
 
     bool is_zero() const {
-#ifdef LEAN_USE_GMP
-        return sgn() == 0;
-#else
-        return m_size == 1 && m_digits[0] == 0;
-#endif
+        return m_val[0]._mp_size == 0;
     }
 
     bool is_nonpos() const { return !is_pos(); }
@@ -112,22 +81,14 @@ public:
     bool is_nonneg() const { return !is_neg(); }
 
     void neg() {
-#ifdef LEAN_USE_GMP
-        mpz_neg(m_val, m_val);
-#else
-        if (!is_zero())
-            m_sign = !m_sign;
-#endif
+        if (m_val[0]._mp_size != 0) m_val[0]._mp_size = -m_val[0]._mp_size;
     }
 
     friend mpz neg(mpz a) { a.neg(); return a; }
 
     void abs() {
-#ifdef LEAN_USE_GMP
-        mpz_abs(m_val, m_val);
-#else
-        m_sign = false;
-#endif
+        if (m_val[0]._mp_size < 0)
+            m_val[0]._mp_size = -m_val[0]._mp_size;
     }
 
     friend mpz abs(mpz a) { a.abs(); return a; }
@@ -295,6 +256,13 @@ public:
 
     std::string to_string() const;
 };
+
+#ifndef LEAN_USE_GMP
+inline size_t mpz_size(__mpz_struct const * m) {
+    int s = m->_mp_size;
+    return s < 0 ? -s : s;
+}
+#endif
 
 struct mpz_cmp_fn {
     int operator()(mpz const & v1, mpz const & v2) const { return cmp(v1, v2); }

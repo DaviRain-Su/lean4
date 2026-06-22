@@ -225,6 +225,7 @@ pub const TaskManager = struct {
     m_mutex: sync.Mutex = .{},
     m_condvar: sync.Condvar = .{},
     m_dedicated_finished_cv: sync.Condvar = .{},
+    m_task_finished_cv: sync.Condvar = .{},
     /// Standard workers are created lazily. This array stays empty until the
     /// first non-`LEAN_SYNC_PRIO` task in the `0..LEAN_MAX_PRIO` range arrives.
     m_workers: std.ArrayList(std.Thread) = .empty,
@@ -281,6 +282,7 @@ pub const TaskManager = struct {
         }
         self.m_dedicated_finished_cv.deinit();
         self.m_condvar.deinit();
+        self.m_task_finished_cv.deinit();
         self.m_mutex.deinit();
         self.allocator.destroy(self);
         return summary;
@@ -391,7 +393,7 @@ pub const TaskManager = struct {
         defer self.m_mutex.unlock();
 
         while (@atomicLoad(?*anyopaque, &task.m_value, .seq_cst) == null) {
-            self.m_condvar.wait(&self.m_mutex);
+            self.m_task_finished_cv.wait(&self.m_mutex);
         }
     }
 
@@ -407,7 +409,7 @@ pub const TaskManager = struct {
             if (waitAnyCheck(task_list)) |winner| {
                 return winner;
             }
-            self.m_condvar.wait(&self.m_mutex);
+            self.m_task_finished_cv.wait(&self.m_mutex);
         }
     }
 
@@ -444,7 +446,7 @@ pub const TaskManager = struct {
         }
 
         while (@atomicLoad(?*anyopaque, &task.m_value, .seq_cst) == null) {
-            self.m_condvar.wait(&self.m_mutex);
+            self.m_task_finished_cv.wait(&self.m_mutex);
         }
 
         if (in_pool) {
@@ -573,6 +575,7 @@ pub const TaskManager = struct {
         self.m_mutex.lock();
         self.m_shutting_down = true;
         self.m_condvar.broadcast();
+        self.m_task_finished_cv.broadcast();
         self.m_mutex.unlock();
     }
 
@@ -669,6 +672,7 @@ pub const TaskManager = struct {
             task.m_imp = null;
             @atomicStore(?*anyopaque, &task.m_value, object.lean_box(@intFromEnum(kind) + 1), .seq_cst);
             self.m_condvar.broadcast();
+            self.m_task_finished_cv.broadcast();
             return;
         }
 
@@ -722,6 +726,7 @@ pub const TaskManager = struct {
         self.handleFinishedLocked(imp);
         alloc.lean_free_small_object(@ptrCast(imp));
         self.m_condvar.broadcast();
+        self.m_task_finished_cv.broadcast();
     }
 
     fn handleFinishedLocked(self: *TaskManager, imp: *lean.lean_task_imp) void {

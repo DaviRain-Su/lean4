@@ -11,9 +11,12 @@ const runtime_options = @import("runtime_options");
 
 var g_exit_on_panic = false;
 var g_panic_messages = true;
-var g_stdout: ?*anyopaque = null;
-var g_stderr: ?*anyopaque = null;
-var g_stdin: ?*anyopaque = null;
+var g_default_stdout: ?*anyopaque = null;
+var g_default_stderr: ?*anyopaque = null;
+var g_default_stdin: ?*anyopaque = null;
+threadlocal var g_stdout: ?*anyopaque = null;
+threadlocal var g_stderr: ?*anyopaque = null;
+threadlocal var g_stdin: ?*anyopaque = null;
 
 fn writeStderr(bytes: []const u8) void {
     std.debug.print("{s}", .{bytes});
@@ -373,12 +376,27 @@ comptime {
         @export(&l_Float_ofScientific, .{ .name = "l_Float_ofScientific" });
     }
 }
+fn installDefaultStreams() void {
+    if (g_default_stdout == null) {
+        g_default_stdout = makeOutputStream(stdoutPutStr, stdoutWrite);
+        rc.lean_mark_persistent(g_default_stdout.?);
+    }
+    if (g_default_stderr == null) {
+        g_default_stderr = makeOutputStream(stderrPutStr, stderrWrite);
+        rc.lean_mark_persistent(g_default_stderr.?);
+    }
+    if (g_default_stdin == null) {
+        g_default_stdin = makeInputStream();
+        rc.lean_mark_persistent(g_default_stdin.?);
+    }
+}
 
 fn initialize_Init(builtin: u8) callconv(.c) *anyopaque {
     _ = builtin;
-    if (g_stdout == null) g_stdout = makeOutputStream(stdoutPutStr, stdoutWrite);
-    if (g_stderr == null) g_stderr = makeOutputStream(stderrPutStr, stderrWrite);
-    if (g_stdin == null) g_stdin = makeInputStream();
+    installDefaultStreams();
+    if (g_stdout == null) g_stdout = g_default_stdout.?;
+    if (g_stderr == null) g_stderr = g_default_stderr.?;
+    if (g_stdin == null) g_stdin = g_default_stdin.?;
     return io_result.lean_io_result_mk_ok(object.lean_box(0).?);
 }
 comptime {
@@ -388,7 +406,8 @@ comptime {
 }
 
 fn getStreamOrInit(current: *?*anyopaque, make: *const fn () callconv(.c) *anyopaque) *anyopaque {
-    const s = current.* orelse make();
+    if (current.* == null) current.* = make();
+    const s = current.*.?;
     rc.lean_inc_ref(s);
     return s;
 }
@@ -396,7 +415,8 @@ fn getStreamOrInit(current: *?*anyopaque, make: *const fn () callconv(.c) *anyop
 export fn lean_get_stdout() callconv(.c) *anyopaque {
     return getStreamOrInit(&g_stdout, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeOutputStream(stdoutPutStr, stdoutWrite);
+            installDefaultStreams();
+            return g_default_stdout.?;
         }
     }.make);
 }
@@ -404,7 +424,8 @@ export fn lean_get_stdout() callconv(.c) *anyopaque {
 export fn lean_get_stderr() callconv(.c) *anyopaque {
     return getStreamOrInit(&g_stderr, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeOutputStream(stderrPutStr, stderrWrite);
+            installDefaultStreams();
+            return g_default_stderr.?;
         }
     }.make);
 }
@@ -412,13 +433,15 @@ export fn lean_get_stderr() callconv(.c) *anyopaque {
 export fn lean_get_stdin() callconv(.c) *anyopaque {
     return getStreamOrInit(&g_stdin, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeInputStream();
+            installDefaultStreams();
+            return g_default_stdin.?;
         }
     }.make);
 }
 
 fn setStream(current: *?*anyopaque, h: *anyopaque, fallback: *const fn () callconv(.c) *anyopaque) *anyopaque {
-    const old = current.* orelse fallback();
+    if (current.* == null) current.* = fallback();
+    const old = current.*.?;
     current.* = h;
     rc.lean_inc_ref(h);
     return old;
@@ -427,7 +450,8 @@ fn setStream(current: *?*anyopaque, h: *anyopaque, fallback: *const fn () callco
 export fn lean_get_set_stdout(h: *anyopaque) callconv(.c) *anyopaque {
     return setStream(&g_stdout, h, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeOutputStream(stdoutPutStr, stdoutWrite);
+            installDefaultStreams();
+            return g_default_stdout.?;
         }
     }.make);
 }
@@ -435,7 +459,8 @@ export fn lean_get_set_stdout(h: *anyopaque) callconv(.c) *anyopaque {
 export fn lean_get_set_stderr(h: *anyopaque) callconv(.c) *anyopaque {
     return setStream(&g_stderr, h, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeOutputStream(stderrPutStr, stderrWrite);
+            installDefaultStreams();
+            return g_default_stderr.?;
         }
     }.make);
 }
@@ -443,7 +468,8 @@ export fn lean_get_set_stderr(h: *anyopaque) callconv(.c) *anyopaque {
 export fn lean_get_set_stdin(h: *anyopaque) callconv(.c) *anyopaque {
     return setStream(&g_stdin, h, struct {
         fn make() callconv(.c) *anyopaque {
-            return makeInputStream();
+            installDefaultStreams();
+            return g_default_stdin.?;
         }
     }.make);
 }
@@ -460,6 +486,15 @@ test "initialize_Init creates stdout, stderr, and stdin streams" {
     try std.testing.expect(g_stdout != null);
     try std.testing.expect(g_stderr != null);
     try std.testing.expect(g_stdin != null);
+}
+test "lean_get_stdout lazily installs the thread-local default stream" {
+    g_stdout = null;
+    const first = lean_get_stdout();
+    defer rc.lean_dec_ref(first);
+    try std.testing.expectEqual(first, g_stdout.?);
+    const second = lean_get_stdout();
+    defer rc.lean_dec_ref(second);
+    try std.testing.expectEqual(first, second);
 }
 test "lean_get_set_stdout swaps the current stream and returns the previous one" {
     g_stdout = null;

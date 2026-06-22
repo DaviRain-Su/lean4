@@ -40,11 +40,20 @@ pub fn onceCold(comptime T: type, loc: *T, tok: *lean_once_cell_t, init: *const 
 }
 
 export fn lean_obj_once_cold(loc: *?*anyopaque, tok: *lean_once_cell_t, init: *const fn () callconv(.c) ?*anyopaque) callconv(.c) ?*anyopaque {
-    const value = onceCold(?*anyopaque, loc, tok, init);
-    if (value) |ptr| {
-        rc.lean_mark_persistent(ptr);
+    lockOnce(tok);
+    defer unlockOnce(tok);
+
+    if (tok.state.load(.acquire) != 1) {
+        loc.* = init();
+        // Mark persistent BEFORE publishing state=1, matching C++ object.cpp:2901-2909.
+        // Publishing state=1 before marking allows other threads to observe an
+        // incompletely marked object graph, causing heap corruption.
+        if (loc.*) |ptr| {
+            rc.lean_mark_persistent(ptr);
+        }
+        tok.state.store(1, .release);
     }
-    return value;
+    return loc.*;
 }
 
 export fn lean_uint8_once_cold(loc: *u8, tok: *lean_once_cell_t, init: *const fn () callconv(.c) u8) callconv(.c) u8 {

@@ -16,7 +16,11 @@ Released under Apache 2.0 license as described in the file LICENSE.
 namespace lean {
 
 #if defined(__GNUC__) || defined(__clang__)
+#ifndef LEAN_NO_WEAK_UV
 #define LEAN_UV_WEAK_ATTR __attribute__((weak))
+#else
+#define LEAN_UV_WEAK_ATTR
+#endif
 #else
 #define LEAN_UV_WEAK_ATTR
 #endif

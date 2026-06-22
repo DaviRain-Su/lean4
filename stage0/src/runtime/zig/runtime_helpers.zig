@@ -21,9 +21,7 @@ extern fn lean_name_mk_string(p: *anyopaque, s: *anyopaque) callconv(.c) *anyopa
 /// Lean String object.
 pub export fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) callconv(.c) *anyopaque {
     const str_obj = string.lean_mk_string(s);
-    const result = lean_name_mk_string(pre, str_obj);
-    rc.lean_dec(str_obj);
-    return result;
+    return lean_name_mk_string(pre, str_obj);
 }
 
 /// Get the byte length of a Lean string (excluding null terminator).
@@ -113,17 +111,20 @@ fn findLevelReplacement(param_name: *anyopaque, lparams: *anyopaque, ls: *anyopa
 /// Recursively replace level params in a level with the corresponding levels from ls.
 fn instantiateLevel(l: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque {
     switch (levelKind(l)) {
-        .Zero, .MVar => return l,
+        .Zero, .MVar => return rc.lean_inc_ret(l),
         .Param => {
             if (findLevelReplacement(levelId(l), lparams, ls)) |replacement| {
-                return replacement;
+                return rc.lean_inc_ret(replacement);
             }
-            return l;
+            return rc.lean_inc_ret(l);
         },
         .Succ => {
             const arg = levelSuccOf(l);
             const new_arg = instantiateLevel(arg, lparams, ls);
-            if (new_arg == arg) return l;
+            if (new_arg == arg) {
+                rc.lean_dec(new_arg);
+                return rc.lean_inc_ret(l);
+            }
             return lean_level_mk_succ(new_arg);
         },
         .Max => {
@@ -131,7 +132,11 @@ fn instantiateLevel(l: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaq
             const rhs = levelRhs(l);
             const new_lhs = instantiateLevel(lhs, lparams, ls);
             const new_rhs = instantiateLevel(rhs, lparams, ls);
-            if (new_lhs == lhs and new_rhs == rhs) return l;
+            if (new_lhs == lhs and new_rhs == rhs) {
+                rc.lean_dec(new_lhs);
+                rc.lean_dec(new_rhs);
+                return rc.lean_inc_ret(l);
+            }
             return lean_level_mk_max(new_lhs, new_rhs);
         },
         .IMax => {
@@ -139,7 +144,11 @@ fn instantiateLevel(l: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaq
             const rhs = levelRhs(l);
             const new_lhs = instantiateLevel(lhs, lparams, ls);
             const new_rhs = instantiateLevel(rhs, lparams, ls);
-            if (new_lhs == lhs and new_rhs == rhs) return l;
+            if (new_lhs == lhs and new_rhs == rhs) {
+                rc.lean_dec(new_lhs);
+                rc.lean_dec(new_rhs);
+                return rc.lean_inc_ret(l);
+            }
             return lean_level_mk_imax(new_lhs, new_rhs);
         },
     }
@@ -147,19 +156,23 @@ fn instantiateLevel(l: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaq
 
 /// Map instantiateLevel over a List Level (const_levels).
 fn mapLevels(levels: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque {
-    if (object.lean_is_scalar(levels)) return levels; // nil
+    if (object.lean_is_scalar(levels)) return rc.lean_inc_ret(levels); // nil
     const head = ctor.lean_ctor_get(levels, 0) orelse @panic("mapLevels: head");
     const tail = ctor.lean_ctor_get(levels, 1) orelse object.lean_box(0).?;
     const new_head = instantiateLevel(head, lparams, ls);
     const new_tail = mapLevels(tail, lparams, ls);
-    if (new_head == head and new_tail == tail) return levels;
+    if (new_head == head and new_tail == tail) {
+        rc.lean_dec(new_head);
+        rc.lean_dec(new_tail);
+        return rc.lean_inc_ret(levels);
+    }
     return lean_list_cons(new_head, new_tail);
 }
 
 /// Recursively replace level params in an expression's const/sort nodes.
 /// Mirrors C++ instantiate_lparams: only const and sort nodes carry levels.
 pub fn instantiateLparamsExpr(e: *anyopaque, lparams: *anyopaque, ls: *anyopaque) *anyopaque {
-    if (!ea.hasLevelParam(e)) return e;
+    if (!ea.hasLevelParam(e)) return rc.lean_inc_ret(e);
     switch (ea.kind(e)) {
         .Const => {
             const levels = ea.constLevels(e);
@@ -204,7 +217,7 @@ pub fn instantiateLparamsExpr(e: *anyopaque, lparams: *anyopaque, ls: *anyopaque
             const new_inner = instantiateLparamsExpr(inner, lparams, ls);
             return ea.updateProj(e, new_inner);
         },
-        .BVar, .FVar, .MVar, .Lit => return e,
+        .BVar, .FVar, .MVar, .Lit => return rc.lean_inc_ret(e),
     }
 }
 

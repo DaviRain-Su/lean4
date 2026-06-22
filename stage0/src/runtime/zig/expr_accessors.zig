@@ -20,6 +20,12 @@
 const std = @import("std");
 const object = @import("object.zig");
 const ctor = @import("ctor.zig");
+const rc = @import("rc.zig");
+
+inline fn retain(e: *anyopaque) *anyopaque {
+    rc.lean_inc(e);
+    return e;
+}
 
 pub const ExprKind = enum(u8) {
     BVar = 0,
@@ -137,8 +143,8 @@ pub inline fn bindingDomain(e: *anyopaque) *anyopaque {
 pub inline fn bindingBody(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 2) orelse @panic("binding_body on malformed expr");
 }
-pub inline fn bindingInfo(e: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(e, 3) orelse @panic("binding_info on malformed expr");
+pub inline fn bindingInfo(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(3 * @sizeOf(*anyopaque) + @sizeOf(u64)));
 }
 
 // Let: field 0 = name, field 1 = type, field 2 = value, field 3 = body,
@@ -152,6 +158,10 @@ pub inline fn letValue(e: *anyopaque) *anyopaque {
 pub inline fn letBody(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 3) orelse @panic("let_body on malformed expr");
 }
+pub inline fn letNonDep(e: *anyopaque) u8 {
+    return ctor.lean_ctor_get_uint8(e, @intCast(4 * @sizeOf(*anyopaque) + @sizeOf(u64)));
+}
+
 
 // ── Metadata accessors (from packed data field) ─────────────────────────────
 
@@ -198,9 +208,9 @@ pub fn getAppNumArgs(e: *anyopaque) usize {
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_lambda(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_forall(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_lambda(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_forall(n: *anyopaque, t: *anyopaque, e: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 
@@ -213,25 +223,40 @@ pub fn updateApp(e: *anyopaque, new_fn: *anyopaque, new_arg: *anyopaque) *anyopa
     const old_fn = appFn(e);
     const old_arg = appArg(e);
     if (old_fn == new_fn and old_arg == new_arg) {
-        return e;
+        rc.lean_dec(new_fn);
+        rc.lean_dec(new_arg);
+        return retain(e);
     }
     return lean_expr_mk_app(new_fn, new_arg);
 }
 
 pub fn updateSort(e: *anyopaque, new_level: *anyopaque) *anyopaque {
-    if (sortLevel(e) == new_level) return e;
+    if (sortLevel(e) == new_level) {
+        rc.lean_dec(new_level);
+        return retain(e);
+    }
     return lean_expr_mk_sort(new_level);
 }
 
 pub fn updateConst(e: *anyopaque, new_levels: *anyopaque) *anyopaque {
-    if (constLevels(e) == new_levels) return e;
-    return lean_expr_mk_const(constName(e), new_levels);
+    if (constLevels(e) == new_levels) {
+        rc.lean_dec(new_levels);
+        return retain(e);
+    }
+    const name = constName(e);
+    rc.lean_inc(name);
+    return lean_expr_mk_const(name, new_levels);
 }
 
 pub fn updateBinding(e: *anyopaque, new_domain: *anyopaque, new_body: *anyopaque) *anyopaque {
-    if (bindingDomain(e) == new_domain and bindingBody(e) == new_body) return e;
+    if (bindingDomain(e) == new_domain and bindingBody(e) == new_body) {
+        rc.lean_dec(new_domain);
+        rc.lean_dec(new_body);
+        return retain(e);
+    }
     const name = bindingName(e);
     const bi = bindingInfo(e);
+    rc.lean_inc(name);
     return if (isLambda(e))
         lean_expr_mk_lambda(name, new_domain, new_body, bi)
     else
@@ -239,18 +264,36 @@ pub fn updateBinding(e: *anyopaque, new_domain: *anyopaque, new_body: *anyopaque
 }
 
 pub fn updateLet(e: *anyopaque, new_type: *anyopaque, new_value: *anyopaque, new_body: *anyopaque) *anyopaque {
-    if (letType(e) == new_type and letValue(e) == new_value and letBody(e) == new_body) return e;
+    if (letType(e) == new_type and letValue(e) == new_value and letBody(e) == new_body) {
+        rc.lean_dec(new_type);
+        rc.lean_dec(new_value);
+        rc.lean_dec(new_body);
+        return retain(e);
+    }
     const name = ctor.lean_ctor_get(e, 0) orelse @panic("update_let: name missing");
-    const nd = ctor.lean_ctor_get(e, 4) orelse object.lean_box(0).?;
+    const nd = letNonDep(e);
+    rc.lean_inc(name);
     return lean_expr_mk_let(name, new_type, new_value, new_body, nd);
 }
 
 pub fn updateMData(e: *anyopaque, new_expr: *anyopaque) *anyopaque {
-    if (mdataExpr(e) == new_expr) return e;
-    return lean_expr_mk_mdata(mdataData(e), new_expr);
+    if (mdataExpr(e) == new_expr) {
+        rc.lean_dec(new_expr);
+        return retain(e);
+    }
+    const data = mdataData(e);
+    rc.lean_inc(data);
+    return lean_expr_mk_mdata(data, new_expr);
 }
 
 pub fn updateProj(e: *anyopaque, new_expr: *anyopaque) *anyopaque {
-    if (projExpr(e) == new_expr) return e;
-    return lean_expr_mk_proj(projSname(e), projIdx(e), new_expr);
+    if (projExpr(e) == new_expr) {
+        rc.lean_dec(new_expr);
+        return retain(e);
+    }
+    const s = projSname(e);
+    const idx = projIdx(e);
+    rc.lean_inc(s);
+    rc.lean_inc(idx);
+    return lean_expr_mk_proj(s, idx, new_expr);
 }

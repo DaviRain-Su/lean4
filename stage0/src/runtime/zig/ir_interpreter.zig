@@ -25,6 +25,7 @@ const interrupt = @import("interrupt.zig");
 const io_min = @import("io_min.zig");
 const apply_mod = @import("apply.zig");
 const ea = @import("expr_accessors.zig");
+const runtime_helpers = @import("runtime_helpers.zig");
 
 const runtime_options = @import("runtime_options");
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
@@ -105,7 +106,7 @@ const Value = struct {
 // These mirror the inline accessors in ir_interpreter.cpp.
 // IR.Expr constructor tags (matching C++ expr_kind / Lean IR.Expr):
 //   Ctor=0, Reset=1, Reuse=2, Proj=3, UProj=4, SProj=5, FAp=6, PAp=7,
-//   Ap=8, Box=9, Unbox=10, Lit=11, IsShared=12
+//   Ap=8, Box=9, Unbox=10, Lit=11, IsShared=12, IsTaggedPtr=13
 
 const ExprKind = enum(u8) {
     Ctor = 0,
@@ -121,6 +122,7 @@ const ExprKind = enum(u8) {
     Unbox = 10,
     Lit = 11,
     IsShared = 12,
+    IsTaggedPtr = 13,
 };
 
 inline fn exprTag(e: *anyopaque) ExprKind {
@@ -133,6 +135,14 @@ inline fn natSmallValue(n: *anyopaque) usize {
     // mpz path: small nat stored as mpz with 1 limb
     // For simplicity, handle scalar case; mpz case should be rare in IR
     return object.lean_unbox(n);
+}
+
+inline fn varIdEq(a: *anyopaque, b: *anyopaque) bool {
+    // Both are Nats — compare by value
+    if (object.lean_is_scalar(a) and object.lean_is_scalar(b))
+        return object.lean_unbox(a) == object.lean_unbox(b);
+    // Fall back to pointer equality for non-scalar (hash-consed) Nats
+    return a == b;
 }
 
 inline fn getBoolField(o: *anyopaque, num_obj_fields: usize) bool {
@@ -263,6 +273,9 @@ inline fn exprLitVal(e: *anyopaque) *anyopaque {
 inline fn exprIsSharedObj(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 0) orelse @panic("expr_is_shared_obj");
 }
+inline fn exprIsTaggedPtrObj(e: *anyopaque) *anyopaque {
+    return ctor.lean_ctor_get(e, 0) orelse @panic("expr_is_tagged_ptr_obj");
+}
 
 // FnBody tags (matching C++ fn_body_kind / Lean IR.FnBody):
 // VDecl=0, JDecl=1, Set=2, SetTag=3, USet=4, SSet=5, Inc=6, Dec=7,
@@ -285,7 +298,7 @@ const FnBodyKind = enum(u8) {
 };
 
 inline fn fnBodyTag(b: *anyopaque) FnBodyKind {
-    return @enumFromInt(object.lean_ptr_tag(b));
+    return @enumFromInt(if (object.lean_is_scalar(b)) object.lean_unbox(b) else object.lean_ptr_tag(b));
 }
 
 // FnBody field accessors
@@ -426,9 +439,7 @@ inline fn altDefaultCont(a: *anyopaque) *anyopaque {
 const DeclKind = enum(u8) { Fun = 0, Extern = 1 };
 
 inline fn declTag(d: *anyopaque) DeclKind {
-    // decl_tag is the first scalar field after obj fields
-    // Actually Decl is an inductive, so tag is ctor tag
-    return @enumFromInt(object.lean_ptr_tag(d));
+    return @enumFromInt(if (object.lean_is_scalar(d)) object.lean_unbox(d) else object.lean_ptr_tag(d));
 }
 inline fn declFunId(d: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(d, 0) orelse @panic("decl_fun_id");
@@ -451,7 +462,7 @@ inline fn paramBorrow(p: *anyopaque) bool {
     return getBoolField(p, 2);
 }
 inline fn paramType(p: *anyopaque) IRType {
-    return cnstrGetType(p, 2);
+    return cnstrGetType(p, 1);
 }
 
 // ── Box/unbox helpers ──────────────────────────────────────────────────────
@@ -468,9 +479,9 @@ fn boxT(v: Value, t: IRType) *anyopaque {
         },
         .UInt8 => object.lean_box(@as(usize, @intCast(v.num & 0xFF))).?,
         .UInt16 => object.lean_box(@as(usize, @intCast(v.num & 0xFFFF))).?,
-        .UInt32 => object.lean_box(@as(usize, @intCast(v.num & 0xFFFFFFFF))).?,
-        .UInt64 => object.lean_box(v.num).?,
-        .USize => object.lean_box(@as(usize, @intCast(v.num))).?,
+        .UInt32 => box.lean_box_uint32(@intCast(v.num & 0xFFFFFFFF)).?,
+        .UInt64 => box.lean_box_uint64(v.num).?,
+        .USize => box.lean_box_usize(@as(usize, @intCast(v.num))).?,
         .Irrelevant, .Void => object.lean_box(0).?,
         .Object, .Tagged, .TObject => v.obj orelse object.lean_box(0).?,
         .Struct, .Union => @panic("box_t: struct/union not implemented"),
@@ -481,11 +492,11 @@ fn unboxT(o: *anyopaque, t: IRType) Value {
     return switch (t) {
         .Float => Value.fromFloat(box.lean_unbox_float(o)),
         .Float32 => Value.fromFloat32(box.lean_unbox_float32(o)),
-        .UInt8 => Value.fromNum(ctor.lean_ctor_get_uint8(o, 0)),
-        .UInt16 => Value.fromNum(ctor.lean_ctor_get_uint16(o, 0)),
-        .UInt32 => Value.fromNum(ctor.lean_ctor_get_uint32(o, 0)),
-        .UInt64 => Value.fromNum(ctor.lean_ctor_get_uint64(o, 0)),
-        .USize => Value.fromNum(ctor.lean_ctor_get_usize(o, 0)),
+        .UInt8 => Value.fromNum(object.lean_unbox(o)),
+        .UInt16 => Value.fromNum(object.lean_unbox(o)),
+        .UInt32 => Value.fromNum(box.lean_unbox_uint32(o)),
+        .UInt64 => Value.fromNum(box.lean_unbox_uint64(o)),
+        .USize => Value.fromNum(box.lean_unbox_usize(o)),
         .Irrelevant, .Void => Value.fromNum(0),
         .Object, .Tagged, .TObject => Value.fromObj(o),
         .Struct, .Union => @panic("unbox_t: struct/union not implemented"),
@@ -503,12 +514,16 @@ extern fn dlopen(filename: ?[*:0]const u8, flag: c_int) callconv(.c) dl_handle;
 extern fn dlsym(handle: dl_handle, symbol: [*:0]const u8) callconv(.c) ?*anyopaque;
 extern fn dlerror() callconv(.c) ?[*:0]const u8;
 
-const RTLD_DEFAULT: c_int = if (builtin.os.tag == .macos) -2 else 0;
+const RTLD_DEFAULT_HANDLE: dl_handle = if (builtin.os.tag == .macos)
+    @as(?*anyopaque, @ptrFromInt(@as(usize, @bitCast(@as(isize, -2)))))
+else
+    null;
 
 fn lookupSymbolInCurexe(sym: [*:0]const u8) ?*anyopaque {
-    // Use RTLD_DEFAULT to search in all loaded images
-    const handle = dlopen(null, RTLD_DEFAULT);
-    return dlsym(handle, sym);
+    _ = dlerror();
+    const addr = dlsym(RTLD_DEFAULT_HANDLE, sym);
+    _ = dlerror();
+    return addr;
 }
 extern fn lean_string_cstr(s: *anyopaque) callconv(.c) [*:0]const u8;
 
@@ -551,6 +566,15 @@ const Interpreter = struct {
             .allocator = a,
         };
     }
+    fn envArg(self: *Interpreter) *anyopaque {
+        rc.lean_inc(self.env);
+        return self.env;
+    }
+
+    fn ownedArg(o: *anyopaque) *anyopaque {
+        rc.lean_inc(o);
+        return o;
+    }
 
     fn deinit(self: *Interpreter) void {
         // Clean up constant cache
@@ -584,8 +608,11 @@ const Interpreter = struct {
     }
 
     fn evalArg(self: *Interpreter, a: *anyopaque) Value {
-        if (argIsIrrelevant(a)) return Value.fromNum(0);
+        if (argIsIrrelevant(a)) return Value.fromObj(object.lean_box(0).?);
         return self.var_(argVarId(a)).*;
+    }
+    fn evalObjArg(self: *Interpreter, a: *anyopaque) *anyopaque {
+        return self.evalArg(a).obj orelse @panic("expected object IR argument");
     }
 
     fn allocCtor(self: *Interpreter, info: *anyopaque, args: *anyopaque) *anyopaque {
@@ -601,10 +628,29 @@ const Interpreter = struct {
         var i: usize = 0;
         while (i < num_args) : (i += 1) {
             const arg = array.lean_array_uget(args, i) orelse continue;
-            const v = self.evalArg(arg);
-            ctor.lean_ctor_set(o, @intCast(i), if (v.is_obj) v.obj orelse object.lean_box(0).? else object.lean_box(@intCast(v.num)).?);
+            ctor.lean_ctor_set(o, @intCast(i), self.evalObjArg(arg));
         }
         return o;
+    }
+
+    fn mkStubClosure(self: *Interpreter, d: *anyopaque, n: usize, args: ?[*]*anyopaque) *anyopaque {
+        const arity = array.lean_array_size(declParams(d));
+        const cls_size = 3 + arity;
+        const cls = alloc.lean_alloc_closure(getStub(cls_size), @intCast(cls_size), @intCast(3 + n));
+        rc.lean_inc(self.env);
+        ctor.lean_ctor_set(cls, 0, self.env);
+        rc.lean_inc(self.opts);
+        ctor.lean_ctor_set(cls, 1, self.opts);
+        rc.lean_inc(d);
+        ctor.lean_ctor_set(cls, 2, d);
+
+        if (args) |arg_ptr| {
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                ctor.lean_ctor_set(cls, @intCast(3 + i), arg_ptr[i]);
+            }
+        }
+        return cls;
     }
 
     fn lookupSymbol(self: *Interpreter, fn_name: *anyopaque) SymbolCacheEntry {
@@ -616,9 +662,9 @@ const Interpreter = struct {
             .native_boxed = false,
         };
         if (self.prefer_native or declTag(d) == .Extern) {
-            const mangled = lean_get_symbol_stem(self.env, fn_name);
+            const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
             defer rc.lean_dec(mangled);
-            const boxed_mangled = lean_mk_mangled_boxed_name(mangled);
+            const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
             defer rc.lean_dec(boxed_mangled);
             const boxed_sym = lean_string_cstr(boxed_mangled);
             if (lookupSymbolInCurexe(boxed_sym)) |p| {
@@ -626,15 +672,65 @@ const Interpreter = struct {
                 entry.native_boxed = true;
             } else {
                 // Try unboxed/export name
-                const export_name = lean_get_export_name_for(self.env, fn_name);
+                const export_name = lean_get_export_name_for(self.envArg(), ownedArg(fn_name));
                 defer rc.lean_dec(export_name);
+                const mangled_sym = lean_string_cstr(mangled);
+                var sym_name = mangled_sym;
                 if (!object.lean_is_scalar(export_name)) {
-                    const export_sym = lean_string_cstr(ctor.lean_ctor_get(export_name, 0) orelse mangled);
-                    if (lookupSymbolInCurexe(export_sym)) |p| {
+                    if (ctor.lean_ctor_get(export_name, 0)) |export_name_val| {
+                        if (!object.lean_is_scalar(export_name_val) and object.lean_ptr_tag(export_name_val) == 1) {
+                            if (ctor.lean_ctor_get(export_name_val, 1)) |export_str| {
+                                sym_name = lean_string_cstr(export_str);
+                            }
+                        }
+                    }
+                }
+                if (lookupSymbolInCurexe(sym_name)) |p| {
+                    entry.native_addr = p;
+                } else if (@intFromPtr(sym_name) != @intFromPtr(mangled_sym)) {
+                    if (lookupSymbolInCurexe(mangled_sym)) |p| {
                         entry.native_addr = p;
                     }
-                } else {
-                    const mangled_sym = lean_string_cstr(mangled);
+                }
+            }
+        }
+        self.symbol_cache.put(fn_name, entry) catch {};
+        return entry;
+    }
+
+    fn lookupSymbolWithDecl(self: *Interpreter, fn_name: *anyopaque, d: *anyopaque) SymbolCacheEntry {
+        if (self.symbol_cache.get(fn_name)) |e| return e;
+        var entry = SymbolCacheEntry{
+            .decl = ownedArg(d),
+            .native_addr = null,
+            .native_boxed = false,
+        };
+        if (self.prefer_native or declTag(d) == .Extern) {
+            const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
+            defer rc.lean_dec(mangled);
+            const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
+            defer rc.lean_dec(boxed_mangled);
+            const boxed_sym = lean_string_cstr(boxed_mangled);
+            if (lookupSymbolInCurexe(boxed_sym)) |p| {
+                entry.native_addr = p;
+                entry.native_boxed = true;
+            } else {
+                const export_name = lean_get_export_name_for(self.envArg(), ownedArg(fn_name));
+                defer rc.lean_dec(export_name);
+                const mangled_sym = lean_string_cstr(mangled);
+                var sym_name = mangled_sym;
+                if (!object.lean_is_scalar(export_name)) {
+                    if (ctor.lean_ctor_get(export_name, 0)) |export_name_val| {
+                        if (!object.lean_is_scalar(export_name_val) and object.lean_ptr_tag(export_name_val) == 1) {
+                            if (ctor.lean_ctor_get(export_name_val, 1)) |export_str| {
+                                sym_name = lean_string_cstr(export_str);
+                            }
+                        }
+                    }
+                }
+                if (lookupSymbolInCurexe(sym_name)) |p| {
+                    entry.native_addr = p;
+                } else if (@intFromPtr(sym_name) != @intFromPtr(mangled_sym)) {
                     if (lookupSymbolInCurexe(mangled_sym)) |p| {
                         entry.native_addr = p;
                     }
@@ -646,7 +742,7 @@ const Interpreter = struct {
     }
 
     fn getDecl(self: *Interpreter, fn_name: *anyopaque) *anyopaque {
-        const opt_d = lean_ir_find_env_decl(self.env, fn_name);
+        const opt_d = lean_ir_find_env_decl(self.envArg(), ownedArg(fn_name));
         if (object.lean_is_scalar(opt_d)) {
             rc.lean_dec(opt_d);
             @panic("(interpreter) unknown declaration");
@@ -662,7 +758,7 @@ const Interpreter = struct {
             .Ctor => return Value.fromObj(self.allocCtor(exprCtorInfo(e), exprCtorArgs(e))),
             .Reset => {
                 const o = self.var_(exprResetObj(e)).obj orelse object.lean_box(0).?;
-                if (rc.lean_is_exclusive(o)) {
+                if (!object.lean_is_scalar(o) and rc.lean_is_exclusive(o)) {
                     const n = exprResetNumObjs(e);
                     var i: usize = 0;
                     while (i < n) : (i += 1) {
@@ -671,7 +767,7 @@ const Interpreter = struct {
                     return Value.fromObj(o);
                 } else {
                     rc.lean_dec(o);
-                    return Value.fromNum(0);
+                    return Value.fromObj(object.lean_box(0).?);
                 }
             },
             .Reuse => {
@@ -687,8 +783,7 @@ const Interpreter = struct {
                     var i: usize = 0;
                     while (i < num_args) : (i += 1) {
                         const arg = array.lean_array_uget(args, i) orelse continue;
-                        const v = self.evalArg(arg);
-                        ctor.lean_ctor_set(o, @intCast(i), if (v.is_obj) v.obj orelse object.lean_box(0).? else object.lean_box(@intCast(v.num)).?);
+                        ctor.lean_ctor_set(o, @intCast(i), self.evalObjArg(arg));
                     }
                     return Value.fromObj(o);
                 }
@@ -733,13 +828,18 @@ const Interpreter = struct {
                     var i: usize = 0;
                     while (i < num_args) : (i += 1) {
                         const arg = array.lean_array_uget(args, i) orelse continue;
-                        const v = self.evalArg(arg);
-                        ctor.lean_ctor_set(cls, @intCast(i), if (v.is_obj) v.obj orelse object.lean_box(0).? else boxT(v, .USize));
+                        ctor.lean_ctor_set(cls, @intCast(i), self.evalObjArg(arg));
                     }
                     return Value.fromObj(cls);
                 } else {
-                    // Stub closure: not implemented fully (requires closure stubs)
-                    @panic("PAp with no native symbol: stub closure not implemented");
+                    var args_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+                    defer args_buf.deinit(self.allocator);
+                    var i: usize = 0;
+                    while (i < num_args) : (i += 1) {
+                        const arg = array.lean_array_uget(args, i) orelse continue;
+                        args_buf.append(self.allocator, self.evalObjArg(arg)) catch @panic("PAp: OOM");
+                    }
+                    return Value.fromObj(self.mkStubClosure(sym.decl, num_args, args_buf.items.ptr));
                 }
             },
             .Ap => {
@@ -750,8 +850,7 @@ const Interpreter = struct {
                 var i: usize = 0;
                 while (i < num_args) : (i += 1) {
                     const arg = array.lean_array_uget(args, i) orelse continue;
-                    const v = self.evalArg(arg);
-                    args_buf.append(self.allocator, if (v.is_obj) v.obj orelse object.lean_box(0).? else boxT(v, .USize)) catch @panic("Ap: OOM");
+                    args_buf.append(self.allocator, self.evalObjArg(arg)) catch @panic("Ap: OOM");
                 }
                 const fn_obj = self.var_(exprApFun(e)).obj orelse object.lean_box(0).?;
                 const r = apply_mod.lean_apply_n(fn_obj, @intCast(num_args), @ptrCast(args_buf.items.ptr)) orelse object.lean_box(0).?;
@@ -793,7 +892,11 @@ const Interpreter = struct {
             },
             .IsShared => {
                 const o = self.var_(exprIsSharedObj(e)).obj orelse object.lean_box(0).?;
-                return Value.fromNum(if (!rc.lean_is_exclusive(o)) 1 else 0);
+                return Value.fromNum(if (object.lean_is_scalar(o) or !rc.lean_is_exclusive(o)) 1 else 0);
+            },
+            .IsTaggedPtr => {
+                const o = self.var_(exprIsTaggedPtrObj(e)).obj orelse object.lean_box(0).?;
+                return Value.fromNum(if (!object.lean_is_scalar(o)) 1 else 0);
             },
         }
     }
@@ -806,23 +909,21 @@ const Interpreter = struct {
                 .VDecl => {
                     const e = fnBodyVDeclExpr(b);
                     const cont = fnBodyVDeclCont(b);
-                    // Tail recursion check
+                    // Tail recursion: FAp to self, ret is the vdecl var
                     if (exprTag(e) == .FAp and
                         lean_name_eq(exprFapFun(e), self.getFrame().fn_name) != 0 and
                         fnBodyTag(cont) == .Ret and
-                        !argIsIrrelevant(fnBodyRetArg(cont)))
+                        !argIsIrrelevant(fnBodyRetArg(cont)) and
+                        varIdEq(argVarId(fnBodyRetArg(cont)), fnBodyVDeclVar(b)))
                     {
-                        // Check if ret arg == vdecl var (simplified: assume yes for tail call)
                         const args = exprFapArgs(e);
                         const num_args = array.lean_array_size(args);
                         const old_size = self.arg_stack.items.len;
-                        // Copy args to end of stack
                         var i: usize = 0;
                         while (i < num_args) : (i += 1) {
                             const arg = array.lean_array_uget(args, i) orelse continue;
                             self.arg_stack.append(self.allocator, self.evalArg(arg)) catch @panic("tail rec: OOM");
                         }
-                        // Copy to parameter slots
                         i = 0;
                         while (i < num_args) : (i += 1) {
                             self.arg_stack.items[self.getFrame().arg_bp + i] = self.arg_stack.items[old_size + i];
@@ -832,7 +933,7 @@ const Interpreter = struct {
                     } else {
                         const v = self.evalExpr(e, fnBodyVDeclType(b));
                         self.var_(fnBodyVDeclVar(b)).* = v;
-                        b = fnBodyVDeclCont(b);
+                        b = cont;
                     }
                 },
                 .JDecl => {
@@ -846,8 +947,7 @@ const Interpreter = struct {
                 .Set => {
                     const o = self.var_(fnBodySetVar(b)).obj orelse object.lean_box(0).?;
                     const arg = fnBodySetArg(b);
-                    const v = self.evalArg(arg);
-                    ctor.lean_ctor_set(o, @intCast(fnBodySetIdx(b)), if (v.is_obj) v.obj orelse object.lean_box(0).? else boxT(v, .USize));
+                    ctor.lean_ctor_set(o, @intCast(fnBodySetIdx(b)), self.evalObjArg(arg));
                     b = fnBodySetCont(b);
                 },
                 .SetTag => {
@@ -897,7 +997,7 @@ const Interpreter = struct {
                 },
                 .Del => {
                     const v = self.var_(fnBodyDelVar(b)).*;
-                    if (v.is_obj) {
+                    if (v.is_obj and !object.lean_is_scalar(v.obj.?)) {
                         alloc.lean_free_object(v.obj.?);
                     }
                     b = fnBodyDelCont(b);
@@ -906,7 +1006,7 @@ const Interpreter = struct {
                     const alts = fnBodyCaseAlts(b);
                     const v = self.var_(fnBodyCaseVar(b)).*;
                     const var_type = fnBodyCaseVarType(b);
-                    const tag: usize = if (typeIsScalar(var_type)) @intCast(v.num) else object.lean_ptr_tag(v.obj orelse object.lean_box(0).?);
+                    const tag: usize = if (typeIsScalar(var_type)) @intCast(v.num) else object.lean_obj_tag(v.obj orelse object.lean_box(0).?);
                     const num_alts = array.lean_array_size(alts);
                     var found = false;
                     var i: usize = 0;
@@ -987,7 +1087,7 @@ const Interpreter = struct {
             };
         }
         // No native code: interpret IR
-        const init_fn = lean_get_regular_init_fn_name_for(self.env, fn_name);
+        const init_fn = lean_get_regular_init_fn_name_for(self.envArg(), ownedArg(fn_name));
         defer rc.lean_dec(init_fn);
         if (!object.lean_is_scalar(init_fn)) {
             @panic("cannot evaluate [init] declaration in the same module");
@@ -1035,7 +1135,14 @@ const Interpreter = struct {
         } else {
             // Interpret IR
             if (declTag(sym.decl) == .Extern) {
-                @panic("could not find native implementation of external declaration");
+                const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
+                defer rc.lean_dec(mangled);
+                const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
+                defer rc.lean_dec(boxed_mangled);
+                std.debug.panic(
+                    "missing native extern: boxed '{s}', unboxed '{s}'",
+                    .{ lean_string_cstr(boxed_mangled), lean_string_cstr(mangled) },
+                );
             }
             const num_args = array.lean_array_size(args);
             var i: usize = 0;
@@ -1063,17 +1170,13 @@ const Interpreter = struct {
             if (sym.native_addr) |addr| {
                 r = alloc.lean_alloc_closure(addr, @intCast(arity), 0);
             } else {
-                // Check for boxed version
-                const opt_d_boxed = lean_ir_find_env_decl_boxed(self.env, fn_name);
+                const opt_d_boxed = lean_ir_find_env_decl_boxed(self.envArg(), ownedArg(fn_name));
                 defer rc.lean_dec(opt_d_boxed);
-                if (!object.lean_is_scalar(opt_d_boxed)) {
-                    const d_boxed = ctor.lean_ctor_get(opt_d_boxed, 0) orelse sym.decl;
-                    rc.lean_inc(d_boxed);
-                    // Stub closure (simplified)
-                    r = alloc.lean_alloc_closure(@ptrCast(@constCast(&stubClosureEntry)), @intCast(arity), 0);
-                } else {
-                    r = alloc.lean_alloc_closure(@ptrCast(@constCast(&stubClosureEntry)), @intCast(arity), 0);
-                }
+                const d = if (!object.lean_is_scalar(opt_d_boxed))
+                    ctor.lean_ctor_get(opt_d_boxed, 0) orelse sym.decl
+                else
+                    sym.decl;
+                r = self.mkStubClosure(d, 0, null);
             }
         }
         if (n > 0) {
@@ -1082,15 +1185,58 @@ const Interpreter = struct {
         return r;
     }
 
-    fn runMain(self: *Interpreter, args: *anyopaque) u32 {
-        // Simplified: call main with world arg
+    fn callBoxedDecl(self: *Interpreter, d: *anyopaque, n: usize, args: [*]*anyopaque) *anyopaque {
+        const fn_name = declFunId(d);
+        const sym = self.lookupSymbolWithDecl(fn_name, d);
+        const arity = array.lean_array_size(declParams(sym.decl));
+        var r: *anyopaque = undefined;
+        if (arity == 0) {
+            const t = declType(sym.decl);
+            const v = self.load(fn_name, t);
+            r = boxT(v, t);
+            if (!typeIsScalar(t)) rc.lean_inc(r);
+        } else {
+            if (sym.native_addr) |addr| {
+                r = alloc.lean_alloc_closure(addr, @intCast(arity), 0);
+            } else {
+                if (n != arity) {
+                    @panic("partial application for interpreted decls is not implemented");
+                }
+                const old_size = self.arg_stack.items.len;
+                const params = declParams(sym.decl);
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    const param = array.lean_array_uget(params, i) orelse @panic("missing decl param");
+                    self.arg_stack.append(self.allocator, unboxT(args[i], paramType(param))) catch @panic("callBoxedDecl: OOM");
+                }
+                self.pushFrame(sym.decl, old_size);
+                const v = self.evalBody(declFunBody(sym.decl));
+                self.popFrame();
+                return boxT(v, declType(sym.decl));
+            }
+        }
+        if (n > 0) {
+            r = apply_mod.lean_apply_n(r, @intCast(n), @ptrCast(args)) orelse object.lean_box(0).?;
+        }
+        return r;
+    }
+
+    fn runMainDecl(self: *Interpreter, args: *anyopaque, d: *anyopaque) u32 {
+        const params = declParams(d);
+        const num_params = array.lean_array_size(params);
+
         const world = object.lean_box(0).?;
-        var call_args: [2]*anyopaque = .{ args, world };
-        const d = self.getDecl(object.lean_box(0x6e69616d).?); // "main" as name — simplified
-        _ = d;
-        const w = self.callBoxed(object.lean_box(0x6e69616d).?, 2, &call_args);
+        var call_args: [2]*anyopaque = undefined;
+        var n: usize = 0;
+        if (num_params == 2) {
+            call_args[n] = Interpreter.ownedArg(args);
+            n += 1;
+        }
+        call_args[n] = world;
+        n += 1;
+
+        const w = self.callBoxedDecl(d, n, &call_args);
         if (io_min.lean_io_result_is_ok(w)) {
-            // Get return value
             const ret_val = io_min.lean_io_result_get_value(w);
             const ret_uint = if (object.lean_is_scalar(ret_val)) object.lean_unbox(ret_val) else 0;
             rc.lean_dec(w);
@@ -1101,11 +1247,152 @@ const Interpreter = struct {
             return 1;
         }
     }
+
+    fn runMain(self: *Interpreter, args: *anyopaque, main_name: *anyopaque) u32 {
+        const d = blk: {
+            const opt_d = lean_ir_find_env_decl(self.envArg(), ownedArg(main_name));
+            if (!object.lean_is_scalar(opt_d)) {
+                const found = ctor.lean_ctor_get(opt_d, 0) orelse @panic("runMain: missing decl");
+                rc.lean_inc(found);
+                rc.lean_dec(opt_d);
+                break :blk found;
+            }
+            rc.lean_dec(opt_d);
+
+            const opt_d_boxed = lean_ir_find_env_decl_boxed(self.envArg(), ownedArg(main_name));
+            if (object.lean_is_scalar(opt_d_boxed)) {
+                rc.lean_dec(opt_d_boxed);
+                @panic("(interpreter) unknown declaration");
+            }
+            const found = ctor.lean_ctor_get(opt_d_boxed, 0) orelse @panic("runMain: missing boxed decl");
+            rc.lean_inc(found);
+            rc.lean_dec(opt_d_boxed);
+            break :blk found;
+        };
+        defer rc.lean_dec(d);
+        return self.runMainDecl(args, d);
+    }
 };
 
-// Stub closure entry point (simplified — real implementation needs per-arity stubs)
-fn stubClosureEntry() callconv(.c) *anyopaque {
-    @panic("stub closure not fully implemented");
+const StubObj = ?*anyopaque;
+
+fn stubObj(o: StubObj) *anyopaque {
+    return o orelse object.lean_box(0).?;
+}
+
+fn stubAux(args: [*]StubObj) StubObj {
+    const env = stubObj(args[0]);
+    const opts = stubObj(args[1]);
+    const d = stubObj(args[2]);
+    defer rc.lean_dec(env);
+    defer rc.lean_dec(opts);
+    defer rc.lean_dec(d);
+
+    const arity = array.lean_array_size(declParams(d));
+    var arg_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer arg_buf.deinit(std.heap.page_allocator);
+    var i: usize = 0;
+    while (i < arity) : (i += 1) {
+        arg_buf.append(std.heap.page_allocator, stubObj(args[3 + i])) catch @panic("interpreter stub: OOM");
+    }
+
+    var interp = Interpreter.init(env, opts, std.heap.page_allocator);
+    defer interp.deinit();
+    return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
+}
+
+fn stub1(x1: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{x1};
+    return stubAux(&args);
+}
+fn stub2(x1: StubObj, x2: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2 };
+    return stubAux(&args);
+}
+fn stub3(x1: StubObj, x2: StubObj, x3: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3 };
+    return stubAux(&args);
+}
+fn stub4(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4 };
+    return stubAux(&args);
+}
+fn stub5(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5 };
+    return stubAux(&args);
+}
+fn stub6(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6 };
+    return stubAux(&args);
+}
+fn stub7(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7 };
+    return stubAux(&args);
+}
+fn stub8(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8 };
+    return stubAux(&args);
+}
+fn stub9(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9 };
+    return stubAux(&args);
+}
+fn stub10(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10 };
+    return stubAux(&args);
+}
+fn stub11(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11 };
+    return stubAux(&args);
+}
+fn stub12(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12 };
+    return stubAux(&args);
+}
+fn stub13(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13 };
+    return stubAux(&args);
+}
+fn stub14(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14 };
+    return stubAux(&args);
+}
+fn stub15(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj, x15: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15 };
+    return stubAux(&args);
+}
+fn stub16(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj, x15: StubObj, x16: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16 };
+    return stubAux(&args);
+}
+fn stubM(args: [*]StubObj) callconv(.c) StubObj {
+    return stubAux(args);
+}
+
+fn stubPtr(comptime f: anytype) *anyopaque {
+    return @ptrCast(@constCast(f));
+}
+
+fn getStub(params: usize) *anyopaque {
+    return switch (params) {
+        1 => stubPtr(&stub1),
+        2 => stubPtr(&stub2),
+        3 => stubPtr(&stub3),
+        4 => stubPtr(&stub4),
+        5 => stubPtr(&stub5),
+        6 => stubPtr(&stub6),
+        7 => stubPtr(&stub7),
+        8 => stubPtr(&stub8),
+        9 => stubPtr(&stub9),
+        10 => stubPtr(&stub10),
+        11 => stubPtr(&stub11),
+        12 => stubPtr(&stub12),
+        13 => stubPtr(&stub13),
+        14 => stubPtr(&stub14),
+        15 => stubPtr(&stub15),
+        16 => stubPtr(&stub16),
+        else => stubPtr(&stubM),
+    };
 }
 
 // Curry native function with N args
@@ -1118,11 +1405,11 @@ fn curry(addr: *anyopaque, n: usize, args: [*]*anyopaque) *anyopaque {
 
 // ── Entry points ────────────────────────────────────────────────────────────
 
-fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque) callconv(.c) u32 {
+fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl: *anyopaque) callconv(.c) u32 {
     const a = std.heap.page_allocator;
     var interp = Interpreter.init(env, opts, a);
     defer interp.deinit();
-    return interp.runMain(args);
+    return interp.runMainDecl(args, decl);
 }
 
 fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
@@ -1130,7 +1417,7 @@ fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) 
     var interp = Interpreter.init(env, opts, a);
     defer interp.deinit();
     // Check sorry dep
-    const sorry_dep = lean_decl_get_sorry_dep(env, c);
+    const sorry_dep = lean_decl_get_sorry_dep(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
     defer rc.lean_dec(sorry_dep);
     if (!object.lean_is_scalar(sorry_dep)) {
         // Has sorry dep — return error
@@ -1187,8 +1474,8 @@ var empty_args: [*]u8 = undefined;
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&leanEvalMain, .{ .name = "lean_eval_main", .linkage = .weak });
-        @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .weak });
-        @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .weak });
+        @export(&leanEvalMain, .{ .name = "lean_eval_main_decl", .linkage = .strong });
+        @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .strong });
+        @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .strong });
     }
 }

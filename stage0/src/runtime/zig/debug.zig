@@ -14,6 +14,8 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const sync = @import("sync.zig");
 const exception = @import("exception.zig");
+const rc = @import("rc.zig");
+const string = @import("string.zig");
 
 const POSIX = builtin.os.tag != .windows;
 
@@ -136,4 +138,25 @@ test "hasViolations tracks debugger invocation" {
     g_has_violations = true;
     try testing.expect(hasViolations());
     g_has_violations = false;
+}
+
+// Weak stub for lean_demangle_bt_line_cstr.
+// The real implementation is @[export] from Lean.Compiler.NameDemangling.
+// When the Lean demangler is linked (libleanshared), it overrides this stub.
+// In zigrt mode (no Lean linked), this stub returns an empty string.
+fn lean_demangle_bt_line_cstr_impl(s: ?*anyopaque) callconv(.c) *anyopaque {
+    rc.lean_dec(s);
+    return string.lean_mk_string("");
+}
+comptime {
+    @export(&lean_demangle_bt_line_cstr_impl, .{ .name = "lean_demangle_bt_line_cstr", .linkage = .weak });
+}
+
+// C++ mangled: lean::notify_assertion_violation(char const*, int, char const*)
+// Called from lean_assert/lean_verify/lean_unreachable macros in debug.h
+fn cpp_notify_assertion_violation(file_name: [*:0]const u8, line: c_int, condition: [*:0]const u8) callconv(.c) void {
+    notifyAssertionViolation(file_name, line, condition);
+}
+comptime {
+    @export(&cpp_notify_assertion_violation, .{ .name = "_ZN4lean26notify_assertion_violationEPKciS1_", .linkage = .strong });
 }

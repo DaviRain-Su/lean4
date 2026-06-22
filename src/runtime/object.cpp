@@ -2811,6 +2811,20 @@ extern "C" LEAN_EXPORT uint8 lean_name_eq(b_lean_obj_arg n1, b_lean_obj_arg n2) 
         */
     }
 }
+// Ordering: 0 = lt, 1 = eq, 2 = gt
+extern "C" LEAN_EXPORT uint8 lean_name_quick_cmp_exported(b_lean_obj_arg n1, b_lean_obj_arg n2) {
+    if (n1 == n2)
+        return 1;
+    if (lean_is_scalar(n1) != lean_is_scalar(n2))
+        return lean_is_scalar(n1) ? 0 : 2;
+    if (lean_is_scalar(n1))
+        return 1;
+    size_t h1 = lean_name_hash_ptr(n1);
+    size_t h2 = lean_name_hash_ptr(n2);
+    if (h1 != h2)
+        return h1 < h2 ? 0 : 2;
+    return lean_name_eq(n1, n2) ? 1 : (h1 < h2 ? 0 : 2);
+}
 
 // =======================================
 // Runtime info

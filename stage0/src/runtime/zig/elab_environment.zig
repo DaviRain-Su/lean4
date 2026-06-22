@@ -12,7 +12,7 @@ const alloc = @import("alloc.zig");
 const ctor = @import("ctor.zig");
 const object = @import("object.zig");
 const interrupt = @import("interrupt.zig");
-
+const rc = @import("rc.zig");
 /// Matches `LEAN_BELIEVER_TRUST_LEVEL` in `src/kernel/environment.h`.
 const lean_believer_trust_level: u32 = 1024;
 
@@ -46,6 +46,8 @@ fn elabAddDeclCore(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_
     interrupt.setCancelToken(cancelTokenFromOption(opt_cancel_tk));
     defer interrupt.clearCancelToken();
 
+    // `update_base_after_kernel_add` consumes `decl` by capturing it in the
+    // async constant map closure, so retain one reference across the call.
     const kenv = lean_elab_environment_to_kernel_env(env);
     const kenv_except = if (check)
         lean_add_decl(kenv, max_heartbeat, decl, opt_cancel_tk)
@@ -54,6 +56,7 @@ fn elabAddDeclCore(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_
 
     if (!exceptIsOk(kenv_except)) return kenv_except;
 
+    rc.lean_inc(decl);
     const kenv_new = exceptGetOk(kenv_except);
     const elab_ok = lean_elab_environment_update_base_after_kernel_add(env, kenv_new, decl);
     const ok_ctor = alloc.lean_alloc_ctor(1, 1, 0);

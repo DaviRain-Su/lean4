@@ -56,6 +56,12 @@ if(ZIG)
     --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
     "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
     "-Dcpp-build-type=${CMAKE_BUILD_TYPE}"
+    "-Dleanc-extra-cc-flags=${LEANC_EXTRA_CC_FLAGS}"
+    "-Dleanc-internal-flags=${LEANC_INTERNAL_FLAGS}"
+    "-Dleanc-static-linker-flags=${LEANC_STATIC_LINKER_FLAGS}"
+    "-Dleanc-shared-linker-flags=${LEANC_SHARED_LINKER_FLAGS}"
+    "-Dleanc-internal-linker-flags=${LEANC_INTERNAL_LINKER_FLAGS}"
+    "-Dlean-extra-linker-flags=${LEAN_EXTRA_LINKER_FLAGS}"
   )
   if(LEAN_ZIG_RT_CUTOVER)
     list(APPEND LEAN_ZIG_RUNTIME_BUILD_OPTIONS "-Dexport-kernel-symbols=true")
@@ -84,18 +90,35 @@ if(ZIG)
   set(LEAN_ZIG_HELPERLESS_OPTIMIZE "ReleaseFast")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/zig-out-helperless")
   set(LEAN_ZIG_RUNTIME_HELPERLESS_LIB "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}/lib/libleanrt_zig.a")
-  add_custom_command(
-    OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
-    COMMAND "${ZIG}" build
-      --prefix "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}"
-      --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
-      --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
-      "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
+  set(LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
+    --prefix "${LEAN_ZIG_RUNTIME_HELPERLESS_PREFIX}"
+    --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}"
+    --global-cache-dir "${LEAN_ZIG_RUNTIME_GLOBAL_CACHE_DIR}"
+    "${LEAN_ZIG_RUNTIME_INCLUDE_ARG}"
+    -Dexport-kernel-symbols=true
+    -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
+    -Dcpp-build-type=${CMAKE_BUILD_TYPE}
+    -Dleanc-extra-cc-flags=${LEANC_EXTRA_CC_FLAGS}
+    -Dleanc-internal-flags=${LEANC_INTERNAL_FLAGS}
+    -Dleanc-static-linker-flags=${LEANC_STATIC_LINKER_FLAGS}
+    -Dleanc-shared-linker-flags=${LEANC_SHARED_LINKER_FLAGS}
+    -Dleanc-internal-linker-flags=${LEANC_INTERNAL_LINKER_FLAGS}
+    -Dlean-extra-linker-flags=${LEAN_EXTRA_LINKER_FLAGS}
+  )
+  if(STAGE EQUAL 0)
+    list(APPEND LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
+      -Dexport-lean-helpers=true
+      -Dexport-allocator-symbols=true
+    )
+  else()
+    list(APPEND LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS
       -Dexport-lean-helpers=false
       -Dexport-allocator-symbols=false
-      -Dexport-kernel-symbols=true
-      -Doptimize=${LEAN_ZIG_HELPERLESS_OPTIMIZE}
-      -Dcpp-build-type=${CMAKE_BUILD_TYPE}
+    )
+  endif()
+  add_custom_command(
+    OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
+    COMMAND "${ZIG}" build ${LEAN_ZIG_RUNTIME_HELPERLESS_BUILD_OPTIONS}
     COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
     DEPENDS ${LEAN_ZIG_RUNTIME_SOURCES} "${LEAN_ZIG_RUNTIME_INCLUDE_DIR}/lean/config.h"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -103,8 +126,9 @@ if(ZIG)
     VERBATIM
   )
   # Phase 2/3 cutover: weaken Zig symbols that duplicate C++ runtime, then
-  # flip specified symbols from C++ to Zig (Phase 3).
-  if(LEAN_ZIG_RT_CUTOVER)
+  # flip specified symbols from C++ to Zig (Phase 3). Stage0 still links the
+  # C snapshot of the stdlib, so it needs the unmodified Zig runtime exports.
+  if(LEAN_ZIG_RT_CUTOVER AND NOT (STAGE EQUAL 0))
     set(LEAN_ZIG_FLIP_FILE "${LEAN_SOURCE_DIR}/../tools/phase3_flip_symbols.txt")
     add_custom_command(
       OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"

@@ -6,3 +6,9 @@
 pub const export_allocator_symbols: bool = true;
 pub const export_lean_helpers: bool = true;
 pub const export_kernel_symbols: bool = false;
+pub const leanc_extra_cc_flags: []const u8 = "";
+pub const leanc_internal_flags: []const u8 = "";
+pub const leanc_static_linker_flags: []const u8 = "";
+pub const leanc_shared_linker_flags: []const u8 = "";
+pub const leanc_internal_linker_flags: []const u8 = "";
+pub const lean_extra_linker_flags: []const u8 = "";

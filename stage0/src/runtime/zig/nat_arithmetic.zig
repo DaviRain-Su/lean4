@@ -127,7 +127,7 @@ fn mulViaZig(a1: *anyopaque, a2: *anyopaque) ?*anyopaque {
     return foldNatResult(&result);
 }
 
-pub export fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a)) {
         const n = object.lean_unbox(a);
         if (n < max_small_nat) return object.lean_box(n + 1);
@@ -149,7 +149,7 @@ pub export fn lean_nat_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*an
     return addViaZig(a1, a2);
 }
 
-pub export fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a1) and object.lean_is_scalar(a2)) {
         const lhs = object.lean_unbox(a1);
         const rhs = object.lean_unbox(a2);
@@ -288,7 +288,7 @@ pub export fn lean_nat_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*an
     return divViaZig(a1, a2);
 }
 
-pub export fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a1) and object.lean_is_scalar(a2)) {
         const rhs = object.lean_unbox(a2);
         return if (rhs == 0) object.lean_box(0) else object.lean_box(object.lean_unbox(a1) / rhs);
@@ -437,21 +437,21 @@ pub export fn lean_nat_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool 
     return cmpViaZig(a1, a2) < 0;
 }
 
-pub export fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a1) and object.lean_is_scalar(a2)) {
         return object.lean_box(object.lean_unbox(a1) & object.lean_unbox(a2));
     }
     return bitwiseViaZig(.and_, a1, a2);
 }
 
-pub export fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a1) and object.lean_is_scalar(a2)) {
         return object.lean_box(object.lean_unbox(a1) | object.lean_unbox(a2));
     }
     return bitwiseViaZig(.or_, a1, a2);
 }
 
-pub export fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (object.lean_is_scalar(a1) and object.lean_is_scalar(a2)) {
         return object.lean_box(object.lean_unbox(a1) ^ object.lean_unbox(a2));
     }
@@ -597,7 +597,7 @@ pub export fn lean_nat_shiftl(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*any
     return shiftlViaZig(a1, a2);
 }
 
-pub export fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+pub fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
     if (!object.lean_is_scalar(a2)) return object.lean_box(0);
     return shiftrViaZig(a1, a2);
 }

@@ -141,6 +141,7 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
     ("lean_internal_has_llvm_backend", "u8", "LeanObj"),
     ("lean_internal_get_hardware_concurrency", "u32", "LeanObj"),
     ("lean_get_current_time", "LeanObj", ""),
+    ("lean_libuv_version", "LeanObj", "LeanObj"),
     ("lean_windows_get_next_transition", "LeanObj", "LeanObj, u64, u8"),
     ("lean_get_windows_local_timezone_id_at", "LeanObj", "u64"),
     ("lean_apply_n", "LeanObj", "LeanObj, c_uint, [*c]LeanObj"),
@@ -230,6 +231,16 @@ def zig_type_to_extern(zig_type: str) -> str:
     mapping = {
         "?*anyopaque": "LeanObj",
         "*anyopaque": "LeanObj",
+        "*lean.lean_task_object": "LeanObj",
+        "?*lean.lean_task_object": "LeanObj",
+        "PrintFn": "?*anyopaque",
+        "*InAddrStorage": "?*anyopaque",
+        "*const c.struct_in_addr": "?*anyopaque",
+        "*const c.struct_in6_addr": "?*anyopaque",
+        "*c.struct_in_addr": "?*anyopaque",
+        "*c.struct_in6_addr": "?*anyopaque",
+        "*const c.sockaddr": "?*anyopaque",
+        "*c.sockaddr_storage": "?*anyopaque",
         "usize": "usize",
         "u8": "u8",
         "u16": "u16",
@@ -253,21 +264,30 @@ def zig_type_to_extern(zig_type: str) -> str:
 
 def zig_rt_export_signatures() -> dict[str, tuple[str, list[str]]]:
     sigs: dict[str, tuple[str, list[str]]] = {}
+    local_sigs: dict[str, tuple[str, list[str]]] = {}
+    fn_pat = re.compile(
+        r"(?m)^(?:pub\s+)?(?:export\s+)?fn (\w+)\((.*?)\)\s*(?:callconv\(\.c\)\s*)?([^\s{]+)",
+        re.DOTALL,
+    )
     export_pat = re.compile(
-        r"export fn (lean_\w+)\((.*?)\) callconv\(\.c\) ([^\s{]+)",
+        r'@export\(&(\w+),\s*\.\{\s*\.name\s*=\s*"([^"]+)"',
         re.DOTALL,
     )
     for path in ZIG_RT.rglob("*.zig"):
         text = path.read_text(errors="replace")
-        for m in export_pat.finditer(text):
+        for m in fn_pat.finditer(text):
             name, args_blob, ret = m.group(1), m.group(2), m.group(3)
-            arg_types: list[str] = []
-            if args_blob.strip():
-                for arg in args_blob.split(","):
-                    arg = arg.strip()
-                    if ":" in arg:
-                        arg_types.append(zig_type_to_extern(arg.split(":", 1)[1].strip()))
-            sigs[name] = (zig_type_to_extern(ret), arg_types)
+            arg_types = [zig_type_to_extern(arg.split(":", 1)[1].strip()) for arg in split_args(args_blob) if ":" in arg]
+            local_sigs[name] = (zig_type_to_extern(ret), arg_types)
+            if name.startswith("lean_"):
+                sigs[name] = local_sigs[name]
+        for m in export_pat.finditer(text):
+            local_name, export_name = m.group(1), m.group(2)
+            if not export_name.startswith("lean_"):
+                continue
+            sig = local_sigs.get(local_name)
+            if sig is not None:
+                sigs[export_name] = sig
     return sigs
 
 

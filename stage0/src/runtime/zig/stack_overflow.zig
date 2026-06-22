@@ -4,13 +4,13 @@
 //! Zig port of the C++ stack overflow detection subsystem.
 //!
 //! POSIX (macOS/Linux) uses a SIGSEGV/SIGBUS handler on an alternate signal
-//! stack. Windows would need structured exception handling (SEH) via
-//! `__try/__except` with `EXCEPTION_STACK_OVERFLOW` — Zig does not expose SEH
-//! frame unwinding, so Windows remains a no-op stub until a Zig SEH story
-//! exists. The `lean_initialize_stack_overflow` / `lean_finalize_stack_overflow`
-//! exports are defined but return immediately on Windows.
+//! stack. Windows uses Vectored Exception Handling (VEH) via
+//! `RtlAddVectoredExceptionHandler` with `EXCEPTION_STACK_OVERFLOW` — the same
+//! mechanism the C++ version uses (not SEH `__try/__except`). Zig 0.16.0
+//! exposes all required VEH APIs via `std.os.windows.ntdll`.
 
 const std = @import("std");
+const lean_alloc = @import("lean_allocator");
 const builtin = @import("builtin");
 const testing = std.testing;
 
@@ -20,6 +20,45 @@ const c = @cImport({
     @cInclude("pthread.h");
     @cInclude("unistd.h");
 });
+
+const windows = if (builtin.os.tag == .windows) struct {
+    const w = std.os.windows;
+    const ntdll = w.ntdll;
+
+    extern "kernel32" fn SetThreadStackGuarantee(sz: *w.ULONG) callconv(.winapi) w.BOOL;
+
+    const reserve_size = 0x5000;
+
+    var g_handler_handle: ?w.LPVOID = null;
+
+    fn handler(info: *w.EXCEPTION_POINTERS) callconv(.winapi) w.c_long {
+        if (info.ExceptionRecord.ExceptionCode == w.EXCEPTION_STACK_OVERFLOW) {
+            const wmsg = "\nStack overflow detected. Aborting.\n";
+            _ = std.os.windows.kernel32.WriteFile(
+                std.os.windows.kernel32.GetStdHandle(std.os.windows.STD_ERROR_HANDLE),
+                @ptrCast(@constCast(@as([*]const u8, @ptrCast(wmsg)))),
+                @as(w.DWORD, @intCast(wmsg.len)),
+                null,
+                null,
+            );
+            std.process.abort();
+        }
+        return w.EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    fn register() void {
+        g_handler_handle = ntdll.RtlAddVectoredExceptionHandler(0, handler);
+        var sz: w.ULONG = reserve_size;
+        _ = SetThreadStackGuarantee(&sz);
+    }
+
+    fn unregister() void {
+        if (g_handler_handle) |h| {
+            _ = ntdll.RtlRemoveVectoredExceptionHandler(h);
+            g_handler_handle = null;
+        }
+    }
+} else struct {};
 
 const POSIX = builtin.os.tag != .windows;
 
@@ -120,14 +159,14 @@ const SignalStack = struct {
     stack: c.stack_t,
 
     fn init() ?SignalStack {
-        const ptr = std.c.malloc(c.SIGSTKSZ) orelse return null;
+        const ptr = lean_alloc.vtable.alloc(c.SIGSTKSZ, @alignOf(u8)) orelse return null;
         const stk = c.stack_t{
-            .ss_sp = ptr,
+            .ss_sp = @ptrCast(ptr),
             .ss_size = c.SIGSTKSZ,
             .ss_flags = 0,
         };
         if (c.sigaltstack(&stk, null) != 0) {
-            std.c.free(ptr);
+            lean_alloc.vtable.free(@ptrCast(ptr), c.SIGSTKSZ, @alignOf(u8));
             return null;
         }
         return .{ .stack = stk };
@@ -137,7 +176,7 @@ const SignalStack = struct {
         var disable = self.stack;
         disable.ss_flags = c.SS_DISABLE;
         _ = c.sigaltstack(&disable, null);
-        std.c.free(self.stack.ss_sp);
+        lean_alloc.vtable.free(@ptrCast(self.stack.ss_sp), c.SIGSTKSZ, @alignOf(u8));
     }
 };
 
@@ -145,11 +184,18 @@ pub const StackGuard = struct {
     signal_stack: ?SignalStack,
 
     pub fn init() StackGuard {
-        if (!POSIX) return .{ .signal_stack = null };
+        if (builtin.os.tag == .windows) {
+            windows.register();
+            return .{ .signal_stack = null };
+        }
         return .{ .signal_stack = SignalStack.init() };
     }
 
     pub fn deinit(self: *StackGuard) void {
+        if (builtin.os.tag == .windows) {
+            windows.unregister();
+            return;
+        }
         if (self.signal_stack) |*signal_stack| {
             signal_stack.deinit();
             self.signal_stack = null;
@@ -158,28 +204,28 @@ pub const StackGuard = struct {
 };
 
 pub export fn lean_initialize_stack_overflow() callconv(.c) void {
-    if (!POSIX) return;
     if (g_stack_guard != null) return;
-    const guard = std.heap.c_allocator.create(StackGuard) catch {
-        setupSignalHandlers();
+    const guard = lean_alloc.vtable.alloc(@sizeOf(StackGuard), @alignOf(StackGuard)) orelse {
+        if (POSIX) setupSignalHandlers();
         return;
     };
-    guard.* = StackGuard.init();
-    g_stack_guard = guard;
-    setupSignalHandlers();
+    const sg: *StackGuard = @ptrCast(@alignCast(guard));
+    sg.* = StackGuard.init();
+    g_stack_guard = sg;
+    if (POSIX) setupSignalHandlers();
 }
 
 pub export fn lean_finalize_stack_overflow() callconv(.c) void {
-    if (!POSIX) return;
     if (g_stack_guard) |guard| {
         guard.deinit();
-        std.heap.c_allocator.destroy(guard);
+        lean_alloc.vtable.free(@ptrCast(guard), @sizeOf(StackGuard), @alignOf(StackGuard));
         g_stack_guard = null;
     }
 }
 
 test "initialize and finalize stack overflow subsystem" {
-    if (!POSIX) return error.SkipZigTest;
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    if (builtin.os.tag == .wasi) return error.SkipZigTest;
     lean_initialize_stack_overflow();
     lean_finalize_stack_overflow();
     try testing.expect(g_stack_guard == null);

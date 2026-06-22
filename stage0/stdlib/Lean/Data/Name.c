@@ -82,6 +82,7 @@ LEAN_EXPORT uint8_t l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl_unsafe_
 LEAN_EXPORT lean_object* l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl_unsafe__1___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl___boxed(lean_object*, lean_object*);
+uint8_t lean_name_quick_cmp_exported(lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Lean_Name_quickLt(lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Name_quickLt___boxed(lean_object*, lean_object*);
 LEAN_EXPORT uint8_t l_Lean_Name_hasNum(lean_object*);
@@ -805,78 +806,7 @@ return v_r_174_;
 LEAN_EXPORT uint8_t l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl(lean_object* v_n_u2081_175_, lean_object* v_n_u2082_176_){
 _start:
 {
-uint64_t v___y_178_; uint64_t v___y_179_; uint64_t v___y_186_; uint8_t v___x_189_; 
-v___x_189_ = l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl_unsafe__1(v_n_u2081_175_, v_n_u2082_176_);
-if (v___x_189_ == 0)
-{
-if (lean_obj_tag(v_n_u2081_175_) == 0)
-{
-uint64_t v___x_190_; 
-v___x_190_ = lean_uint64_once(&l_Lean_Name_hashEx___closed__0, &l_Lean_Name_hashEx___closed__0_once, _init_l_Lean_Name_hashEx___closed__0);
-v___y_186_ = v___x_190_;
-goto v___jp_185_;
-}
-else
-{
-uint64_t v_hash_191_; 
-v_hash_191_ = lean_ctor_get_uint64(v_n_u2081_175_, sizeof(void*)*2);
-v___y_186_ = v_hash_191_;
-goto v___jp_185_;
-}
-}
-else
-{
-uint8_t v___x_192_; 
-v___x_192_ = 1;
-return v___x_192_;
-}
-v___jp_177_:
-{
-uint8_t v___x_180_; 
-v___x_180_ = lean_uint64_dec_lt(v___y_178_, v___y_179_);
-if (v___x_180_ == 0)
-{
-uint8_t v___x_181_; 
-v___x_181_ = lean_uint64_dec_eq(v___y_178_, v___y_179_);
-if (v___x_181_ == 0)
-{
-uint8_t v___x_182_; 
-v___x_182_ = 2;
-return v___x_182_;
-}
-else
-{
-uint8_t v___x_183_; 
-v___x_183_ = l_Lean_Name_quickCmpAux(v_n_u2081_175_, v_n_u2082_176_);
-return v___x_183_;
-}
-}
-else
-{
-uint8_t v___x_184_; 
-v___x_184_ = 0;
-return v___x_184_;
-}
-}
-v___jp_185_:
-{
-if (lean_obj_tag(v_n_u2082_176_) == 0)
-{
-uint64_t v___x_187_; 
-v___x_187_ = lean_uint64_once(&l_Lean_Name_hashEx___closed__0, &l_Lean_Name_hashEx___closed__0_once, _init_l_Lean_Name_hashEx___closed__0);
-v___y_178_ = v___y_186_;
-v___y_179_ = v___x_187_;
-goto v___jp_177_;
-}
-else
-{
-uint64_t v_hash_188_; 
-v_hash_188_ = lean_ctor_get_uint64(v_n_u2082_176_, sizeof(void*)*2);
-v___y_178_ = v___y_186_;
-v___y_179_ = v_hash_188_;
-goto v___jp_177_;
-}
-}
+return lean_name_quick_cmp_exported(v_n_u2081_175_, v_n_u2082_176_);
 }
 }
 LEAN_EXPORT lean_object* l___private_Lean_Data_Name_0__Lean_Name_quickCmpImpl___boxed(lean_object* v_n_u2081_193_, lean_object* v_n_u2082_194_){

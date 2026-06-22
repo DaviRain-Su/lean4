@@ -174,3 +174,74 @@ test "sleepFor returns without error" {
     if (!POSIX) return error.SkipZigTest;
     sleepFor(10, 5);
 }
+
+/// C++ flet<T> layout: { T* m_ref; T m_old_value; }
+const FletUsize = extern struct {
+    m_ref: *usize,
+    m_old_value: usize,
+};
+
+const FletObjPtr = extern struct {
+    m_ref: *?*anyopaque,
+    m_old_value: ?*anyopaque,
+};
+
+// C++ mangled: lean::scope_max_heartbeat::scope_max_heartbeat(unsigned long)
+fn cpp_scope_max_heartbeat_ctor(this: *FletUsize, max: usize) callconv(.c) void {
+    this.m_ref = &g_max_heartbeat;
+    this.m_old_value = g_max_heartbeat;
+    g_max_heartbeat = max;
+}
+
+// C++ mangled: lean::scope_max_heartbeat::~scope_max_heartbeat()
+fn cpp_scope_max_heartbeat_dtor(this: *FletUsize) callconv(.c) void {
+    g_max_heartbeat = this.m_old_value;
+}
+
+// C++ mangled: lean::scope_cancel_tk::scope_cancel_tk(lean_object*)
+fn cpp_scope_cancel_tk_ctor(this: *FletObjPtr, o: ?*anyopaque) callconv(.c) void {
+    this.m_ref = &g_cancel_tk;
+    this.m_old_value = g_cancel_tk;
+    g_cancel_tk = o;
+}
+
+// C++ mangled: lean::scope_cancel_tk::~scope_cancel_tk()
+fn cpp_scope_cancel_tk_dtor(this: *FletObjPtr) callconv(.c) void {
+    g_cancel_tk = this.m_old_value;
+}
+
+comptime {
+    @export(&cpp_scope_max_heartbeat_ctor, .{ .name = "_ZN4lean19scope_max_heartbeatC1Em", .linkage = .strong });
+    @export(&cpp_scope_max_heartbeat_dtor, .{ .name = "_ZN4lean19scope_max_heartbeatD1Ev", .linkage = .strong });
+    @export(&cpp_scope_cancel_tk_ctor, .{ .name = "_ZN4lean15scope_cancel_tkC1EP11lean_object", .linkage = .strong });
+    @export(&cpp_scope_cancel_tk_dtor, .{ .name = "_ZN4lean15scope_cancel_tkD1Ev", .linkage = .strong });
+}
+
+// C++ mangled: lean::check_system(char const*, bool)
+fn cpp_check_system(component_name: [*:0]const u8, do_check_interrupted: bool) callconv(.c) void {
+    checkSystem(component_name, do_check_interrupted);
+}
+comptime {
+    @export(&cpp_check_system, .{ .name = "_ZN4lean12check_systemEPKcb", .linkage = .strong });
+}
+
+// C++ mangled: lean::reset_heartbeat()
+fn cpp_reset_heartbeat() callconv(.c) void {
+    resetHeartbeat();
+}
+
+// C++ mangled: lean::get_max_heartbeat()
+fn cpp_get_max_heartbeat() callconv(.c) usize {
+    return getMaxHeartbeat();
+}
+
+// C++ mangled: lean::set_max_heartbeat(unsigned long)
+fn cpp_set_max_heartbeat(max: usize) callconv(.c) void {
+    setMaxHeartbeat(max);
+}
+
+comptime {
+    @export(&cpp_reset_heartbeat, .{ .name = "_ZN4lean15reset_heartbeatEv", .linkage = .strong });
+    @export(&cpp_get_max_heartbeat, .{ .name = "_ZN4lean17get_max_heartbeatEv", .linkage = .strong });
+    @export(&cpp_set_max_heartbeat, .{ .name = "_ZN4lean17set_max_heartbeatEm", .linkage = .strong });
+}

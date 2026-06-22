@@ -9,6 +9,13 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 const string = @import("string.zig");
+const int = @import("int.zig");
+const nat_arithmetic = @import("nat_arithmetic.zig");
+const uint = @import("uint.zig");
+const nat_constructors = @import("nat_constructors.zig");
+const runtime_options = @import("runtime_options");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
+
 
 const max_small_nat: usize = std.math.maxInt(usize) >> 1;
 
@@ -16,39 +23,107 @@ pub const force_link = true;
 const max_small_int: i64 = if (@sizeOf(usize) == 8) std.math.maxInt(c_int) else std.math.maxInt(c_int) >> 1;
 const min_small_int: i64 = if (@sizeOf(usize) == 8) std.math.minInt(c_int) else std.math.minInt(c_int) >> 1;
 
-extern fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque;
-extern fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque;
-extern fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque;
+fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
 
-extern fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool;
-extern fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool;
+pub export fn lean_big_int64_to_int(n: i64) callconv(.c) *anyopaque {
+    return int.lean_big_int64_to_int(n);
+}
+pub export fn lean_big_size_t_to_int(n: usize) callconv(.c) *anyopaque {
+    return int.lean_big_size_t_to_int(n);
+}
+pub export fn lean_big_int_to_nat(a: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_big_int_to_nat(a);
+}
 
-extern fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque;
-extern fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque;
-extern fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque;
+pub export fn lean_int_big_neg(a: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_neg(a);
+}
+pub export fn lean_int_big_add(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_add(a1, a2);
+}
+pub export fn lean_int_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_sub(a1, a2);
+}
+pub export fn lean_int_big_mul(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_mul(a1, a2);
+}
+pub export fn lean_int_big_div(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_div(a1, a2);
+}
+pub export fn lean_int_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_div_exact(a1, a2);
+}
+pub export fn lean_int_big_mod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_mod(a1, a2);
+}
+pub export fn lean_int_big_ediv(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_ediv(a1, a2);
+}
+pub export fn lean_int_big_emod(a1: *anyopaque, a2: *anyopaque) callconv(.c) *anyopaque {
+    return int.lean_int_big_emod(a1, a2);
+}
+pub export fn lean_int_big_eq(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_eq(a1, a2);
+}
+pub export fn lean_int_big_le(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_le(a1, a2);
+}
+pub export fn lean_int_big_lt(a1: *anyopaque, a2: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_lt(a1, a2);
+}
+pub export fn lean_int_big_nonneg(a: *anyopaque) callconv(.c) bool {
+    return int.lean_int_big_nonneg(a);
+}
 
-extern fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8;
-extern fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16;
-extern fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32;
-extern fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64;
-extern fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize;
+pub export fn lean_nat_big_succ(a: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_succ(a);
+}
+pub export fn lean_nat_big_div_exact(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_div_exact(a1, a2);
+}
+pub export fn lean_nat_big_land(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_land(a1, a2);
+}
+pub export fn lean_nat_big_lor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_lor(a1, a2);
+}
+pub export fn lean_nat_big_xor(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_xor(a1, a2);
+}
+pub export fn lean_nat_big_shiftr(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_shiftr(a1, a2);
+}
+pub export fn lean_nat_big_sub(a1: *anyopaque, a2: *anyopaque) callconv(.c) ?*anyopaque {
+    return nat_arithmetic.lean_nat_big_sub(a1, a2);
+}
+pub export fn lean_big_usize_to_nat(n: usize) callconv(.c) ?*anyopaque {
+    return nat_constructors.lean_big_usize_to_nat(n);
+}
+pub export fn lean_big_uint64_to_nat(n: u64) callconv(.c) ?*anyopaque {
+    return nat_constructors.lean_big_uint64_to_nat(n);
+}
+
+pub export fn lean_uint8_of_big_nat(a: *anyopaque) callconv(.c) u8 {
+    return uint.lean_uint8_of_big_nat(a);
+}
+pub export fn lean_uint16_of_big_nat(a: *anyopaque) callconv(.c) u16 {
+    return uint.lean_uint16_of_big_nat(a);
+}
+pub export fn lean_uint32_of_big_nat(a: *anyopaque) callconv(.c) u32 {
+    return uint.lean_uint32_of_big_nat(a);
+}
+pub export fn lean_uint64_of_big_nat(a: *anyopaque) callconv(.c) u64 {
+    return uint.lean_uint64_of_big_nat(a);
+}
+pub export fn lean_usize_of_big_nat(a: *anyopaque) callconv(.c) usize {
+    return uint.lean_usize_of_big_nat(a);
+}
 
 extern fn lean_task_spawn_core(c: *anyopaque, prio: c_uint, keep_alive: bool) callconv(.c) *anyopaque;
 extern fn lean_task_bind_core(x: *anyopaque, f: *anyopaque, prio: c_uint, sync: bool, keep_alive: bool) callconv(.c) *anyopaque;
@@ -127,24 +202,20 @@ fn sarrayPtr(a: *anyopaque) *lean.lean_sarray_object {
 }
 
 pub export fn lean_mk_thunk(c: *anyopaque) callconv(.c) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_thunk_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_thunk_object));
     const thunk = thunkPtr(ptr);
-    thunk.* = .{
-        .m_header = .{ .m_rc = 1, .m_cs_sz = 0, .m_other = 0, .m_tag = lean.LeanThunk },
-        .m_value = null,
-        .m_closure = c,
-    };
+    setStHeader(&thunk.m_header, lean.LeanThunk, 0);
+    thunk.m_value = null;
+    thunk.m_closure = c;
     return ptr;
 }
 
 pub export fn lean_thunk_pure(v: *anyopaque) callconv(.c) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_thunk_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_thunk_object));
     const thunk = thunkPtr(ptr);
-    thunk.* = .{
-        .m_header = .{ .m_rc = 1, .m_cs_sz = 0, .m_other = 0, .m_tag = lean.LeanThunk },
-        .m_value = v,
-        .m_closure = null,
-    };
+    setStHeader(&thunk.m_header, lean.LeanThunk, 0);
+    thunk.m_value = v;
+    thunk.m_closure = null;
     return ptr;
 }
 
@@ -202,7 +273,6 @@ pub export fn lean_io_wait_any(task_list: *anyopaque) callconv(.c) *anyopaque {
     const t = lean_io_wait_any_core(task_list);
     const v = lean_task_get(t);
     rc.lean_inc(v);
-    rc.lean_dec(t);
     return v;
 }
 
@@ -273,16 +343,11 @@ pub export fn lean_internal_is_multi_thread(_: ?*anyopaque) callconv(.c) u8 {
 }
 
 pub export fn lean_internal_is_debug(_: ?*anyopaque) callconv(.c) u8 {
-    return @intFromBool(builtin.mode == .Debug);
+    return @intFromBool(std.mem.eql(u8, runtime_options.cpp_build_type, "Debug"));
 }
 
 pub export fn lean_internal_get_build_type(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes(switch (builtin.mode) {
-        .Debug => "Debug",
-        .ReleaseSafe => "RelWithDebInfo",
-        .ReleaseSmall => "MinSizeRel",
-        .ReleaseFast => "Release",
-    });
+    return string.mkAsciiStringBytes(runtime_options.cpp_build_type);
 }
 
 pub export fn lean_version_get_major(_: ?*anyopaque) callconv(.c) *anyopaque {
@@ -323,30 +388,6 @@ pub export fn lean_runtime_hold(_: *anyopaque) callconv(.c) *anyopaque {
     return object.lean_box(0).?;
 }
 
-pub export fn lean_internal_get_default_verbose(_: ?*anyopaque) callconv(.c) u8 {
-    return 0;
-}
-
-pub export fn lean_internal_get_default_options(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return object.lean_box(0).?;
-}
-
-
-pub export fn lean_get_leanc_extra_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_leanc_internal_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_linker_flags(_: u8) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
-
-pub export fn lean_get_internal_linker_flags(_: ?*anyopaque) callconv(.c) *anyopaque {
-    return string.mkAsciiStringBytes("");
-}
 
 pub export fn lean_expr_dbg_to_string(e: *anyopaque) callconv(.c) *anyopaque {
     var fbs = std.Io.Writer.Allocating.init(std.heap.page_allocator);
@@ -410,18 +451,22 @@ fn printName(w: *std.Io.Writer, n: *anyopaque) void {
     }
     const ctor_mod = @import("ctor.zig");
     const tag = object.lean_ptr_tag(n);
-    const parent = ctor_mod.lean_ctor_get(n, 1) orelse return;
+    const parent = ctor_mod.lean_ctor_get(n, 0) orelse return;
     if (!object.lean_is_scalar(parent)) {
         printName(w, parent);
         w.writeByte('.') catch return;
     }
-    if (tag == 0) {
-        const str_obj = ctor_mod.lean_ctor_get(n, 0) orelse return;
-        const s: *lean.lean_string_object = @ptrCast(@alignCast(str_obj));
-        const data: [*]const u8 = @ptrCast(&s.m_data);
-        w.writeAll(data[0..s.m_size -| 1]) catch return;
-    } else {
-        w.print("{d}", .{object.lean_unbox(ctor_mod.lean_ctor_get(n, 0) orelse return)}) catch return;
+    switch (tag) {
+        1 => {
+            const str_obj = ctor_mod.lean_ctor_get(n, 1) orelse return;
+            const s: *lean.lean_string_object = @ptrCast(@alignCast(str_obj));
+            const data: [*]const u8 = @ptrCast(&s.m_data);
+            w.writeAll(data[0..s.m_size -| 1]) catch return;
+        },
+        2 => {
+            w.print("{d}", .{object.lean_unbox(ctor_mod.lean_ctor_get(n, 1) orelse return)}) catch return;
+        },
+        else => return,
     }
 }
 

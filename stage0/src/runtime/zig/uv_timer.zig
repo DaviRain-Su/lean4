@@ -10,6 +10,7 @@ const rc = @import("rc.zig");
 const io_result = @import("io_result.zig");
 const io_errno = @import("io_errno.zig");
 const lean = @import("lean_object.zig");
+const lean_alloc = @import("lean_allocator");
 
 const uv = @cImport({
     @cInclude("uv.h");
@@ -63,7 +64,7 @@ fn timerPromiseIsFinished(timer: *LeanUvTimerObject) bool {
 }
 
 fn uvCloseFreeCallback(handle: ?*uv.uv_handle_t) callconv(.c) void {
-    std.c.free(@ptrCast(handle));
+    lean_alloc.vtable.free(@ptrCast(handle), @sizeOf(uv.uv_timer_t), @alignOf(uv.uv_timer_t));
 }
 
 fn leanUvTimerFinalizer(ptr: *anyopaque) callconv(.c) void {
@@ -74,7 +75,7 @@ fn leanUvTimerFinalizer(ptr: *anyopaque) callconv(.c) void {
     lean_event_loop_lock();
     _ = uv.uv_close(@ptrCast(timer.m_uv_timer), uvCloseFreeCallback);
     lean_event_loop_unlock();
-    std.c.free(timer);
+    lean_alloc.leanFree(LeanUvTimerObject, @ptrCast(timer), 1);
 }
 
 fn timerForeach(ptr: *anyopaque, f: ?*anyopaque) callconv(.c) void {
@@ -132,7 +133,7 @@ fn handleTimerEvent(handle: ?*uv.uv_timer_t) callconv(.c) void {
 fn leanUvTimerMkHelper(timeout: u64, repeating: u8) *anyopaque {
     ensureTimerExternalClass();
 
-    const timer: *LeanUvTimerObject = @ptrCast(@alignCast(std.c.malloc(@sizeOf(LeanUvTimerObject)) orelse {
+    const timer: *LeanUvTimerObject = @ptrCast(@alignCast(lean_alloc.leanAlloc(LeanUvTimerObject, 1) orelse {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
     timer.* = .{
@@ -143,8 +144,8 @@ fn leanUvTimerMkHelper(timeout: u64, repeating: u8) *anyopaque {
         .m_state = .initial,
     };
 
-    const uv_timer: *uv.uv_timer_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_timer_t)) orelse {
-        std.c.free(timer);
+    const uv_timer: *uv.uv_timer_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_timer_t), @alignOf(uv.uv_timer_t)) orelse {
+        lean_alloc.leanFree(LeanUvTimerObject, @ptrCast(timer), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -154,8 +155,8 @@ fn leanUvTimerMkHelper(timeout: u64, repeating: u8) *anyopaque {
     lean_event_loop_unlock();
 
     if (init_result != 0) {
-        std.c.free(uv_timer);
-        std.c.free(timer);
+        lean_alloc.vtable.free(@ptrCast(uv_timer), @sizeOf(uv.uv_timer_t), @alignOf(uv.uv_timer_t));
+        lean_alloc.leanFree(LeanUvTimerObject, @ptrCast(timer), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(init_result, null));
     }
 

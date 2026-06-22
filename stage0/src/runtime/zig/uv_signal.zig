@@ -11,6 +11,7 @@ const rc = @import("rc.zig");
 const io_result = @import("io_result.zig");
 const io_errno = @import("io_errno.zig");
 const lean = @import("lean_object.zig");
+const lean_alloc = @import("lean_allocator");
 
 const uv = @cImport({
     @cInclude("uv.h");
@@ -64,7 +65,7 @@ fn signalPromiseIsFinished(signal: *LeanUvSignalObject) bool {
 }
 
 fn uvCloseFreeCallback(handle: ?*uv.uv_handle_t) callconv(.c) void {
-    std.c.free(@ptrCast(handle));
+    lean_alloc.vtable.free(@ptrCast(handle), @sizeOf(uv.uv_signal_t), @alignOf(uv.uv_signal_t));
 }
 
 fn leanUvSignalFinalizer(ptr: *anyopaque) callconv(.c) void {
@@ -75,7 +76,7 @@ fn leanUvSignalFinalizer(ptr: *anyopaque) callconv(.c) void {
     lean_event_loop_lock();
     _ = uv.uv_close(@ptrCast(signal.m_uv_signal), uvCloseFreeCallback);
     lean_event_loop_unlock();
-    std.c.free(signal);
+    lean_alloc.leanFree(LeanUvSignalObject, @ptrCast(signal), 1);
 }
 
 fn signalForeach(ptr: *anyopaque, f: ?*anyopaque) callconv(.c) void {
@@ -182,7 +183,7 @@ fn leanUvSignalMkHelper(signum_obj: u32, repeating: u8) *anyopaque {
 
     const signum = mapLeanSignum(signum_obj);
 
-    const signal: *LeanUvSignalObject = @ptrCast(@alignCast(std.c.malloc(@sizeOf(LeanUvSignalObject)) orelse {
+    const signal: *LeanUvSignalObject = @ptrCast(@alignCast(lean_alloc.leanAlloc(LeanUvSignalObject, 1) orelse {
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
     signal.* = .{
@@ -193,8 +194,8 @@ fn leanUvSignalMkHelper(signum_obj: u32, repeating: u8) *anyopaque {
         .m_state = .initial,
     };
 
-    const uv_signal: *uv.uv_signal_t = @ptrCast(@alignCast(std.c.malloc(@sizeOf(uv.uv_signal_t)) orelse {
-        std.c.free(signal);
+    const uv_signal: *uv.uv_signal_t = @ptrCast(@alignCast(lean_alloc.vtable.alloc(@sizeOf(uv.uv_signal_t), @alignOf(uv.uv_signal_t)) orelse {
+        lean_alloc.leanFree(LeanUvSignalObject, @ptrCast(signal), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(@intFromEnum(std.posix.E.NOMEM), null));
     }));
 
@@ -204,8 +205,8 @@ fn leanUvSignalMkHelper(signum_obj: u32, repeating: u8) *anyopaque {
     lean_event_loop_unlock();
 
     if (init_result != 0) {
-        std.c.free(uv_signal);
-        std.c.free(signal);
+        lean_alloc.vtable.free(@ptrCast(uv_signal), @sizeOf(uv.uv_signal_t), @alignOf(uv.uv_signal_t));
+        lean_alloc.leanFree(LeanUvSignalObject, @ptrCast(signal), 1);
         return io_result.lean_io_result_mk_error(io_errno.lean_decode_uv_error(init_result, null));
     }
 

@@ -29,6 +29,7 @@ else
     struct {
         extern fn lean_nat_big_eq(a1: ?*anyopaque, a2: ?*anyopaque) callconv(.c) bool;
     }.lean_nat_big_eq;
+extern fn l_Lean_Name_hash___override(n: *anyopaque) callconv(.c) u64;
 
 fn asString(o: *anyopaque) *lean.lean_string_object {
     return @ptrCast(@alignCast(o));
@@ -67,10 +68,46 @@ fn natEq(a1: ?*anyopaque, a2: ?*anyopaque) bool {
     }
     return nat_big_eq(a1, a2);
 }
+const CompatNameKind = enum {
+    invalid,
+    anonymous,
+    string,
+    numeral,
+};
+
+fn compatNameKind(n: ?*anyopaque) CompatNameKind {
+    if (n == null) return .invalid;
+    if (object.lean_is_scalar(n)) {
+        return if (object.lean_unbox(n.?) == 0) .anonymous else .invalid;
+    }
+    const o = n.?;
+    if (ctor.ctorNumObjs(o) != 2) return .invalid;
+    const prefix = ctor.lean_ctor_get(o, 0);
+    const suffix = ctor.lean_ctor_get(o, 1);
+    if (compatNameKind(prefix) == .invalid) return .invalid;
+    return switch (object.lean_ptr_tag(o)) {
+        1 => if (suffix != null and !object.lean_is_scalar(suffix.?) and object.lean_ptr_tag(suffix.?) == lean.LeanString) .string else .invalid,
+        2 => if (suffix != null and (object.lean_is_scalar(suffix) or object.lean_ptr_tag(suffix.?) == lean.LeanMPZ)) .numeral else .invalid,
+        else => .invalid,
+    };
+}
+
 
 fn nameHashPtr(n: ?*anyopaque) u64 {
     std.debug.assert(n != null and !object.lean_is_scalar(n));
-    return ctor.lean_ctor_get_uint64(n.?, pointer_bytes * 2);
+    const name = n.?;
+    const kind = compatNameKind(name);
+    return switch (kind) {
+        .string => if (object.lean_ptr_tag(name) == 1 and ctor.ctorScalarBytes(name) >= @sizeOf(u64))
+            ctor.lean_ctor_get_uint64(name, pointer_bytes * 2)
+        else
+            rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), stringHashObj(ctor.lean_ctor_get(name, 1).?)),
+        .numeral => if (object.lean_ptr_tag(name) == 2 and ctor.ctorScalarBytes(name) >= @sizeOf(u64))
+            ctor.lean_ctor_get_uint64(name, pointer_bytes * 2)
+        else
+            rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), natHashObj(ctor.lean_ctor_get(name, 1))),
+        else => l_Lean_Name_hash___override(name),
+    };
 }
 
 fn nameHash(n: ?*anyopaque) u64 {
@@ -89,7 +126,7 @@ fn natHashObj(n: ?*anyopaque) u64 {
 
 fn mkNameNumObj(prefix: *anyopaque, nat_value: ?*anyopaque) *anyopaque {
     const h = rt_hash.hash(nameHash(prefix), natHashObj(nat_value));
-    const result = alloc.lean_alloc_ctor(0, 2, @sizeOf(u64));
+    const result = alloc.lean_alloc_ctor(2, 2, @sizeOf(u64));
     ctor.lean_ctor_set(result, 0, prefix);
     ctor.lean_ctor_set(result, 1, nat_value);
     ctor.lean_ctor_set_uint64(result, pointer_bytes * 2, h);
@@ -241,6 +278,9 @@ pub export fn lean_name_eq(n1: ?*anyopaque, n2: ?*anyopaque) callconv(.c) u8 {
     if (lhs == rhs) return 1;
     if (lhs == null or rhs == null) return 0;
     if (object.lean_is_scalar(lhs) or object.lean_is_scalar(rhs)) return 0;
+    const lhs_kind = compatNameKind(lhs);
+    const rhs_kind = compatNameKind(rhs);
+    if (lhs_kind == .invalid or rhs_kind == .invalid or lhs_kind != rhs_kind) return 0;
     if (nameHashPtr(lhs) != nameHashPtr(rhs)) {
         return 0;
     }
@@ -250,19 +290,24 @@ pub export fn lean_name_eq(n1: ?*anyopaque, n2: ?*anyopaque) callconv(.c) u8 {
         std.debug.assert(!object.lean_is_scalar(lhs));
         std.debug.assert(!object.lean_is_scalar(rhs));
 
-        const tag = object.lean_ptr_tag(lhs.?);
-        if (tag != object.lean_ptr_tag(rhs.?)) {
+        const lhs_kind_loop = compatNameKind(lhs);
+        const rhs_kind_loop = compatNameKind(rhs);
+        if (lhs_kind_loop == .invalid or lhs_kind_loop != rhs_kind_loop) {
             return 0;
         }
 
-        if (tag == 1) {
-            if (!stringEq(ctor.lean_ctor_get(lhs.?, 1), ctor.lean_ctor_get(rhs.?, 1))) {
-                return 0;
-            }
-        } else {
-            if (!natEq(ctor.lean_ctor_get(lhs.?, 1), ctor.lean_ctor_get(rhs.?, 1))) {
-                return 0;
-            }
+        switch (lhs_kind_loop) {
+            .string => {
+                if (!stringEq(ctor.lean_ctor_get(lhs.?, 1), ctor.lean_ctor_get(rhs.?, 1))) {
+                    return 0;
+                }
+            },
+            .numeral => {
+                if (!natEq(ctor.lean_ctor_get(lhs.?, 1), ctor.lean_ctor_get(rhs.?, 1))) {
+                    return 0;
+                }
+            },
+            else => return 0,
         }
 
         lhs = ctor.lean_ctor_get(lhs.?, 0);
@@ -312,11 +357,20 @@ test "lean_name_append_index_after supports big Nat indexes" {
     try testing.expectEqualStrings("_10000000000000000000000000000000000000000", stringBytes(suffix));
 }
 
-fn mkNameNum(prefix: *anyopaque, nat_value: usize, hash: u64) *anyopaque {
-    const result = alloc.lean_alloc_ctor(0, 2, @sizeOf(u64));
+fn mkCanonicalNameNum(prefix: *anyopaque, nat_value: usize) *anyopaque {
+    const nat = object.lean_box(nat_value);
+    const hash = rt_hash.hash(nameHash(prefix), natHashObj(nat));
+    const result = alloc.lean_alloc_ctor(2, 2, @sizeOf(u64));
+    ctor.lean_ctor_set(result, 0, prefix);
+    ctor.lean_ctor_set(result, 1, nat);
+    ctor.lean_ctor_set_uint64(result, pointer_bytes * 2, hash);
+    return result;
+}
+
+fn mkNameGeneratorLikeState(prefix: *anyopaque, nat_value: usize) *anyopaque {
+    const result = alloc.lean_alloc_ctor(0, 2, 0);
     ctor.lean_ctor_set(result, 0, prefix);
     ctor.lean_ctor_set(result, 1, object.lean_box(nat_value));
-    ctor.lean_ctor_set_uint64(result, pointer_bytes * 2, hash);
     return result;
 }
 
@@ -346,9 +400,9 @@ fn decIfHeap(o: ?*anyopaque) void {
 
 test "lean_name_eq walks the Lean.Name ctor spine" {
     const anonymous = object.lean_box(0).?;
-    const lhs = mkNameStr(mkNameNum(anonymous, 7, 0xaaaa), "leaf", 0xbbbb);
-    const rhs = mkNameStr(mkNameNum(anonymous, 7, 0xaaaa), "leaf", 0xbbbb);
-    const diff = mkNameStr(mkNameNum(anonymous, 8, 0xaaaa), "leaf", 0xbbbb);
+    const lhs = mkNameStr(mkCanonicalNameNum(anonymous, 7), "leaf", 0xbbbb);
+    const rhs = mkNameStr(mkCanonicalNameNum(anonymous, 7), "leaf", 0xbbbb);
+    const diff = mkNameStr(mkCanonicalNameNum(anonymous, 8), "leaf", 0xbbbb);
     defer decIfHeap(lhs);
     defer decIfHeap(rhs);
     defer decIfHeap(diff);
@@ -357,6 +411,19 @@ test "lean_name_eq walks the Lean.Name ctor spine" {
     try testing.expectEqual(@as(u8, 0), lean_name_eq(lhs, diff));
     try testing.expectEqual(@as(u8, 0), lean_name_eq(anonymous, lhs));
     try testing.expectEqual(@as(u8, 0), lean_name_eq(null, lhs));
+}
+
+test "lean_name_eq rejects NameGenerator-shaped state objects" {
+    const anonymous = object.lean_box(0).?;
+    const valid = mkCanonicalNameNum(anonymous, 7);
+    const state = mkNameGeneratorLikeState(anonymous, 7);
+    defer decIfHeap(valid);
+    defer decIfHeap(state);
+
+    try testing.expectEqual(@as(u8, 2), object.lean_ptr_tag(valid));
+    try testing.expectEqual(CompatNameKind.numeral, compatNameKind(valid));
+    try testing.expectEqual(CompatNameKind.invalid, compatNameKind(state));
+    try testing.expectEqual(@as(u8, 0), lean_name_eq(valid, state));
 }
 
 test "lean_slice_hash uses slice bytes rather than the backing string" {

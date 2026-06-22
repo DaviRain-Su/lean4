@@ -137,6 +137,14 @@ inline fn natSmallValue(n: *anyopaque) usize {
     return object.lean_unbox(n);
 }
 
+inline fn varIdEq(a: *anyopaque, b: *anyopaque) bool {
+    // Both are Nats — compare by value
+    if (object.lean_is_scalar(a) and object.lean_is_scalar(b))
+        return object.lean_unbox(a) == object.lean_unbox(b);
+    // Fall back to pointer equality for non-scalar (hash-consed) Nats
+    return a == b;
+}
+
 inline fn getBoolField(o: *anyopaque, num_obj_fields: usize) bool {
     // bool stored as u8 scalar after obj fields
     const offset: c_uint = @intCast(num_obj_fields * @sizeOf(?*anyopaque));
@@ -471,9 +479,9 @@ fn boxT(v: Value, t: IRType) *anyopaque {
         },
         .UInt8 => object.lean_box(@as(usize, @intCast(v.num & 0xFF))).?,
         .UInt16 => object.lean_box(@as(usize, @intCast(v.num & 0xFFFF))).?,
-        .UInt32 => object.lean_box(@as(usize, @intCast(v.num & 0xFFFFFFFF))).?,
-        .UInt64 => object.lean_box(v.num).?,
-        .USize => object.lean_box(@as(usize, @intCast(v.num))).?,
+        .UInt32 => box.lean_box_uint32(@intCast(v.num & 0xFFFFFFFF)).?,
+        .UInt64 => box.lean_box_uint64(v.num).?,
+        .USize => box.lean_box_usize(@as(usize, @intCast(v.num))).?,
         .Irrelevant, .Void => object.lean_box(0).?,
         .Object, .Tagged, .TObject => v.obj orelse object.lean_box(0).?,
         .Struct, .Union => @panic("box_t: struct/union not implemented"),
@@ -484,11 +492,11 @@ fn unboxT(o: *anyopaque, t: IRType) Value {
     return switch (t) {
         .Float => Value.fromFloat(box.lean_unbox_float(o)),
         .Float32 => Value.fromFloat32(box.lean_unbox_float32(o)),
-        .UInt8 => Value.fromNum(ctor.lean_ctor_get_uint8(o, 0)),
-        .UInt16 => Value.fromNum(ctor.lean_ctor_get_uint16(o, 0)),
-        .UInt32 => Value.fromNum(ctor.lean_ctor_get_uint32(o, 0)),
-        .UInt64 => Value.fromNum(ctor.lean_ctor_get_uint64(o, 0)),
-        .USize => Value.fromNum(ctor.lean_ctor_get_usize(o, 0)),
+        .UInt8 => Value.fromNum(object.lean_unbox(o)),
+        .UInt16 => Value.fromNum(object.lean_unbox(o)),
+        .UInt32 => Value.fromNum(box.lean_unbox_uint32(o)),
+        .UInt64 => Value.fromNum(box.lean_unbox_uint64(o)),
+        .USize => Value.fromNum(box.lean_unbox_usize(o)),
         .Irrelevant, .Void => Value.fromNum(0),
         .Object, .Tagged, .TObject => Value.fromObj(o),
         .Struct, .Union => @panic("unbox_t: struct/union not implemented"),
@@ -625,6 +633,26 @@ const Interpreter = struct {
         return o;
     }
 
+    fn mkStubClosure(self: *Interpreter, d: *anyopaque, n: usize, args: ?[*]*anyopaque) *anyopaque {
+        const arity = array.lean_array_size(declParams(d));
+        const cls_size = 3 + arity;
+        const cls = alloc.lean_alloc_closure(getStub(cls_size), @intCast(cls_size), @intCast(3 + n));
+        rc.lean_inc(self.env);
+        ctor.lean_ctor_set(cls, 0, self.env);
+        rc.lean_inc(self.opts);
+        ctor.lean_ctor_set(cls, 1, self.opts);
+        rc.lean_inc(d);
+        ctor.lean_ctor_set(cls, 2, d);
+
+        if (args) |arg_ptr| {
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                ctor.lean_ctor_set(cls, @intCast(3 + i), arg_ptr[i]);
+            }
+        }
+        return cls;
+    }
+
     fn lookupSymbol(self: *Interpreter, fn_name: *anyopaque) SymbolCacheEntry {
         if (self.symbol_cache.get(fn_name)) |e| return e;
         const d = self.getDecl(fn_name);
@@ -730,7 +758,7 @@ const Interpreter = struct {
             .Ctor => return Value.fromObj(self.allocCtor(exprCtorInfo(e), exprCtorArgs(e))),
             .Reset => {
                 const o = self.var_(exprResetObj(e)).obj orelse object.lean_box(0).?;
-                if (rc.lean_is_exclusive(o)) {
+                if (!object.lean_is_scalar(o) and rc.lean_is_exclusive(o)) {
                     const n = exprResetNumObjs(e);
                     var i: usize = 0;
                     while (i < n) : (i += 1) {
@@ -739,7 +767,7 @@ const Interpreter = struct {
                     return Value.fromObj(o);
                 } else {
                     rc.lean_dec(o);
-                    return Value.fromNum(0);
+                    return Value.fromObj(object.lean_box(0).?);
                 }
             },
             .Reuse => {
@@ -804,8 +832,14 @@ const Interpreter = struct {
                     }
                     return Value.fromObj(cls);
                 } else {
-                    // Stub closure: not implemented fully (requires closure stubs)
-                    @panic("PAp with no native symbol: stub closure not implemented");
+                    var args_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+                    defer args_buf.deinit(self.allocator);
+                    var i: usize = 0;
+                    while (i < num_args) : (i += 1) {
+                        const arg = array.lean_array_uget(args, i) orelse continue;
+                        args_buf.append(self.allocator, self.evalObjArg(arg)) catch @panic("PAp: OOM");
+                    }
+                    return Value.fromObj(self.mkStubClosure(sym.decl, num_args, args_buf.items.ptr));
                 }
             },
             .Ap => {
@@ -858,7 +892,7 @@ const Interpreter = struct {
             },
             .IsShared => {
                 const o = self.var_(exprIsSharedObj(e)).obj orelse object.lean_box(0).?;
-                return Value.fromNum(if (!rc.lean_is_exclusive(o)) 1 else 0);
+                return Value.fromNum(if (object.lean_is_scalar(o) or !rc.lean_is_exclusive(o)) 1 else 0);
             },
             .IsTaggedPtr => {
                 const o = self.var_(exprIsTaggedPtrObj(e)).obj orelse object.lean_box(0).?;
@@ -875,23 +909,21 @@ const Interpreter = struct {
                 .VDecl => {
                     const e = fnBodyVDeclExpr(b);
                     const cont = fnBodyVDeclCont(b);
-                    // Tail recursion check
+                    // Tail recursion: FAp to self, ret is the vdecl var
                     if (exprTag(e) == .FAp and
                         lean_name_eq(exprFapFun(e), self.getFrame().fn_name) != 0 and
                         fnBodyTag(cont) == .Ret and
-                        !argIsIrrelevant(fnBodyRetArg(cont)))
+                        !argIsIrrelevant(fnBodyRetArg(cont)) and
+                        varIdEq(argVarId(fnBodyRetArg(cont)), fnBodyVDeclVar(b)))
                     {
-                        // Check if ret arg == vdecl var (simplified: assume yes for tail call)
                         const args = exprFapArgs(e);
                         const num_args = array.lean_array_size(args);
                         const old_size = self.arg_stack.items.len;
-                        // Copy args to end of stack
                         var i: usize = 0;
                         while (i < num_args) : (i += 1) {
                             const arg = array.lean_array_uget(args, i) orelse continue;
                             self.arg_stack.append(self.allocator, self.evalArg(arg)) catch @panic("tail rec: OOM");
                         }
-                        // Copy to parameter slots
                         i = 0;
                         while (i < num_args) : (i += 1) {
                             self.arg_stack.items[self.getFrame().arg_bp + i] = self.arg_stack.items[old_size + i];
@@ -901,7 +933,7 @@ const Interpreter = struct {
                     } else {
                         const v = self.evalExpr(e, fnBodyVDeclType(b));
                         self.var_(fnBodyVDeclVar(b)).* = v;
-                        b = fnBodyVDeclCont(b);
+                        b = cont;
                     }
                 },
                 .JDecl => {
@@ -965,7 +997,7 @@ const Interpreter = struct {
                 },
                 .Del => {
                     const v = self.var_(fnBodyDelVar(b)).*;
-                    if (v.is_obj) {
+                    if (v.is_obj and !object.lean_is_scalar(v.obj.?)) {
                         alloc.lean_free_object(v.obj.?);
                     }
                     b = fnBodyDelCont(b);
@@ -1138,17 +1170,13 @@ const Interpreter = struct {
             if (sym.native_addr) |addr| {
                 r = alloc.lean_alloc_closure(addr, @intCast(arity), 0);
             } else {
-                // Check for boxed version
                 const opt_d_boxed = lean_ir_find_env_decl_boxed(self.envArg(), ownedArg(fn_name));
                 defer rc.lean_dec(opt_d_boxed);
-                if (!object.lean_is_scalar(opt_d_boxed)) {
-                    const d_boxed = ctor.lean_ctor_get(opt_d_boxed, 0) orelse sym.decl;
-                    rc.lean_inc(d_boxed);
-                    // Stub closure (simplified)
-                    r = alloc.lean_alloc_closure(@ptrCast(@constCast(&stubClosureEntry)), @intCast(arity), 0);
-                } else {
-                    r = alloc.lean_alloc_closure(@ptrCast(@constCast(&stubClosureEntry)), @intCast(arity), 0);
-                }
+                const d = if (!object.lean_is_scalar(opt_d_boxed))
+                    ctor.lean_ctor_get(opt_d_boxed, 0) orelse sym.decl
+                else
+                    sym.decl;
+                r = self.mkStubClosure(d, 0, null);
             }
         }
         if (n > 0) {
@@ -1246,9 +1274,125 @@ const Interpreter = struct {
     }
 };
 
-// Stub closure entry point (simplified — real implementation needs per-arity stubs)
-fn stubClosureEntry() callconv(.c) *anyopaque {
-    @panic("stub closure not fully implemented");
+const StubObj = ?*anyopaque;
+
+fn stubObj(o: StubObj) *anyopaque {
+    return o orelse object.lean_box(0).?;
+}
+
+fn stubAux(args: [*]StubObj) StubObj {
+    const env = stubObj(args[0]);
+    const opts = stubObj(args[1]);
+    const d = stubObj(args[2]);
+    defer rc.lean_dec(env);
+    defer rc.lean_dec(opts);
+    defer rc.lean_dec(d);
+
+    const arity = array.lean_array_size(declParams(d));
+    var arg_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer arg_buf.deinit(std.heap.page_allocator);
+    var i: usize = 0;
+    while (i < arity) : (i += 1) {
+        arg_buf.append(std.heap.page_allocator, stubObj(args[3 + i])) catch @panic("interpreter stub: OOM");
+    }
+
+    var interp = Interpreter.init(env, opts, std.heap.page_allocator);
+    defer interp.deinit();
+    return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
+}
+
+fn stub1(x1: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{x1};
+    return stubAux(&args);
+}
+fn stub2(x1: StubObj, x2: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2 };
+    return stubAux(&args);
+}
+fn stub3(x1: StubObj, x2: StubObj, x3: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3 };
+    return stubAux(&args);
+}
+fn stub4(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4 };
+    return stubAux(&args);
+}
+fn stub5(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5 };
+    return stubAux(&args);
+}
+fn stub6(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6 };
+    return stubAux(&args);
+}
+fn stub7(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7 };
+    return stubAux(&args);
+}
+fn stub8(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8 };
+    return stubAux(&args);
+}
+fn stub9(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9 };
+    return stubAux(&args);
+}
+fn stub10(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10 };
+    return stubAux(&args);
+}
+fn stub11(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11 };
+    return stubAux(&args);
+}
+fn stub12(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12 };
+    return stubAux(&args);
+}
+fn stub13(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13 };
+    return stubAux(&args);
+}
+fn stub14(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14 };
+    return stubAux(&args);
+}
+fn stub15(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj, x15: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15 };
+    return stubAux(&args);
+}
+fn stub16(x1: StubObj, x2: StubObj, x3: StubObj, x4: StubObj, x5: StubObj, x6: StubObj, x7: StubObj, x8: StubObj, x9: StubObj, x10: StubObj, x11: StubObj, x12: StubObj, x13: StubObj, x14: StubObj, x15: StubObj, x16: StubObj) callconv(.c) StubObj {
+    var args = [_]StubObj{ x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16 };
+    return stubAux(&args);
+}
+fn stubM(args: [*]StubObj) callconv(.c) StubObj {
+    return stubAux(args);
+}
+
+fn stubPtr(comptime f: anytype) *anyopaque {
+    return @ptrCast(@constCast(f));
+}
+
+fn getStub(params: usize) *anyopaque {
+    return switch (params) {
+        1 => stubPtr(&stub1),
+        2 => stubPtr(&stub2),
+        3 => stubPtr(&stub3),
+        4 => stubPtr(&stub4),
+        5 => stubPtr(&stub5),
+        6 => stubPtr(&stub6),
+        7 => stubPtr(&stub7),
+        8 => stubPtr(&stub8),
+        9 => stubPtr(&stub9),
+        10 => stubPtr(&stub10),
+        11 => stubPtr(&stub11),
+        12 => stubPtr(&stub12),
+        13 => stubPtr(&stub13),
+        14 => stubPtr(&stub14),
+        15 => stubPtr(&stub15),
+        16 => stubPtr(&stub16),
+        else => stubPtr(&stubM),
+    };
 }
 
 // Curry native function with N args

@@ -13,15 +13,44 @@ set(
   alloc.cpp
   sharecommon.cpp
   object_ref.cpp
-  githash.cpp
-  io_error_helpers.cpp
   byteslice.cpp
+  mimalloc_compat.cpp
   uv/net_addr.cpp
   uv/zig_link_compat.cpp
 )
+if(LEAN_ZIG_RT_CUTOVER)
+  # Shims that fill gaps left by removing io.cpp/platform.cpp.
+  list(APPEND RUNTIME_OBJS githash.cpp io_error_helpers.cpp)
+else()
+  # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
+  list(APPEND RUNTIME_OBJS
+    io.cpp
+    memory.cpp
+    hash.cpp
+    init_module.cpp
+    stack_overflow.cpp
+    platform.cpp
+    allocprof.cpp
+    mpn.cpp
+    mutex.cpp
+    process.cpp
+    libuv.cpp
+    openssl.cpp
+    uv/dns.cpp
+    uv/event_loop.cpp
+    uv/signal.cpp
+    uv/system.cpp
+    uv/tcp.cpp
+    uv/timer.cpp
+    uv/udp.cpp
+  )
+endif()
 
 add_library(leanrt_initial-exec STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt_initial-exec PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+if(NOT LEAN_ZIG_RT_CUTOVER)
+  target_compile_definitions(leanrt_initial-exec PRIVATE LEAN_NO_WEAK_UV)
+endif()
 
 # Phase 2 cutover strategy: instead of weakening C++ symbols (which caused
 # 414 behavioral mismatches), we keep C++ strong and weaken only Zig symbols
@@ -37,6 +66,9 @@ add_library(leanrt STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
 if(NOT MSVC)
   target_compile_options(leanrt PRIVATE -ftls-model=local-exec)
+endif()
+if(NOT LEAN_ZIG_RT_CUTOVER)
+  target_compile_definitions(leanrt PRIVATE LEAN_NO_WEAK_UV)
 endif()
 # We do not export Lean symbols when statically linking on Windows.
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")

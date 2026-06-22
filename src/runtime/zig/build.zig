@@ -11,12 +11,24 @@ pub fn build(b: *std.Build) void {
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
     const cpp_build_type = b.option([]const u8, "cpp-build-type", "C++ CMAKE_BUILD_TYPE for .olean compatibility (Debug, Release, RelWithDebInfo, MinSizeRel)") orelse "Release";
+    const leanc_extra_cc_flags = b.option([]const u8, "leanc-extra-cc-flags", "Extra CC flags for leanc") orelse "";
+    const leanc_internal_flags = b.option([]const u8, "leanc-internal-flags", "Internal flags for leanc") orelse "";
+    const leanc_static_linker_flags = b.option([]const u8, "leanc-static-linker-flags", "Static linker flags") orelse "";
+    const leanc_shared_linker_flags = b.option([]const u8, "leanc-shared-linker-flags", "Shared linker flags") orelse "";
+    const leanc_internal_linker_flags = b.option([]const u8, "leanc-internal-linker-flags", "Internal linker flags") orelse "";
+    const lean_extra_linker_flags = b.option([]const u8, "lean-extra-linker-flags", "Extra Lean linker flags") orelse "";
 
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
     opts.addOption([]const u8, "cpp_build_type", cpp_build_type);
+    opts.addOption([]const u8, "leanc_extra_cc_flags", leanc_extra_cc_flags);
+    opts.addOption([]const u8, "leanc_internal_flags", leanc_internal_flags);
+    opts.addOption([]const u8, "leanc_static_linker_flags", leanc_static_linker_flags);
+    opts.addOption([]const u8, "leanc_shared_linker_flags", leanc_shared_linker_flags);
+    opts.addOption([]const u8, "leanc_internal_linker_flags", leanc_internal_linker_flags);
+    opts.addOption([]const u8, "lean_extra_linker_flags", lean_extra_linker_flags);
     const opts_mod = opts.createModule();
 
     const allocator_mod = b.addModule("lean_allocator", .{

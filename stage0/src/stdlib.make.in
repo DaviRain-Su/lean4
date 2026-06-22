@@ -43,6 +43,12 @@ LEANMAKE_OPTS=\
 	${EXTRA_LEANMAKE_OPTS}\
 	CMAKE_LIKE_OUTPUT=1
 
+ifeq "$(USE_ZIG)" "1"
+LEANMAKE_CMD=$(MAKE) -f "${CMAKE_BINARY_DIR}/share/lean/lean.mk"
+else
+LEANMAKE_CMD="${LEAN_BIN}/leanmake"
+endif
+
 ifeq "${STAGE}" "0"
   LEANMAKE_OPTS+=C_ONLY=1 C_OUT=${LEAN_SOURCE_DIR}/../stdlib/
 endif
@@ -64,29 +70,29 @@ Init:
 	@mkdir -p "${LIB}/lean/Lean" "${LIB}/lean/Lake" "${LIB}/lean/Std"
 # Use `+` to use the Make jobserver with `leanmake` for parallelized builds
 # Build `.olean/.o`s of downstream libraries as well for better parallelism
-	+"${LEAN_BIN}/leanmake" objs lib lib.export PKG=Init $(LEANMAKE_OPTS) \
+	+$(LEANMAKE_CMD) objs lib lib.export PKG=Init $(LEANMAKE_OPTS) \
 	  EXTRA_SRC_ROOTS="Std Std.lean Lean Lean.lean LeanIR.lean"
 
 Std: Init
-	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Std $(LEANMAKE_OPTS)
+	+$(LEANMAKE_CMD) lib lib.export PKG=Std $(LEANMAKE_OPTS)
 
 Lean: Std
-	+"${LEAN_BIN}/leanmake" lib lib.export PKG=Lean $(LEANMAKE_OPTS)
+	+$(LEANMAKE_CMD) lib lib.export PKG=Lean $(LEANMAKE_OPTS)
 
 Leanc: Lean
 ifneq "${STAGE}" "0"
-	+"${LEAN_BIN}/leanmake" -C "${CMAKE_BINARY_DIR}/leanc" lib PKG=Leanc $(LEANMAKE_OPTS) OUT="$(OUTARC)" LIB_OUT="$(OUTARC)" OLEAN_OUT="$(OUTARC)"
+	+$(LEANMAKE_CMD) -C "${CMAKE_BINARY_DIR}/leanc" lib PKG=Leanc $(LEANMAKE_OPTS) OUT="$(OUTARC)" LIB_OUT="$(OUTARC)" OLEAN_OUT="$(OUTARC)"
 endif
 
 Lake: Lean
 # lake is in its own subdirectory, so must adjust relative paths...
-	+"${LEAN_BIN}/leanmake" -C lake lib lib.export ../${LIB}/temp/LakeMain.o.export  PKG=Lake $(LEANMAKE_OPTS) OUT="../${LIB}" LIB_OUT="../${LIB}/lean" TEMP_OUT="../${LIB}/temp" OLEAN_OUT="../${LIB}/lean" EXTRA_SRC_ROOTS=LakeMain.lean
+	+$(LEANMAKE_CMD) -C lake lib lib.export ../${LIB}/temp/LakeMain.o.export  PKG=Lake $(LEANMAKE_OPTS) OUT="../${LIB}" LIB_OUT="../${LIB}/lean" TEMP_OUT="../${LIB}/temp" OLEAN_OUT="../${LIB}/lean" EXTRA_SRC_ROOTS=LakeMain.lean
 
 LeanChecker: Lake
-	+"${LEAN_BIN}/leanmake" lib PKG=LeanChecker $(LEANMAKE_OPTS) OUT="$(OUTARC)" LIB_OUT="$(OUTARC)" TEMP_OUT="${LIB}/temp" OLEAN_OUT="$(OUTARC)"
+	+$(LEANMAKE_CMD) lib PKG=LeanChecker $(LEANMAKE_OPTS) OUT="$(OUTARC)" LIB_OUT="$(OUTARC)" TEMP_OUT="${LIB}/temp" OLEAN_OUT="$(OUTARC)"
 
 LeanIR: Lean
-	+"${LEAN_BIN}/leanmake" lib PKG=LeanIR $(LEANMAKE_OPTS) OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}" LIB_OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}" OLEAN_OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
+	+$(LEANMAKE_CMD) lib PKG=LeanIR $(LEANMAKE_OPTS) OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}" LIB_OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}" OLEAN_OUT="${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}"
 
 endif
 

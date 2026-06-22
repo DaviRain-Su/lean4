@@ -118,6 +118,7 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Zig symbols that duplicate C++ are weakened (via weaken_zig_symbols.py) so only
 # Zig-only symbols fill gaps in the C++ runtime.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
+option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
 if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
@@ -699,6 +700,10 @@ if(USE_LAKE AND STAGE EQUAL 0)
   # Lake in the future as we won't use it in this stage
   set(USE_LAKE OFF)
 endif()
+if(LEAN_ZIG_CODEGEN AND USE_LAKE)
+  message(STATUS "Disabling Lake stdlib build because Lake does not support the Zig backend")
+  set(USE_LAKE OFF)
+endif()
 
 # Windows uses ";" as a path separator. We use `LEAN_PATH_SEPARATOR` on scripts such as lean.mk.in
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -863,11 +868,14 @@ if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
     " ${LIB}/temp/libleanshell.a ${TOOLCHAIN_STATIC_LINKER_FLAGS} ${EMSCRIPTEN_SETTINGS} -lnodefs.js -s EXIT_RUNTIME=1 -s MAIN_MODULE=1 -s LINKABLE=1 -s EXPORT_ALL=1 -s ERROR_ON_UNDEFINED_SYMBOLS=0"
   )
 endif()
-
 # Build the compiler using the bootstrapped C sources for stage0, and use
 # the LLVM build for stage1 and further.
 if(LLVM AND STAGE GREATER 0)
   set(EXTRA_LEANMAKE_OPTS "LLVM=1")
+endif()
+if(LEAN_ZIG_CODEGEN AND STAGE GREATER 0)
+  find_program(ZIG zig REQUIRED)
+  string(APPEND EXTRA_LEANMAKE_OPTS " USE_ZIG=1 ZIG=${ZIG}")
 endif()
 
 set(

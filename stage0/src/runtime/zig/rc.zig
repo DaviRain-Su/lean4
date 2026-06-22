@@ -27,6 +27,24 @@ else
         extern fn leanrt_task_deactivate_promise_impl(o: *anyopaque) callconv(.c) void;
     };
 extern fn leanrt_task_deactivate_task_impl(task_obj: *lean.lean_task_object) callconv(.c) void;
+extern fn lean_task_get(t: *anyopaque) callconv(.c) *anyopaque;
+
+const VisitMode = enum { mt, persistent };
+
+fn opaqueFunPtr(fun: anytype) ?*anyopaque {
+    return @ptrCast(@constCast(fun));
+}
+
+fn markPersistentFn(o: *anyopaque) callconv(.c) *anyopaque {
+    lean_mark_persistent(o);
+    return object.lean_box(0).?;
+}
+
+fn markMtFn(o: *anyopaque) callconv(.c) *anyopaque {
+    lean_mark_mt(o);
+    lean_dec(o);
+    return object.lean_box(0).?;
+}
 
 fn header(o: *anyopaque) *lean.lean_object {
     return @ptrCast(@alignCast(o));
@@ -56,7 +74,20 @@ fn addChild(todo: *std.ArrayList(*anyopaque), child: ?*anyopaque) void {
     }
 }
 
-fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
+fn visitExternal(mode: VisitMode, o: *anyopaque) void {
+    const ext: *lean.lean_external_object = @ptrCast(@alignCast(o));
+    const visit = switch (mode) {
+        .mt => opaqueFunPtr(&markMtFn),
+        .persistent => opaqueFunPtr(&markPersistentFn),
+    };
+    const fn_obj = alloc.lean_alloc_closure(visit, 1, 0);
+    if (ext.m_data) |data| {
+        ext.m_class.m_foreach(data, fn_obj);
+    }
+    lean_dec(fn_obj);
+}
+
+fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque, mode: VisitMode) void {
     const hdr = header(o);
     if (hdr.m_tag <= lean.LeanMaxCtorTag) {
         const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(o));
@@ -75,6 +106,14 @@ fn visitChildren(todo: *std.ArrayList(*anyopaque), o: *anyopaque) void {
             const array: *lean.lean_array_object = @ptrCast(@alignCast(o));
             const slots = arraySlots(array);
             for (0..array.m_size) |i| addChild(todo, slots[i]);
+        },
+        lean.LeanExternal => visitExternal(mode, o),
+        lean.LeanTask => addChild(todo, lean_task_get(o)),
+        lean.LeanPromise => {
+            const promise: *lean.lean_promise_object = @ptrCast(@alignCast(o));
+            if (promise.m_result) |result| {
+                addChild(todo, @ptrCast(result));
+            }
         },
         lean.LeanThunk => {
             const thunk: *lean.lean_thunk_object = @ptrCast(@alignCast(o));
@@ -268,7 +307,7 @@ pub export fn lean_mark_mt(o: *anyopaque) callconv(.c) void {
         if (hdr.m_rc <= 0) continue;
 
         hdr.m_rc = -hdr.m_rc;
-        visitChildren(&todo, current);
+        visitChildren(&todo, current, .mt);
     }
 }
 
@@ -285,7 +324,7 @@ pub export fn lean_mark_persistent(o: *anyopaque) callconv(.c) void {
         if (hdr.m_rc == 0) continue;
 
         hdr.m_rc = 0;
-        visitChildren(&todo, current);
+        visitChildren(&todo, current, .persistent);
     }
 }
 

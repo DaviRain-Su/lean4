@@ -1,16 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+generated_ext() {
+    local base=$1
+    if [[ -e $CSRCS/$base.c ]]; then
+        echo c
+    elif [[ -e $CSRCS/$base.zig ]]; then
+        echo zig
+    else
+        return 1
+    fi
+}
+
 rm -rf stage0 || true
 # don't copy untracked files
 # `:!` is git glob flavor for exclude patterns
 for f in $(git ls-files src ':!:src/lake/*' ':!:src/Leanc.lean'); do
     if [[ $f == *.lean ]]; then
-        f=${f#src/}
-        f=${f%.lean}.c
-        mkdir -p $(dirname stage0/stdlib/$f)
-        cp ${CP_C_PARAMS:-} $CSRCS/$f stage0/stdlib/$f
+        base=${f#src/}
+        base=${base%.lean}
+        ext=$(generated_ext "$base") || continue
+        out=$base.$ext
+        mkdir -p $(dirname stage0/stdlib/$out)
+        cp ${CP_C_PARAMS:-} $CSRCS/$out stage0/stdlib/$out
     else
+        [[ -e $f ]] || continue
         mkdir -p $(dirname stage0/$f)
         cp $f stage0/$f
     fi
@@ -20,14 +34,19 @@ done
 # copy the README to ensure the `stage0/src/lake` directory is committed
 for f in $(git ls-files 'src/lake/Lake/*' src/lake/Lake.lean src/lake/LakeMain.lean src/lake/README.md ':!:src/lakefile.toml'); do
     if [[ $f == *.lean ]]; then
-        f=${f#src/lake}
-        f=${f%.lean}.c
-        mkdir -p $(dirname stage0/stdlib/$f)
-        cp ${CP_C_PARAMS:-} $CSRCS/$f stage0/stdlib/$f
+        base=${f#src/lake}
+        base=${base%.lean}
+        ext=$(generated_ext "$base") || continue
+        out=$base.$ext
+        mkdir -p $(dirname stage0/stdlib/$out)
+        cp ${CP_C_PARAMS:-} $CSRCS/$out stage0/stdlib/$out
     else
+        [[ -e $f ]] || continue
         mkdir -p $(dirname stage0/$f)
         cp $f stage0/$f
     fi
 done
 
-git add stage0
+if [[ ${SKIP_GIT_ADD:-0} != 1 ]]; then
+    git add stage0
+fi

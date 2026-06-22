@@ -3,10 +3,13 @@
 
 const std = @import("std");
 const testing = std.testing;
+const runtime_options = @import("runtime_options");
 const alloc = @import("alloc.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
+const export_allocator_symbols = runtime_options.export_allocator_symbols;
+
 
 // `lean_ref_object` is ABI-pinned to 16 bytes, so the MT synchronization state
 // lives out-of-line. A single runtime mutex is sufficient for the current M3
@@ -20,6 +23,14 @@ fn header(o: *anyopaque) *lean.lean_object {
 fn asRef(o: *anyopaque) *lean.lean_ref_object {
     return @ptrCast(@alignCast(o));
 }
+fn setStHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
+    const small_cs_sz = hdr.m_cs_sz;
+    hdr.m_rc = 1;
+    hdr.m_tag = tag;
+    hdr.m_other = other;
+    hdr.m_cs_sz = if (export_allocator_symbols) 0 else small_cs_sz;
+}
+
 
 fn refMaybeMt(ref: *anyopaque) bool {
     const m_rc = header(ref).m_rc;
@@ -35,10 +46,18 @@ fn mtTakeValue(ref: *anyopaque) ?*anyopaque {
     return value;
 }
 
-fn mtGetValue(ref: *anyopaque) *anyopaque {
-    g_mt_ref_mutex.lockUncancelable(std.Options.debug_io);
-    defer g_mt_ref_mutex.unlock(std.Options.debug_io);
-    return asRef(ref).m_value orelse @panic("null reference read");
+fn mtGetValueRetained(ref: *anyopaque) *anyopaque {
+    while (true) {
+        g_mt_ref_mutex.lockUncancelable(std.Options.debug_io);
+        if (asRef(ref).m_value) |value| {
+            rc.lean_inc(value);
+            g_mt_ref_mutex.unlock(std.Options.debug_io);
+            return value;
+        }
+        g_mt_ref_mutex.unlock(std.Options.debug_io);
+        std.atomic.spinLoopHint();
+        std.Thread.yield() catch {};
+    }
 }
 
 fn mtSetValue(ref: *anyopaque, new_value: *anyopaque) ?*anyopaque {
@@ -51,26 +70,26 @@ fn mtSetValue(ref: *anyopaque, new_value: *anyopaque) ?*anyopaque {
 }
 
 fn mtSwapValue(ref: *anyopaque, new_value: *anyopaque) *anyopaque {
-    g_mt_ref_mutex.lockUncancelable(std.Options.debug_io);
-    defer g_mt_ref_mutex.unlock(std.Options.debug_io);
-    const ref_obj = asRef(ref);
-    const old_value = ref_obj.m_value orelse @panic("null reference read");
-    ref_obj.m_value = new_value;
-    return old_value;
+    while (true) {
+        g_mt_ref_mutex.lockUncancelable(std.Options.debug_io);
+        const ref_obj = asRef(ref);
+        const old_value = ref_obj.m_value;
+        if (old_value != null) {
+            ref_obj.m_value = new_value;
+            g_mt_ref_mutex.unlock(std.Options.debug_io);
+            return old_value.?;
+        }
+        g_mt_ref_mutex.unlock(std.Options.debug_io);
+        std.atomic.spinLoopHint();
+        std.Thread.yield() catch {};
+    }
 }
 
 fn makeRef(initial: ?*anyopaque) *anyopaque {
-    const ptr = alloc.lean_alloc_object(@sizeOf(lean.lean_ref_object));
+    const ptr = alloc.allocSmallObject(@sizeOf(lean.lean_ref_object));
     const ref_obj = asRef(ptr);
-    ref_obj.* = .{
-        .m_header = .{
-            .m_rc = 1,
-            .m_cs_sz = 0,
-            .m_other = 0,
-            .m_tag = lean.LeanRef,
-        },
-        .m_value = initial,
-    };
+    setStHeader(&ref_obj.m_header, lean.LeanRef, 0);
+    ref_obj.m_value = initial;
     return ptr;
 }
 
@@ -111,11 +130,11 @@ pub export fn lean_st_mk_ref(value: *anyopaque) callconv(.c) *anyopaque {
 }
 
 pub export fn lean_st_ref_get(ref: *anyopaque) callconv(.c) *anyopaque {
-    const value = if (refMaybeMt(ref))
-        mtGetValue(ref)
-    else
-        expectRefValue(ref);
+    if (refMaybeMt(ref)) {
+        return mtGetValueRetained(ref);
+    }
 
+    const value = expectRefValue(ref);
     rc.lean_inc(value);
     return value;
 }

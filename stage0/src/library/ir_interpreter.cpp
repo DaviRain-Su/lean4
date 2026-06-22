@@ -1186,6 +1186,10 @@ extern "C" LEAN_EXPORT uint32_t lean_eval_main(b_obj_arg env, b_obj_arg opts, b_
     uint32 ret = run_main(TO_REF(elab_environment, env), TO_REF(options, opts), TO_REF(list_ref<string_ref>, args));
     return ret;
 }
+/* runMain with an explicit IR Decl — delegates to lean_eval_main. */
+extern "C" LEAN_EXPORT uint32_t lean_eval_main_decl(b_obj_arg env, b_obj_arg opts, b_obj_arg args, b_obj_arg) {
+    return lean_eval_main(env, opts, args);
+}
 
 extern "C" LEAN_EXPORT object * lean_eval_const(object * env, object * opts, object * c) {
     try {

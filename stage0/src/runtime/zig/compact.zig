@@ -206,24 +206,47 @@ pub const Compactor = struct {
     }
 
     fn insertString(self: *Compactor, o: *anyopaque) usize {
-        const sz = object.lean_object_data_byte_size(o);
-        const dst = self.copyObject(o, sz);
+        const str: *lean.lean_string_object = @ptrCast(@alignCast(o));
+        const sz = str.m_size;
+        const len = str.m_length;
+        const obj_sz = @sizeOf(lean.lean_string_object) + sz;
+        const dst = self.allocBytes(obj_sz);
+        const new_str: *lean.lean_string_object = @ptrCast(@alignCast(dst));
+        setNonHeapHeader(@ptrCast(dst), obj_sz, lean.LeanString, 0);
+        new_str.m_size = sz;
+        new_str.m_capacity = sz;
+        new_str.m_length = len;
+        @memcpy(new_str.m_data[0..sz], str.m_data[0..sz]);
         return self.toOffset(dst);
     }
 
     fn insertScalarArray(self: *Compactor, o: *anyopaque) usize {
-        const sz = object.lean_object_data_byte_size(o);
-        const dst = self.copyObject(o, sz);
+        const arr: *lean.lean_sarray_object = @ptrCast(@alignCast(o));
+        const sz = arr.m_size;
+        const elem_sz: usize = ptrOther(o);
+        const obj_sz = @sizeOf(lean.lean_sarray_object) + elem_sz * sz;
+        const dst = self.allocBytes(obj_sz);
+        const new_arr: *lean.lean_sarray_object = @ptrCast(@alignCast(dst));
+        setNonHeapHeader(@ptrCast(dst), obj_sz, lean.LeanScalarArray, @intCast(elem_sz));
+        new_arr.m_size = sz;
+        new_arr.m_capacity = sz;
+        @memcpy(new_arr.m_data[0 .. elem_sz * sz], arr.m_data[0 .. elem_sz * sz]);
         return self.toOffset(dst);
     }
 
     fn insertArray(self: *Compactor, o: *anyopaque) usize {
-        const sz = object.lean_object_data_byte_size(o);
-        const dst = self.copyObject(o, sz);
-        const arr: *lean.lean_array_object = @ptrCast(@alignCast(dst));
+        const arr: *lean.lean_array_object = @ptrCast(@alignCast(o));
+        const sz = arr.m_size;
+        const obj_sz = @sizeOf(lean.lean_array_object) + @sizeOf(Obj) * sz;
+        const dst = self.allocBytes(obj_sz);
+        const new_arr: *lean.lean_array_object = @ptrCast(@alignCast(dst));
+        setNonHeapHeader(@ptrCast(dst), obj_sz, lean.LeanArray, 0);
+        new_arr.m_size = sz;
+        new_arr.m_capacity = sz;
         const slots: [*]Obj = @ptrCast(@alignCast(&arr.m_data));
-        for (0..arr.m_size) |i| {
-            slots[i] = @ptrFromInt(self.compact(slots[i]));
+        const new_slots: [*]Obj = @ptrCast(@alignCast(&new_arr.m_data));
+        for (0..sz) |i| {
+            new_slots[i] = @ptrFromInt(self.compact(slots[i]));
         }
         return self.toOffset(dst);
     }
@@ -412,7 +435,7 @@ pub const Reader = struct {
         for (0..num_objs) |i| {
             slots[i] = self.fixObjectPtr(slots[i]);
         }
-        self.move(@sizeOf(lean.lean_object) + num_objs * @sizeOf(Obj));
+        self.move(object.lean_object_byte_size(o));
     }
 
     fn fixArray(self: *Reader, o: *anyopaque) void {
@@ -421,15 +444,15 @@ pub const Reader = struct {
         for (0..arr.m_size) |i| {
             slots[i] = self.fixObjectPtr(slots[i]);
         }
-        self.move(object.lean_object_data_byte_size(o));
+        self.move(object.lean_object_byte_size(o));
     }
 
     fn fixScalarArray(self: *Reader, o: *anyopaque) void {
-        self.move(object.lean_object_data_byte_size(o));
+        self.move(object.lean_object_byte_size(o));
     }
 
     fn fixString(self: *Reader, o: *anyopaque) void {
-        self.move(object.lean_object_data_byte_size(o));
+        self.move(object.lean_object_byte_size(o));
     }
 
     fn fixMPZ(self: *Reader, o: *anyopaque) void {
@@ -483,6 +506,28 @@ pub const Reader = struct {
 
     pub fn read(self: *Reader) ?*anyopaque {
         if (@intFromPtr(self.next) >= @intFromPtr(self.end)) return null;
+
+        // Fast path: if the region is at its base address and no dep regions need
+        // relocation, all saved pointers are already correct — return the root
+        // directly without a structural walk.
+        if (@intFromPtr(self.begin) == self.base_addr) {
+            var needs_dep_reloc = false;
+            for (self.dep_regions) |dep| {
+                if (@intFromPtr(dep.begin) != dep.base_addr) {
+                    needs_dep_reloc = true;
+                    break;
+                }
+            }
+            if (!needs_dep_reloc) {
+                const root_slot: *align(1) Obj = @ptrCast(self.next);
+                const root: ?*anyopaque = root_slot.*;
+                self.end = self.next;
+                return root;
+            }
+        }
+
+        // Slow path: dep-region fixup needed. Sort dep regions by base_addr.
+        std.mem.sort(RegionView, self.dep_regions, {}, cmpRegionViewByBaseAddr);
 
         // Apply closure fn-pointer relocations directly via the offset list
         // rather than scanning the compacted region for closure tags.

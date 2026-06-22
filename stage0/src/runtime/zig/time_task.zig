@@ -8,9 +8,11 @@
 pub const force_link = true;
 
 const std = @import("std");
+const builtin = @import("builtin");
 const apply = @import("apply.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
+const rc = @import("rc.zig");
 const string = @import("string.zig");
 
 const gpa = std.heap.c_allocator;
@@ -144,12 +146,14 @@ pub export fn lean_display_cumulative_profiling_times() callconv(.c) *anyopaque 
 
 pub export fn lean_profileit(category: *anyopaque, opts: *anyopaque, fn_obj: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
     const unit = object.lean_box(0).?;
+    rc.lean_inc(opts);
     if (lean_get_profiler(opts) == 0) {
         return apply.lean_apply_1(fn_obj, unit) orelse @panic("lean_profileit: apply returned null");
     }
 
     const cat_bytes = stringBytes(category);
     const category_owned = gpa.dupe(u8, cat_bytes) catch @panic("lean_profileit: oom");
+    rc.lean_inc(opts);
     const threshold_secs = lean_get_profiler_threshold(opts);
 
     const task = gpa.create(TimeTask) catch @panic("lean_profileit: oom");
@@ -174,3 +178,44 @@ pub export fn lean_profileit(category: *anyopaque, opts: *anyopaque, fn_obj: *an
     finishTimeTask(task);
     return result;
 }
+
+/// libc++ `std::string` / `std::basic_string<char>` layout (Darwin arm64/x86_64).
+/// Duplicates the helper in `dynlib_lib.zig` so this module stays self-contained.
+fn stdStringBytes(s: *const anyopaque) struct { ptr: [*]const u8, len: usize } {
+    const raw: [*]const u8 = @ptrCast(s);
+    if (builtin.os.tag != .macos and builtin.os.tag != .linux) {
+        return .{ .ptr = raw, .len = std.mem.len(raw) };
+    }
+    const size_byte = raw[23];
+    if ((size_byte & 0x80) == 0) {
+        const len: usize = size_byte;
+        return .{ .ptr = raw, .len = len };
+    }
+    const long_ptr: *const extern struct {
+        cap: usize,
+        size: usize,
+        data: [*]const u8,
+    } = @ptrCast(@alignCast(s));
+    return .{ .ptr = long_ptr.data, .len = long_ptr.size };
+}
+
+const SecondDuration = extern struct { rep: f64 };
+
+fn cppHasNoBlockProfilingTask() callconv(.c) bool {
+    return g_current_time_task != null and !std.mem.eql(u8, g_current_time_task.?.category, "blocked");
+}
+
+fn cppReportProfilingTime(category: *const anyopaque, time: SecondDuration) callconv(.c) void {
+    const parts = stdStringBytes(category);
+    reportProfilingTime(parts.ptr[0..parts.len], time.rep);
+}
+
+fn cppExcludeProfilingTimeFromCurrentTask(time: SecondDuration) callconv(.c) void {
+    if (g_current_time_task) |task| {
+        const child_inclusive_ns: i128 = @intFromFloat(time.rep * @as(f64, @floatFromInt(std.time.ns_per_s)));
+        task.excluded_ns += child_inclusive_ns;
+    }
+}
+
+// `src/library/time_task.cpp` provides the Itanium mangled profiling helpers
+// when the C++ library layer is linked. Keep only the C ABI exports above.

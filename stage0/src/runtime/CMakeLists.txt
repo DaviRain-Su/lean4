@@ -8,62 +8,56 @@ set(
   apply.cpp
   exception.cpp
   interrupt.cpp
-  memory.cpp
   stackinfo.cpp
   compact.cpp
-  init_module.cpp
-  io.cpp
-  hash.cpp
-  byteslice.cpp
-  platform.cpp
   alloc.cpp
-  allocprof.cpp
   sharecommon.cpp
-  stack_overflow.cpp
-  process.cpp
   object_ref.cpp
-  mpn.cpp
-  mutex.cpp
-  libuv.cpp
+  byteslice.cpp
+  mimalloc_compat.cpp
   uv/net_addr.cpp
-  uv/event_loop.cpp
-  uv/timer.cpp
-  uv/tcp.cpp
-  uv/udp.cpp
-  uv/dns.cpp
-  uv/system.cpp
-  uv/signal.cpp
   uv/zig_link_compat.cpp
-  zig/uv_init.cpp
-  openssl.cpp
 )
-if(USE_MIMALLOC)
-  list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)
-  # Lean code includes it as `lean/mimalloc.h` but for compiling `static.c` itself, add original dir
-  include_directories(${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/include)
-  # make all symbols visible, always build with optimizations as otherwise Lean becomes too slow
-  set(MIMALLOC_FLAGS "-DMI_SHARED_LIB -DMI_SHARED_LIB_EXPORT -O3 -DNDEBUG -DMI_WIN_NOREDIRECT -DMI_SECURE=${LEAN_MI_SECURE} -Wno-unused-function")
-  if(CMAKE_CXX_COMPILER_ID MATCHES "AppleClang|Clang")
-    string(APPEND MIMALLOC_FLAGS " -Wno-deprecated")
-  endif()
-  set_source_files_properties(
-    ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c
-    PROPERTIES
-      # (C flags are incomplete, compile as C++ instead like everything else)
-      LANGUAGE CXX
-      COMPILE_FLAGS ${MIMALLOC_FLAGS}
+if(LEAN_ZIG_RT_CUTOVER)
+  # Shims that fill gaps left by removing io.cpp/platform.cpp.
+  list(APPEND RUNTIME_OBJS githash.cpp io_error_helpers.cpp)
+else()
+  # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
+  list(APPEND RUNTIME_OBJS
+    io.cpp
+    memory.cpp
+    hash.cpp
+    init_module.cpp
+    stack_overflow.cpp
+    platform.cpp
+    allocprof.cpp
+    mpn.cpp
+    mutex.cpp
+    process.cpp
+    libuv.cpp
+    openssl.cpp
+    uv/dns.cpp
+    uv/event_loop.cpp
+    uv/signal.cpp
+    uv/system.cpp
+    uv/tcp.cpp
+    uv/timer.cpp
+    uv/udp.cpp
   )
 endif()
 
 add_library(leanrt_initial-exec STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt_initial-exec PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+if(NOT LEAN_ZIG_RT_CUTOVER)
+  target_compile_definitions(leanrt_initial-exec PRIVATE LEAN_NO_WEAK_UV)
+endif()
 
 # Phase 2 cutover strategy: instead of weakening C++ symbols (which caused
 # 414 behavioral mismatches), we keep C++ strong and weaken only Zig symbols
 # that duplicate C++ definitions.  Zig-only symbols stay strong and fill gaps.
 # The weakening happens in src/runtime/zig/CMakeLists.txt after the Zig
 # helperless archive is built, using weaken_zig_symbols.py.
-option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared (experimental)" OFF)
+option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 
 # The above library, like all other C++ code, is built using `-ftls-model=initial-exec`, which is necessary for linking it into `leanshared`,
 # but introduces a measurable overhead while accessing the thread-local variable `g_heap` when allocating and deallocating. Therefore we compile
@@ -72,6 +66,9 @@ add_library(leanrt STATIC ${RUNTIME_OBJS})
 set_target_properties(leanrt PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_ARCHIVE_OUTPUT_DIRECTORY})
 if(NOT MSVC)
   target_compile_options(leanrt PRIVATE -ftls-model=local-exec)
+endif()
+if(NOT LEAN_ZIG_RT_CUTOVER)
+  target_compile_definitions(leanrt PRIVATE LEAN_NO_WEAK_UV)
 endif()
 # We do not export Lean symbols when statically linking on Windows.
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")

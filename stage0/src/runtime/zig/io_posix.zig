@@ -632,13 +632,13 @@ fn stringSliceArg(s: *anyopaque) ![]const u8 {
     return stringBytes(s);
 }
 
-fn mkChild(stdin_h: *anyopaque, stdout_h: *anyopaque, stderr_h: *anyopaque, pid: u32, setsid: bool) *anyopaque {
+fn mkChild(stdin_h: *anyopaque, stdout_h: *anyopaque, stderr_h: *anyopaque, pid: u32, do_setsid: bool) *anyopaque {
     const child = alloc.lean_alloc_ctor(0, 3, @sizeOf(u32) + @sizeOf(u8));
     ctor.lean_ctor_set(child, 0, stdin_h);
     ctor.lean_ctor_set(child, 1, stdout_h);
     ctor.lean_ctor_set(child, 2, stderr_h);
     ctor.lean_ctor_set_uint32(child, 3 * @sizeOf(*anyopaque), pid);
-    ctor.lean_ctor_set_uint8(child, 3 * @sizeOf(*anyopaque) + @sizeOf(u32), @intFromBool(setsid));
+    ctor.lean_ctor_set_uint8(child, 3 * @sizeOf(*anyopaque) + @sizeOf(u32), @intFromBool(do_setsid));
     return child;
 }
 
@@ -649,6 +649,60 @@ fn childPid(child: *anyopaque) c.pid_t {
 fn childSetsid(child: *anyopaque) bool {
     const ctor_obj: *lean.lean_ctor_object = @ptrCast(@alignCast(child));
     return ctor_obj.m_header.m_cs_sz > @sizeOf(u32) and ctor.lean_ctor_get_uint8(child, 3 * @sizeOf(*anyopaque) + @sizeOf(u32)) != 0;
+}
+
+// ── process spawn helpers (fork+execvp, avoiding std.process.spawn OOM) ──
+
+extern var environ: ?[*:null]?[*:0]u8;
+extern fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) callconv(.c) c_int;
+extern fn unsetenv(name: [*:0]const u8) callconv(.c) c_int;
+extern fn execvp(file: [*:0]const u8, argv: [*:null]const ?[*:0]u8) callconv(.c) c_int;
+extern fn fork() callconv(.c) c_int;
+extern fn setsid() callconv(.c) c_int;
+extern fn chdir(path: [*:0]const u8) callconv(.c) c_int;
+extern fn dup2(old: c_int, new: c_int) callconv(.c) c_int;
+extern fn close(fd: c_int) callconv(.c) c_int;
+extern fn pipe(fds: [*]c_int) callconv(.c) c_int;
+extern fn _exit(code: c_int) callconv(.c) noreturn;
+
+fn dupZ(allocator: std.mem.Allocator, s: []const u8) ![:0]u8 {
+    return allocator.dupeZ(u8, s);
+}
+
+fn setCloexec(fd: c_int) void {
+    _ = c.fcntl(fd, @as(c_int, 2), @as(c_int, 1)); // F_SETFD=2, FD_CLOEXEC=1
+}
+
+fn openDevNull(flags: c_int) c_int {
+    var oflags: c.O = .{};
+    oflags.CLOEXEC = true;
+    oflags.ACCMODE = if (flags == 0) .RDONLY else .WRONLY;
+    const fd = c.open("/dev/null", oflags, @as(c_uint, 0o666));
+    if (c.errno(fd) != .SUCCESS) return -1;
+    return @intCast(fd);
+}
+
+fn mkSpawnErrno() *anyopaque {
+    return io_result.lean_io_result_mk_error(io_errno.lean_decode_io_error(c._errno().*, null));
+}
+
+fn setEnvZ(key: []const u8, val: []const u8) void {
+    var key_buf: [4096]u8 = undefined;
+    var val_buf: [4096]u8 = undefined;
+    if (key.len >= key_buf.len or val.len >= val_buf.len) return;
+    @memcpy(key_buf[0..key.len], key);
+    @memcpy(val_buf[0..val.len], val);
+    key_buf[key.len] = 0;
+    val_buf[val.len] = 0;
+    _ = setenv(@ptrCast(&key_buf), @ptrCast(&val_buf), 1);
+}
+
+fn unsetEnvZ(key: []const u8) void {
+    var key_buf: [4096]u8 = undefined;
+    if (key.len >= key_buf.len) return;
+    @memcpy(key_buf[0..key.len], key);
+    key_buf[key.len] = 0;
+    _ = unsetenv(@ptrCast(&key_buf));
 }
 
 fn mkSpawnError(err: anyerror) *anyopaque {
@@ -674,55 +728,139 @@ pub export fn lean_io_process_spawn(args_obj: *anyopaque) callconv(.c) *anyopaqu
     const inherit_env = ctor.lean_ctor_get_uint8(args_obj, 5 * @sizeOf(*anyopaque)) != 0;
     const use_setsid = ctor.lean_ctor_get_uint8(args_obj, 5 * @sizeOf(*anyopaque) + 1) != 0;
 
-    var argv = std.ArrayList([]const u8).initCapacity(gpa, array.lean_array_size(argv_arr) + 1) catch return mkOtherIoError("out of memory");
-    defer argv.deinit(gpa);
-    argv.append(gpa, stringSliceArg(cmd_obj) catch return invalidPath(cmd_obj)) catch return mkOtherIoError("out of memory");
-    for (0..array.lean_array_size(argv_arr)) |i| {
+    // Build argv as null-terminated C strings (strdup'd, freed after fork)
+    const nargs = array.lean_array_size(argv_arr);
+    var pargs: [*:null]?[*:0]u8 = gpa.allocSentinel(?[*:0]u8, nargs + 1, null) catch return mkOtherIoError("out of memory");
+    defer gpa.free(pargs[0..nargs + 1]);
+    pargs[0] = dupZ(gpa, stringSliceArg(cmd_obj) catch return invalidPath(cmd_obj)) catch return mkOtherIoError("out of memory");
+    for (0..nargs) |i| {
         const arg = array.lean_array_uget(argv_arr, i).?;
         defer rc.lean_dec(arg);
-        argv.append(gpa, stringSliceArg(arg) catch return invalidPath(arg)) catch return mkOtherIoError("out of memory");
+        pargs[i + 1] = dupZ(gpa, stringSliceArg(arg) catch return invalidPath(arg)) catch return mkOtherIoError("out of memory");
     }
 
-    var env_map = std.process.Environ.Map.init(gpa);
-    defer env_map.deinit();
-    var env_map_ptr: ?*const std.process.Environ.Map = null;
-    if (inherit_env or array.lean_array_size(env_arr) > 0) {
-        if (inherit_env) env_map.putPosixBlock(.{ .slice = parentEnvironSlice() }) catch return mkOtherIoError("out of memory");
-        for (0..array.lean_array_size(env_arr)) |i| {
-            const pair = array.lean_array_uget(env_arr, i).?;
-            defer rc.lean_dec(pair);
-            const key_obj = ctor.lean_ctor_get(pair, 0).?;
-            const val_opt = ctor.lean_ctor_get(pair, 1).?;
-            const key = stringSliceArg(key_obj) catch return invalidPath(key_obj);
-            if (object.lean_is_scalar(val_opt)) {
-                _ = env_map.orderedRemove(key);
+    // Collect env overrides
+    const nenv = array.lean_array_size(env_arr);
+    var env_keys = gpa.alloc([]const u8, nenv) catch return mkOtherIoError("out of memory");
+    defer gpa.free(env_keys);
+    var env_vals = gpa.alloc(?[]const u8, nenv) catch return mkOtherIoError("out of memory");
+    defer gpa.free(env_vals);
+    for (0..nenv) |i| {
+        const pair = array.lean_array_uget(env_arr, i).?;
+        defer rc.lean_dec(pair);
+        const key_obj = ctor.lean_ctor_get(pair, 0).?;
+        const val_opt = ctor.lean_ctor_get(pair, 1).?;
+        env_keys[i] = stringSliceArg(key_obj) catch return invalidPath(key_obj);
+        if (object.lean_is_scalar(val_opt)) {
+            env_vals[i] = null; // unset
+        } else {
+            const val = ctor.lean_ctor_get(val_opt, 0).?;
+            env_vals[i] = stringSliceArg(val) catch return invalidPath(val);
+        }
+    }
+
+    // Resolve cwd
+    const cwd_slice: ?[]const u8 = if (object.lean_is_scalar(cwd_opt))
+        null
+    else
+        stringSliceArg(ctor.lean_ctor_get(cwd_opt, 0).?) catch return invalidPath(ctor.lean_ctor_get(cwd_opt, 0).?);
+
+    // Setup pipes for piped stdio (PIPED=0, INHERIT=1, NUL=2)
+    var stdin_fds: [2]c_int = .{ -1, -1 };
+    var stdout_fds: [2]c_int = .{ -1, -1 };
+    var stderr_fds: [2]c_int = .{ -1, -1 };
+    if (stdin_mode == 0)  if (pipe(&stdin_fds)  == -1) return mkSpawnErrno();
+    if (stdout_mode == 0) if (pipe(&stdout_fds) == -1) return mkSpawnErrno();
+    if (stderr_mode == 0) if (pipe(&stderr_fds) == -1) return mkSpawnErrno();
+
+    // Set CLOEXEC on pipe write/read ends so they don't leak into child
+    if (stdin_mode == 0)  { setCloexec(stdin_fds[0]);  setCloexec(stdin_fds[1]);  }
+    if (stdout_mode == 0) { setCloexec(stdout_fds[0]); setCloexec(stdout_fds[1]); }
+    if (stderr_mode == 0) { setCloexec(stderr_fds[0]); setCloexec(stderr_fds[1]); }
+
+    const pid = fork();
+    if (pid == -1) return mkSpawnErrno();
+
+    if (pid == 0) {
+        // ── child process ──
+        // Do NOT allocate between fork and execvp (ASAN-safe)
+
+        // Stdio redirection
+        if (stdin_mode == 0) {
+            _ = dup2(stdin_fds[0], 0); // stdin read end
+            _ = close(stdin_fds[1]);  // close write end
+        } else if (stdin_mode == 2) {
+            const fd = openDevNull(0); // O_RDONLY=0
+            if (fd >= 0) _ = dup2(fd, 0);
+        }
+        if (stdout_mode == 0) {
+            _ = dup2(stdout_fds[1], 1); // stdout write end
+            _ = close(stdout_fds[0]);  // close read end
+        } else if (stdout_mode == 2) {
+            const fd = openDevNull(1); // O_WRONLY=1
+            if (fd >= 0) _ = dup2(fd, 1);
+        }
+        if (stderr_mode == 0) {
+            _ = dup2(stderr_fds[1], 2); // stderr write end
+            _ = close(stderr_fds[0]);  // close read end
+        } else if (stderr_mode == 2) {
+            const fd = openDevNull(1); // O_WRONLY=1
+            if (fd >= 0) _ = dup2(fd, 2);
+        }
+
+        // Environment
+        if (!inherit_env) {
+            // Clear environment (matches C++ behavior: environ = NULL on macOS)
+            environ = null;
+        }
+        for (0..nenv) |i| {
+            if (env_vals[i]) |val| {
+                setEnvZ(env_keys[i], val);
             } else {
-                const val = ctor.lean_ctor_get(val_opt, 0).?;
-                env_map.put(key, stringSliceArg(val) catch return invalidPath(val)) catch return mkOtherIoError("out of memory");
+                unsetEnvZ(env_keys[i]);
             }
         }
-        env_map_ptr = &env_map;
+
+        // Working directory
+        if (cwd_slice) |cwd| {
+            const cwd_z = dupZ(gpa, cwd) catch _exit(1);
+            if (chdir(cwd_z) < 0) _exit(1);
+        }
+
+        // setsid
+        if (use_setsid) {
+            if (setsid() < 0) _exit(1);
+        }
+
+        // execvp searches PATH
+        _ = execvp(pargs[0].?, @ptrCast(pargs));
+        // execvp only returns on error
+        _exit(1);
     }
 
-    const cwd: std.process.Child.Cwd = if (object.lean_is_scalar(cwd_opt))
-        .inherit
-    else
-        .{ .path = stringSliceArg(ctor.lean_ctor_get(cwd_opt, 0).?) catch return invalidPath(ctor.lean_ctor_get(cwd_opt, 0).?) };
+    // ── parent process ──
+    // Free duplicated argv strings
+    for (pargs[0 .. nargs + 1]) |p| if (p) |str| gpa.free(std.mem.span(str));
 
-    const child = std.process.spawn(std.Io.Threaded.global_single_threaded.io(), .{
-        .argv = argv.items,
-        .cwd = cwd,
-        .environ_map = env_map_ptr,
-        .stdin = if (stdin_mode == 0) .pipe else if (stdin_mode == 1) .inherit else .ignore,
-        .stdout = if (stdout_mode == 0) .pipe else if (stdout_mode == 1) .inherit else .ignore,
-        .stderr = if (stderr_mode == 0) .pipe else if (stderr_mode == 1) .inherit else .ignore,
-        .pgid = if (use_setsid) 0 else null,
-    }) catch |err| return mkSpawnError(err);
+    // Close child-side fds and wrap parent-side fds
+    var parent_stdin: *anyopaque = object.lean_box(0).?;
+    var parent_stdout: *anyopaque = object.lean_box(0).?;
+    var parent_stderr: *anyopaque = object.lean_box(0).?;
 
-    const stdin_obj = if (stdin_mode == 0) wrapFd(child.stdin.?.handle) else object.lean_box(0).?;
-    const stdout_obj = if (stdout_mode == 0) wrapFd(child.stdout.?.handle) else object.lean_box(0).?;
-    const stderr_obj = if (stderr_mode == 0) wrapFd(child.stderr.?.handle) else object.lean_box(0).?;
-    return io_result.lean_io_result_mk_ok(mkChild(stdin_obj, stdout_obj, stderr_obj, @intCast(child.id.?), use_setsid));
+    if (stdin_mode == 0) {
+        _ = close(stdin_fds[0]); // close read end (child side)
+        parent_stdin = wrapFd(stdin_fds[1]); // write end
+    }
+    if (stdout_mode == 0) {
+        _ = close(stdout_fds[1]); // close write end (child side)
+        parent_stdout = wrapFd(stdout_fds[0]); // read end
+    }
+    if (stderr_mode == 0) {
+        _ = close(stderr_fds[1]); // close write end (child side)
+        parent_stderr = wrapFd(stderr_fds[0]); // read end
+    }
+
+    return io_result.lean_io_result_mk_ok(mkChild(parent_stdin, parent_stdout, parent_stderr, @intCast(pid), use_setsid));
 }
 
 pub export fn lean_io_process_child_wait(_: *anyopaque, child: *anyopaque) callconv(.c) *anyopaque {

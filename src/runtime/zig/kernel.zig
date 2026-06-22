@@ -426,19 +426,19 @@ fn lowerLiftImpl(e: *anyopaque, s: u32, d: u32, mode: Mode) *anyopaque {
 /// Returns replacement expression or null (recurse into children).
 fn lowerLiftRec(e: *anyopaque, offset: u32, s: u32, d: u32, mode: Mode) ?*anyopaque {
     const s1 = s +% offset;
-    if (s1 < s) return null; // overflow
-    if (s1 >= looseBVarRange(e)) return null;
+    if (s1 < s) return retain(e); // overflow — no bvars to adjust
+    if (s1 >= looseBVarRange(e)) return retain(e); // no loose bvars at this offset — stop
     if (eTag(e) == 0) { // bvar
-        const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return null);
+        const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
         if (idx >= s1) {
             const new_idx = switch (mode) {
                 .lower => idx - d,
                 .lift => idx + d,
             };
-            return lean_expr_mk_bvar(object.lean_box(new_idx) orelse return null);
+            return lean_expr_mk_bvar(object.lean_box(new_idx) orelse return retain(e));
         }
     }
-    return null;
+    return null; // recurse into children
 }
 
 // ── Instantiate ──────────────────────────────────────────────────────────────
@@ -489,21 +489,20 @@ fn instantiateImplArr(e: *anyopaque, off: u32, base: usize, n: usize, subst: *an
 }
 
 fn instantiateRec(e: *anyopaque, off: u32, n: usize, base: usize, subst: *anyopaque, rev: bool) *anyopaque {
-    if (off < looseBVarRange(e)) {
-        if (eTag(e) == 0) { // bvar
-            const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
-            if (idx >= off) {
-                const h = off +% @as(u32, @intCast(n));
-                if (h >= off and idx < h) {
-                    const si = if (rev) n - 1 - (idx - off) else idx - off;
-                    const v = array.lean_array_uget(subst, base + si) orelse return retain(e);
-                    defer rc.lean_dec(v);
-                    const d_obj = object.lean_box(off) orelse return retain(e);
-                    const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
-                    return lean_expr_lift_loose_bvars(v, s_obj, d_obj);
-                }
-                return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
+    if (off >= looseBVarRange(e)) return retain(e);
+    if (eTag(e) == 0) { // bvar
+        const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
+        if (idx >= off) {
+            const h = off +% @as(u32, @intCast(n));
+            if (h >= off and idx < h) {
+                const si = if (rev) n - 1 - (idx - off) else idx - off;
+                const v = array.lean_array_uget(subst, base + si) orelse return retain(e);
+                defer rc.lean_dec(v);
+                const d_obj = object.lean_box(off) orelse return retain(e);
+                const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
+                return lean_expr_lift_loose_bvars(v, s_obj, d_obj);
             }
+            return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
         }
     }
     return replaceRecDirect(e, off, .instantiate, .{ .instantiate = .{ .n = n, .base = base, .subst = subst, .rev = rev } });
@@ -532,8 +531,9 @@ fn abstractImpl(e: *anyopaque, n: usize, subst: *anyopaque) *anyopaque {
 }
 
 fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque {
+    if (!hasFVar(e) and !hasMVar(e)) return retain(e);
     const tag = eTag(e);
-    if (tag == 1 or tag == 2) {
+    if (tag == 1 or tag == 2) { // fvar or mvar
         const name = ctor.lean_ctor_get(e, 0) orelse return retain(e);
         var i: usize = n;
         while (i > 0) {
@@ -548,6 +548,7 @@ fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque 
                 }
             }
         }
+        return retain(e); // fvar/mvar not in subst — keep as-is
     }
     return replaceRecDirect(e, off, .abstract, .{ .abstract = .{ .n = n, .subst = subst } });
 }
@@ -631,7 +632,9 @@ fn lean_find_ext_expr(p: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
 
 fn findImpl(p: *anyopaque, e: *anyopaque, partial: bool) *anyopaque {
     var found: ?*anyopaque = null;
-    findRec(e, p, &found, partial);
+    var visited = std.AutoHashMap(*anyopaque, void).init(std.heap.c_allocator);
+    defer visited.deinit();
+    findRec(e, p, &found, partial, &visited);
     if (found) |f| {
         rc.lean_inc(f);
         const r = alloc.lean_alloc_ctor(1, 1, 0);
@@ -641,8 +644,28 @@ fn findImpl(p: *anyopaque, e: *anyopaque, partial: bool) *anyopaque {
     return object.lean_box(0).?;
 }
 
-fn findRec(e: *anyopaque, p: *anyopaque, found: *?*anyopaque, partial: bool) void {
+/// Returns true if e is likely unshared (RC == 1), so caching is unnecessary.
+inline fn isLikelyUnshared(e: *anyopaque) bool {
+    if (object.lean_is_scalar(e)) return true;
+    const hdr: *align(1) lean.lean_object = @ptrCast(e);
+    return hdr.m_rc == 1 or hdr.m_rc == -1;
+}
+
+/// Returns true if e was already visited. Otherwise marks e as visited.
+fn alreadyVisited(e: *anyopaque, cache: *std.AutoHashMap(*anyopaque, void)) bool {
+    if (isLikelyUnshared(e)) return false;
+    if (cache.contains(e)) return true;
+    cache.put(e, {}) catch return false; // OOM — skip caching, may be slow but correct
+    return false;
+}
+
+fn findRec(e: *anyopaque, p: *anyopaque, found: *?*anyopaque, partial: bool, visited: *std.AutoHashMap(*anyopaque, void)) void {
     if (found.* != null) return;
+    const tag = eTag(e);
+    // Leaf nodes (bvar=0, const=3, sort=4) are never cached — call predicate directly
+    if (tag != 0 and tag != 3 and tag != 4) {
+        if (alreadyVisited(e, visited)) return;
+    }
     rc.lean_inc(e);
     rc.lean_inc_ref(p);
     const r_opt = apply_mod.lean_apply_1(p, e);
@@ -664,37 +687,36 @@ fn findRec(e: *anyopaque, p: *anyopaque, found: *?*anyopaque, partial: bool) voi
             }
         }
     }
-    const tag = eTag(e);
     switch (tag) {
         5 => { // app
             if (partial) {
-                findRec(ctor.lean_ctor_get(e, 0) orelse return, p, found, partial);
+                findRec(ctor.lean_ctor_get(e, 0) orelse return, p, found, partial, visited);
             } else {
-                findRecAppFn(ctor.lean_ctor_get(e, 0) orelse return, p, found);
+                findRecAppFn(ctor.lean_ctor_get(e, 0) orelse return, p, found, visited);
             }
-            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial);
+            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial, visited);
         },
         6, 7 => { // lam, forallE
-            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial);
-            findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial);
+            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial, visited);
+            findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial, visited);
         },
         8 => { // letE
-            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial);
-            findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial);
-            findRec(ctor.lean_ctor_get(e, 3) orelse return, p, found, partial);
+            findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial, visited);
+            findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial, visited);
+            findRec(ctor.lean_ctor_get(e, 3) orelse return, p, found, partial, visited);
         },
-        10 => findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial), // mdata
-        11 => findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial), // proj
+        10 => findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, partial, visited), // mdata
+        11 => findRec(ctor.lean_ctor_get(e, 2) orelse return, p, found, partial, visited), // proj
         else => {},
     }
 }
 
-fn findRecAppFn(e: *anyopaque, p: *anyopaque, found: *?*anyopaque) void {
+fn findRecAppFn(e: *anyopaque, p: *anyopaque, found: *?*anyopaque, visited: *std.AutoHashMap(*anyopaque, void)) void {
     if (eTag(e) == 5) {
-        findRecAppFn(ctor.lean_ctor_get(e, 0) orelse return, p, found);
-        findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, true);
+        findRecAppFn(ctor.lean_ctor_get(e, 0) orelse return, p, found, visited);
+        findRec(ctor.lean_ctor_get(e, 1) orelse return, p, found, false, visited);
     } else {
-        findRec(e, p, found, true);
+        findRec(e, p, found, false, visited);
     }
 }
 
@@ -785,19 +807,18 @@ fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_ca
 // ── Core recursive replacement engine ────────────────────────────────────────
 
 fn instantiateSliceRec(e: *anyopaque, off: u32, n: usize, subst: []*anyopaque, rev: bool) *anyopaque {
-    if (off < looseBVarRange(e)) {
-        if (eTag(e) == 0) {
-            const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
-            if (idx >= off) {
-                const h = off +% @as(u32, @intCast(n));
-                if (h >= off and idx < h) {
-                    const si = if (rev) n - 1 - (idx - off) else idx - off;
-                    const d_obj = object.lean_box(off) orelse return retain(e);
-                    const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
-                    return lean_expr_lift_loose_bvars(subst[si], s_obj, d_obj);
-                }
-                return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
+    if (off >= looseBVarRange(e)) return retain(e);
+    if (eTag(e) == 0) {
+        const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
+        if (idx >= off) {
+            const h = off +% @as(u32, @intCast(n));
+            if (h >= off and idx < h) {
+                const si = if (rev) n - 1 - (idx - off) else idx - off;
+                const d_obj = object.lean_box(off) orelse return retain(e);
+                const s_obj = object.lean_box(@as(usize, 0)) orelse return retain(e);
+                return lean_expr_lift_loose_bvars(subst[si], s_obj, d_obj);
             }
+            return lean_expr_mk_bvar(object.lean_box(idx - @as(u32, @intCast(n))) orelse return retain(e));
         }
     }
     return replaceRecDirect(e, off, .instantiate_slice, .{ .instantiate_slice = .{ .n = n, .subst_slice = subst, .rev = rev } });
@@ -867,27 +888,25 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
 
 comptime {
     if (export_kernel_symbols) {
-        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .strong });
-        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .strong });
-        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .strong });
-        @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
-        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .strong });
-        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .strong });
-        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .strong });
-        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .strong });
-        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .strong });
-        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .strong });
-        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .strong });
-        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .strong });
-        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .strong });
-        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .strong });
-        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .strong });
-        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .strong });
-        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .strong });
-        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
-        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
-        @export(&lean_level_eqv, .{ .name = "lean_level_eqv", .linkage = .strong });
-        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .strong });
-        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
+        @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .weak });
+        @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .weak });
+        @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .weak });
+        @export(&lean_expr_equal, .{ .name = "lean_expr_equal", .linkage = .weak });
+        @export(&lean_expr_eqv, .{ .name = "lean_expr_eqv", .linkage = .weak });
+        @export(&lean_expr_has_loose_bvar, .{ .name = "lean_expr_has_loose_bvar", .linkage = .weak });
+        @export(&lean_expr_lower_loose_bvars, .{ .name = "lean_expr_lower_loose_bvars", .linkage = .weak });
+        @export(&lean_expr_lift_loose_bvars, .{ .name = "lean_expr_lift_loose_bvars", .linkage = .weak });
+        @export(&lean_expr_instantiate1, .{ .name = "lean_expr_instantiate1", .linkage = .weak });
+        @export(&lean_expr_instantiate, .{ .name = "lean_expr_instantiate", .linkage = .weak });
+        @export(&lean_expr_instantiate_range, .{ .name = "lean_expr_instantiate_range", .linkage = .weak });
+        @export(&lean_expr_instantiate_rev, .{ .name = "lean_expr_instantiate_rev", .linkage = .weak });
+        @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .weak });
+        @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .weak });
+        @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .weak });
+        @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .weak });
+        @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .weak });
+        @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .weak });
+        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .weak });
+        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
     }
 }
