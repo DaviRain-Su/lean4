@@ -11,6 +11,8 @@ pub const force_link = true;
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const ctor = @import("ctor.zig");
+const ea = @import("expr_accessors.zig");
+const rt = @import("lean_rt.zig");
 const util_name = @import("util_name.zig");
 
 extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
@@ -31,6 +33,47 @@ inline fn eData(e: *anyopaque) u64 {
 
 fn nameLt(a: *anyopaque, b: *anyopaque) bool {
     return util_name.cmpCore(a, b) < 0;
+}
+
+inline fn listIsNil(o: *anyopaque) bool {
+    return object.lean_is_scalar(o) and object.lean_unbox(o) == 0;
+}
+
+inline fn natLt(a: *anyopaque, b: *anyopaque) bool {
+    return rt.lean_nat_lt(@ptrCast(a), @ptrCast(b));
+}
+
+fn levelsLt(as: *anyopaque, bs: *anyopaque, use_hash: bool) bool {
+    if (listIsNil(as)) return !listIsNil(bs);
+    if (listIsNil(bs)) return false;
+    const ah = ctor.lean_ctor_get(as, 0) orelse return false;
+    const at = ctor.lean_ctor_get(as, 1) orelse return false;
+    const bh = ctor.lean_ctor_get(bs, 0) orelse return false;
+    const bt = ctor.lean_ctor_get(bs, 1) orelse return false;
+    if (levelLt(ah, bh, use_hash)) return true;
+    if (levelLt(bh, ah, use_hash)) return false;
+    return levelsLt(at, bt, use_hash);
+}
+
+fn litLt(a: *anyopaque, b: *anyopaque) bool {
+    const la = ea.litValue(a);
+    const lb = ea.litValue(b);
+    const ka = object.lean_ptr_tag(la);
+    const kb = object.lean_ptr_tag(lb);
+    if (ka != kb) return ka < kb;
+    switch (ka) {
+        0 => {
+            const na = ctor.lean_ctor_get(la, 0) orelse return false;
+            const nb = ctor.lean_ctor_get(lb, 0) orelse return false;
+            return natLt(na, nb);
+        },
+        1 => {
+            const sa = ctor.lean_ctor_get(la, 0) orelse return false;
+            const sb = ctor.lean_ctor_get(lb, 0) orelse return false;
+            return lean_string_lt(sa, sb) != 0;
+        },
+        else => return false,
+    }
 }
 
 fn levelKind(l: *anyopaque) u8 {
@@ -109,88 +152,61 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
     if (exprEqv(a, b)) return false;
     switch (ka) {
         0 => {
-            const ia = if (object.lean_is_scalar(a)) object.lean_unbox(a) else blk: {
-                const f = ctor.lean_ctor_get(a, 0) orelse return false;
-                break :blk object.lean_unbox(f);
-            };
-            const ib = if (object.lean_is_scalar(b)) object.lean_unbox(b) else blk: {
-                const f = ctor.lean_ctor_get(b, 0) orelse return false;
-                break :blk object.lean_unbox(f);
-            };
-            return ia < ib;
+            if (object.lean_is_scalar(a) and object.lean_is_scalar(b)) {
+                return object.lean_unbox(a) < object.lean_unbox(b);
+            }
+            const ia = if (object.lean_is_scalar(a)) object.lean_box(object.lean_unbox(a)).? else ea.bvarIdx(a);
+            const ib = if (object.lean_is_scalar(b)) object.lean_box(object.lean_unbox(b)).? else ea.bvarIdx(b);
+            return natLt(ia, ib);
         },
-        1 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        2 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        3 => {
-            const la = ctor.lean_ctor_get(a, 0) orelse return false;
-            const lb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return levelLt(la, lb, use_hash);
-        },
+        1 => return nameLt(ea.fvarName(a), ea.fvarName(b)),
+        2 => return nameLt(ea.mvarName(a), ea.mvarName(b)),
+        3 => return levelLt(ea.sortLevel(a), ea.sortLevel(b), use_hash),
         4 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
+            const na = ea.constName(a);
+            const nb = ea.constName(b);
             if (lean_name_eq(na, nb) == 0) return nameLt(na, nb);
-            const la = ctor.lean_ctor_get(a, 1) orelse return false;
-            const lb = ctor.lean_ctor_get(b, 1) orelse return false;
-            return levelLt(la, lb, use_hash);
+            return levelsLt(ea.constLevels(a), ea.constLevels(b), use_hash);
         },
         5 => {
-            const fa = ctor.lean_ctor_get(a, 0) orelse return false;
-            const fb = ctor.lean_ctor_get(b, 0) orelse return false;
+            const fa = ea.appFn(a);
+            const fb = ea.appFn(b);
             if (!exprEqv(fa, fb)) return isLtExpr(fa, fb, use_hash);
-            const aa = ctor.lean_ctor_get(a, 1) orelse return false;
-            const ab = ctor.lean_ctor_get(b, 1) orelse return false;
-            return isLtExpr(aa, ab, use_hash);
+            return isLtExpr(ea.appArg(a), ea.appArg(b), use_hash);
         },
         6, 7 => {
-            const da = ctor.lean_ctor_get(a, 1) orelse return false;
-            const db = ctor.lean_ctor_get(b, 1) orelse return false;
+            const da = ea.bindingDomain(a);
+            const db = ea.bindingDomain(b);
             if (!exprEqv(da, db)) return isLtExpr(da, db, use_hash);
-            const ba = ctor.lean_ctor_get(a, 2) orelse return false;
-            const bb = ctor.lean_ctor_get(b, 2) orelse return false;
-            return isLtExpr(ba, bb, use_hash);
+            return isLtExpr(ea.bindingBody(a), ea.bindingBody(b), use_hash);
         },
         8 => {
-            const nda = if (ctor.lean_ctor_get(a, 4)) |v| object.lean_unbox(v) else 0;
-            const ndb = if (ctor.lean_ctor_get(b, 4)) |v| object.lean_unbox(v) else 0;
+            const nda = ea.letNonDep(a);
+            const ndb = ea.letNonDep(b);
             if (nda != ndb) return nda < ndb;
-            const ta = ctor.lean_ctor_get(a, 1) orelse return false;
-            const tb = ctor.lean_ctor_get(b, 1) orelse return false;
+            const ta = ea.letType(a);
+            const tb = ea.letType(b);
             if (!exprEqv(ta, tb)) return isLtExpr(ta, tb, use_hash);
-            const va = ctor.lean_ctor_get(a, 2) orelse return false;
-            const vb = ctor.lean_ctor_get(b, 2) orelse return false;
+            const va = ea.letValue(a);
+            const vb = ea.letValue(b);
             if (!exprEqv(va, vb)) return isLtExpr(va, vb, use_hash);
-            const ba = ctor.lean_ctor_get(a, 3) orelse return false;
-            const bb = ctor.lean_ctor_get(b, 3) orelse return false;
-            return isLtExpr(ba, bb, use_hash);
+            return isLtExpr(ea.letBody(a), ea.letBody(b), use_hash);
         },
-        9 => return object.lean_unbox(a) < object.lean_unbox(b),
+        9 => return litLt(a, b),
         10 => {
-            const ea = ctor.lean_ctor_get(a, 1) orelse return false;
-            const eb = ctor.lean_ctor_get(b, 1) orelse return false;
-            if (!exprEqv(ea, eb)) return isLtExpr(ea, eb, use_hash);
-            const ma = ctor.lean_ctor_get(a, 0) orelse return false;
-            const mb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return mdataLt(ma, mb);
+            const ea_inner = ea.mdataExpr(a);
+            const eb_inner = ea.mdataExpr(b);
+            if (!exprEqv(ea_inner, eb_inner)) return isLtExpr(ea_inner, eb_inner, use_hash);
+            return mdataLt(ea.mdataData(a), ea.mdataData(b));
         },
         11 => {
-            const ea = ctor.lean_ctor_get(a, 2) orelse return false;
-            const eb = ctor.lean_ctor_get(b, 2) orelse return false;
-            if (!exprEqv(ea, eb)) return isLtExpr(ea, eb, use_hash);
-            const sa = ctor.lean_ctor_get(a, 0) orelse return false;
-            const sb = ctor.lean_ctor_get(b, 0) orelse return false;
+            const ea_proj = ea.projExpr(a);
+            const eb_proj = ea.projExpr(b);
+            if (!exprEqv(ea_proj, eb_proj)) return isLtExpr(ea_proj, eb_proj, use_hash);
+            const sa = ea.projSname(a);
+            const sb = ea.projSname(b);
             if (lean_name_eq(sa, sb) == 0) return nameLt(sa, sb);
-            const ia = if (ctor.lean_ctor_get(a, 1)) |v| object.lean_unbox(v) else 0;
-            const ib = if (ctor.lean_ctor_get(b, 1)) |v| object.lean_unbox(v) else 0;
-            return ia < ib;
+            return natLt(ea.projIdx(a), ea.projIdx(b));
         },
         else => return false,
     }
