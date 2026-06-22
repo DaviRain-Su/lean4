@@ -29,9 +29,6 @@ fn maybeFree(o: ?*anyopaque) void {
 
 fn allocBoxedScalar(comptime T: type, value: T) *anyopaque {
     const ptr = alloc.lean_alloc_ctor(0, 0, @intCast(@sizeOf(T)));
-    if (export_allocator_symbols) {
-        header(ptr).m_cs_sz = @intCast(@sizeOf(T));
-    }
     scalarFieldPtr(T, ptr).* = value;
     return ptr;
 }
@@ -156,7 +153,6 @@ test "usize roundtrip covers tagged and boxed representations" {
             try testing.expect(object.lean_is_scalar(boxed));
         } else {
             try testing.expect(!object.lean_is_scalar(boxed));
-            try testing.expectEqual(@as(u16, @sizeOf(usize)), header(boxed.?).m_cs_sz);
         }
     }
 }
@@ -209,7 +205,6 @@ test "uint64 roundtrip uses heap fallback above tagged-scalar range" {
             try testing.expect(object.lean_is_scalar(boxed));
         } else {
             try testing.expect(!object.lean_is_scalar(boxed));
-            try testing.expectEqual(@as(u16, @sizeOf(u64)), header(boxed.?).m_cs_sz);
         }
     }
 }
@@ -229,7 +224,6 @@ test "float boxing preserves f64 bit patterns" {
         defer maybeFree(boxed);
 
         try testing.expect(!object.lean_is_scalar(boxed));
-        try testing.expectEqual(@as(u16, @sizeOf(f64)), header(boxed.?).m_cs_sz);
         try testing.expectEqual(bits, lean_float_to_bits(lean_unbox_float(boxed)));
     }
 }
@@ -249,7 +243,6 @@ test "float32 boxing preserves f32 bit patterns" {
         defer maybeFree(boxed);
 
         try testing.expect(!object.lean_is_scalar(boxed));
-        try testing.expectEqual(@as(u16, @sizeOf(f32)), header(boxed.?).m_cs_sz);
         try testing.expectEqual(bits, lean_float32_to_bits(lean_unbox_float32(boxed)));
     }
 }

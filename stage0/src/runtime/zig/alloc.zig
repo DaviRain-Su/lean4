@@ -69,7 +69,7 @@ const allocation_kind_small: u8 = 1;
 const allocation_kind_large: u8 = 2;
 pub const allocation_kind_mpz: u8 = 3;
 
-const AllocationMeta = extern struct {
+pub const AllocationMeta = extern struct {
     payload_size: usize,
     slot_idx: u16,
     kind: u8,
@@ -162,11 +162,9 @@ fn trackedMeta(payload_size: usize, slot_idx: usize, kind: u8) AllocationMeta {
 
 fn hasTrackedMeta(ptr: *anyopaque) bool {
     if (!export_allocator_symbols) return false;
-    // Tracked allocations have 16 bytes of AllocationMeta before the payload.
-    // If ptr is within the first 16 bytes of a page, ptr-4 would read from
-    // the previous page which may be unmapped (e.g. malloc-allocated objects
-    // at page boundaries). leanAlloc always places metadata in the same
-    // malloc block, so the offset from page start is >= sizeof(AllocationMeta).
+    // AllocationMeta (16 bytes) sits immediately before the payload.
+    // If ptr is within the first 16 bytes of a page, ptr-4 could read
+    // from an unmapped previous page. Fall through to legacy path instead.
     const page_size = std.heap.pageSize();
     const offset_in_page = @intFromPtr(ptr) & (page_size - 1);
     if (offset_in_page < @sizeOf(AllocationMeta)) return false;
@@ -558,7 +556,8 @@ pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopa
     const ptr = lean_alloc_object(total_size);
     const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
     setHeapHeader(&ctor.m_header, @intCast(tag), @intCast(num_objs));
-    ctor.m_header.m_cs_sz = @intCast(scalar_sz);
+    // m_cs_sz stays 0 (set by setHeapHeader) — matches C++ lean_set_st_header.
+    // scalar_sz is encoded in the AllocationMeta payload_size, not m_cs_sz.
     allocprof.recordAlloc(@intCast(tag));
     return ptr;
 }
@@ -682,11 +681,10 @@ test "lean_alloc_ctor initializes the constructor header" {
 
     const ctor: *lean.lean_ctor_object = @ptrCast(@alignCast(ptr));
     try testing.expectEqual(@as(i32, 1), ctor.m_header.m_rc);
-    try testing.expectEqual(@as(u16, 16), ctor.m_header.m_cs_sz);
+    try testing.expectEqual(@as(u16, 0), ctor.m_header.m_cs_sz);
     try testing.expectEqual(@as(u8, 3), ctor.m_header.m_other);
     try testing.expectEqual(@as(u8, 7), ctor.m_header.m_tag);
 }
-
 test "lean_alloc_closure initializes closure metadata" {
     const fn_ptr = @as(?*anyopaque, @ptrFromInt(0x12340));
     const ptr = lean_alloc_closure(fn_ptr, 4, 2);

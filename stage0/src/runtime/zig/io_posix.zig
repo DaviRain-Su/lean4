@@ -647,8 +647,7 @@ fn childPid(child: *anyopaque) c.pid_t {
 }
 
 fn childSetsid(child: *anyopaque) bool {
-    const ctor_obj: *lean.lean_ctor_object = @ptrCast(@alignCast(child));
-    return ctor_obj.m_header.m_cs_sz > @sizeOf(u32) and ctor.lean_ctor_get_uint8(child, 3 * @sizeOf(*anyopaque) + @sizeOf(u32)) != 0;
+    return ctor.ctorScalarBytes(child) > @sizeOf(u32) and ctor.lean_ctor_get_uint8(child, 3 * @sizeOf(*anyopaque) + @sizeOf(u32)) != 0;
 }
 
 // ── process spawn helpers (fork+execvp, avoiding std.process.spawn OOM) ──

@@ -91,15 +91,18 @@ pub fn ctorScalarBytes(o: *anyopaque) usize {
         }
     }
 
-    // Self-hosted mode: m_cs_sz stores scalar_sz directly for heap ctors.
-    if (hdr.m_rc != 0 and hdr.m_cs_sz != 0) {
-        return hdr.m_cs_sz;
+    // Self-hosted mode: heap ctors have m_cs_sz=0 (matching C++ lean_set_st_header).
+    // Non-heap objects have m_cs_sz set by lean_set_non_heap_header.
+    if (hdr.m_rc == 0 and hdr.m_cs_sz != 0) {
+        // Non-heap object: m_cs_sz stores total payload size.
+        std.debug.assert(hdr.m_cs_sz >= scalar_start);
+        return hdr.m_cs_sz - scalar_start;
     }
 
-    const payload_size = alloc.allocationPayloadSize(o) orelse if (hdr.m_rc == 0 and hdr.m_cs_sz != 0)
-        @as(usize, hdr.m_cs_sz)
-    else
-        return 0;
+    // Heap ctor: try AllocationMeta payload_size first (Zig tracked allocator).
+    // Fall back to legacy size-prefix (C++ inline lean_alloc_small_object in lean.h
+    // uses malloc(sizeof(size_t)+sz) with size at ptr-8, not AllocationMeta).
+    const payload_size = alloc.allocationPayloadSize(o) orelse alloc.legacyPayloadSize(o);
     std.debug.assert(payload_size >= scalar_start);
     return payload_size - scalar_start;
 }
