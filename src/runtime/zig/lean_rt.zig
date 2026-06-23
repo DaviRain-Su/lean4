@@ -1257,7 +1257,13 @@ pub inline fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: usize) L
     @setEvalBranchQuota(10000000);
     std.debug.assert(tag <= LeanMaxCtorTag and num_objs < LeanMaxCtorFields and scalar_sz < LeanMaxCtorScalarsSize);
     const total = lean_usize_add_checked(lean_usize_add_checked(@sizeOf(lean_object), lean_usize_mul_checked(@sizeOf(usize), @intCast(num_objs))), scalar_sz);
-    const o = lean_alloc_object(total);
+    // Use the small-object allocator (size-prefixed allocation) so that
+    // lean_free_object's constructor path (freeLegacySmallNoMimalloc, which
+    // frees via free(ptr-8)) matches the allocation layout. Using lean_alloc_object
+    // here would produce a prefix-less allocation that free(ptr-8) would abort on.
+    // This mirrors the C++ lean.h inline lean_alloc_ctor, which routes through
+    // lean_alloc_small_object.
+    const o = lean_alloc_small_object(@intCast(total));
     lean_set_st_header(o, tag, num_objs);
     return o;
 }

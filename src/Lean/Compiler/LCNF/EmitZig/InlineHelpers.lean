@@ -305,7 +305,12 @@ private def mvpInlineHelperEntries : List (String × String) := [
     "    lean_usize_add_checked(@sizeOf(lean_object), lean_usize_mul_checked(@sizeOf(usize), @intCast(num_objs))),",
     "    scalar_sz",
     "  );",
-    "  const o = lean_alloc_object(total);",
+    "  // Route constructors through the small-object allocator (size-prefixed",
+    "  // allocation) so lean_free_object's constructor path (freeLegacySmallNoMimalloc,",
+    "  // which frees via free(ptr-8)) matches the allocation layout. lean_alloc_object",
+    "  // is prefix-less; using it here would make free(ptr-8) abort in libsystem_malloc.",
+    "  // This mirrors the C++ lean.h inline lean_alloc_ctor, which uses lean_alloc_small_object.",
+    "  const o = lean_alloc_small_object(@intCast(total));",
     "  lean_set_st_header(o, tag, num_objs);",
     "  return o;",
     "}"

@@ -28,10 +28,16 @@ foreach(var ${vars})
     if(var MATCHES "USE_GMP|CHECK_OLEAN_VERSION|LEAN_VERSION_.*|LEAN_SPECIAL_VERSION_DESC")
       # must forward options that generate incompatible .olean format
       list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
-    elseif(var MATCHES "LLVM*|PKG_CONFIG|USE_LAKE|USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER|LEAN_ZIG_CODEGEN")
+    elseif(var MATCHES "LLVM*|PKG_CONFIG|USE_LAKE|USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_CODEGEN")
+      # LEAN_ZIG_RT_CUTOVER is intentionally NOT forwarded to stage0: stage0 is
+      # the self-contained bootstrap compiler and must use the full C++ runtime.
+      # Cutover (Zig helperless archive linked into leanshared, C++ runtime as
+      # stub) only applies to stage1+ (src/CMakeLists.txt STAGE GREATER 0 guard).
+      # Forwarding cutover to stage0 left leanshared with no provider for
+      # lean_dec_ref_cold/lean_free_object/etc. and broke .export archive rules.
       list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
     endif()
-  elseif(var MATCHES "USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_RT_CUTOVER|LEAN_ZIG_CODEGEN")
+  elseif(var MATCHES "USE_MIMALLOC|LEAN_ZIG_RUNTIME|LEAN_ZIG_CODEGEN")
     list(APPEND CL_ARGS "-D${var}=${${var}}")
     list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
   elseif((var MATCHES "CMAKE_.*") AND NOT (var MATCHES "CMAKE_BUILD_TYPE") AND NOT (var MATCHES "CMAKE_HOME_DIRECTORY"))

@@ -49,7 +49,16 @@ LEANMAKE_OPTS=\
 ifeq "$(USE_ZIG)" "1"
 LEANMAKE_CMD=$(MAKE) -f "${CMAKE_BINARY_DIR}/share/lean/lean.mk"
 else
+# stage0 builds stdlib from the CMake build directory, which contains a CMake
+# `Makefile`; the `leanmake` wrapper treats any `Makefile` as a user project
+# and runs `make -I share/lean` (include mode), which has no `objs` target.
+# Use `make -f lean.mk` directly for stage0 to bypass that misdetection.
+# stage1+ keep the `leanmake` wrapper (their invocation works as before).
+ifeq "${STAGE}" "0"
+LEANMAKE_CMD=PATH="${LEAN_BIN}:$${PATH}" $(MAKE) -f "${CMAKE_BINARY_DIR}/share/lean/lean.mk"
+else
 LEANMAKE_CMD="${LEAN_BIN}/leanmake"
+endif
 endif
 
 ifeq "${STAGE}" "0"
