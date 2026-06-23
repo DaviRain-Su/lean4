@@ -261,6 +261,16 @@ fn lean_io_error_to_string_impl(err: *anyopaque) callconv(.c) *anyopaque {
         rc.lean_inc(msg);
         return msg;
     }
+    // Lean compiled code may pass a raw String (tag 249) as the error
+    // when the error originates from EState with a String error type.
+    if (tag == lean.LeanString) {
+        rc.lean_inc(err);
+        return err;
+    }
+    // Handle IO.Error constructors with file/code/details fields
+    if (tag <= 16) {
+        return lean_mk_string_unchecked("IO error".ptr, 8, 8);
+    }
     return lean_mk_string_unchecked("IO error".ptr, 8, 8);
 }
 // Always exported: helperless builds weaken Init's copy during cutover linking.

@@ -50,7 +50,6 @@ stage0/temp/
 stage0/util/
 stage0/lean
 stage0/githash.h
-stage0/stdlib/
 # Zig build outputs
 zig-out/
 src/runtime/zig/zig-out/
