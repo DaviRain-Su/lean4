@@ -106,6 +106,19 @@ def module_cache_lock_name(module: str) -> str:
     return f".module-{digest}.lock"
 
 
+def is_signal_abort(exc: subprocess.CalledProcessError) -> bool:
+    """True if `lean` was killed by a signal (e.g. SIGABRT from a stack overflow).
+
+    When a subprocess is terminated by a signal N, `subprocess` reports the
+    return code as -N. Lean's runtime aborts with SIGABRT (-6) when it detects a
+    stack overflow during elaboration/codegen of deep proof terms. Upstream
+    `lean.mk` never hits this for such modules because it codegens in a library
+    context with prebuilt `.olean` files; `zigc-stdlib` emits each module
+    standalone from source and re-elaborates, so proof-only modules can overflow.
+    """
+    return exc.returncode is not None and exc.returncode < 0
+
+
 def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     run([str(lean), "-z", str(out), str(src)], cwd=cwd, env=host_lean_env())
@@ -196,9 +209,18 @@ def filter_conflicting_objs(
     zigrt_lib: pathlib.Path,
     work_dir: pathlib.Path,
 ) -> list[pathlib.Path]:
-    """On Darwin rely on link-order + duplicate suppression; elsewhere strip overlaps."""
-    if sys.platform == "darwin":
-        return objs
+    """Strip symbols from stdlib objects that the Zig runtime also defines.
+
+    The Zig runtime intentionally exports some symbols the Lean stdlib also
+    provides via `@[export]` (e.g. `lean_io_error_to_string`); the helperless
+    runtime's post-processing weakens the C++/stdlib *archive* copies, but the
+    per-module `.o` files zigc-stdlib builds are strong and linked as bare
+    objects, so they would clash with the runtime. Stripping the overlap from
+    those objects (or dropping them if they only provide runtime symbols) lets
+    the Zig runtime's definition win, matching the flip-list intent. Applied on
+    every platform; `strip -N` (Darwin) and `llvm-objcopy` (elsewhere) both
+    remove the global definition from the object copy.
+    """
     zigrt_syms = get_defined_symbols(zigrt_lib)
     if not zigrt_syms:
         return objs
@@ -423,6 +445,13 @@ def build_or_load_archive(
     return cached
 
 
+CUTOVER_CPP_SHIMS = (
+    "compact.cpp", "sharecommon.cpp", "thread.cpp", "mpz.cpp",
+    "exception.cpp", "object_ref.cpp", "io_error_helpers.cpp",
+    "object_shim.cpp", "libcxx_hash_compat.cpp",
+)
+
+
 def runtime_fingerprint(zig: pathlib.Path, runtime_dir: pathlib.Path) -> dict:
     h = hashlib.sha256()
     for path in sorted(runtime_dir.rglob("*")):
@@ -434,6 +463,18 @@ def runtime_fingerprint(zig: pathlib.Path, runtime_dir: pathlib.Path) -> dict:
         h.update(rel.encode())
         h.update(b"\0")
         h.update(path.read_bytes())
+        h.update(b"\0")
+    # The helperless runtime compiles the cutover C++ shims (in the parent
+    # runtime dir) into the archive, so their contents and the compile-cpp-cutover
+    # flag must invalidate the cache too.
+    h.update(b"compile-cpp-cutover=true\0")
+    parent_runtime = runtime_dir.parent
+    for name in CUTOVER_CPP_SHIMS:
+        shim = parent_runtime / name
+        h.update(name.encode())
+        h.update(b"\0")
+        if shim.exists():
+            h.update(shim.read_bytes())
         h.update(b"\0")
     zig_version = subprocess.run(
         [str(zig), "version"],
@@ -481,19 +522,105 @@ def save_helperless_zigrt_cache(cache_dir: pathlib.Path, lib: pathlib.Path, meta
     return cached_lib
 
 
+def helperless_zigrt_cpp_dir(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt" / "cpp"
+
+
+def helperless_zigrt_cpp_manifest(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt" / "cpp.manifest"
+
+
+def cached_cpp_archives(cache_dir: pathlib.Path) -> list[pathlib.Path] | None:
+    """Return post-processed C++/stdlib archive copies if present and consistent."""
+    cpp_dir = helperless_zigrt_cpp_dir(cache_dir)
+    manifest = helperless_zigrt_cpp_manifest(cache_dir)
+    if not cpp_dir.is_dir() or not manifest.exists():
+        return None
+    try:
+        names = json.loads(manifest.read_text())
+    except Exception:
+        return None
+    copies = [cpp_dir / n for n in names]
+    if not all(c.exists() and c.stat().st_size > 0 for c in copies):
+        return None
+    return copies
+
+
+def phase3_flip_file() -> pathlib.Path:
+    return ROOT / "tools" / "phase3_flip_symbols.txt"
+
+
+def postprocess_zigrt_for_linking(
+    zig_lib: pathlib.Path,
+    cpp_archives: list[pathlib.Path],
+    work_dir: pathlib.Path,
+) -> tuple[pathlib.Path, list[pathlib.Path]]:
+    """Weaken duplicate Zig symbols and flip Phase-3 symbols so the link resolves.
+
+    Mirrors the post-processing CMake applies to the cutover helperless runtime
+    (src/runtime/zig/CMakeLists.txt): run `weaken_zig_symbols.py` so Zig symbols
+    that duplicate a C++/stdlib definition become weak (the C++/stdlib one wins),
+    then `flip_to_zig.py` so symbols in `phase3_flip_symbols.txt` become weak in
+    the C++/stdlib archives and strong in Zig.
+
+    The C++/stdlib archives are copied into `work_dir` first, because both scripts
+    mutate archives in place and we must not perturb the shared CMake build
+    archives. The zig archive itself is mutated in place (it is a fresh copy in
+    the cache, never the CMake one).
+    """
+    flip = phase3_flip_file()
+    cpp_dir = work_dir / "cpp"
+    cpp_dir.mkdir(parents=True, exist_ok=True)
+    copies: list[pathlib.Path] = []
+    for ar in cpp_archives:
+        if not ar.exists():
+            continue
+        dst = cpp_dir / ar.name
+        shutil.copy2(ar, dst)
+        copies.append(dst)
+
+    tools_dir = ROOT / "tools"
+    weaken = subprocess.run(
+        ["python3", str(tools_dir / "weaken_zig_symbols.py"), str(zig_lib)]
+        + [str(c) for c in copies],
+        capture_output=True, text=True,
+    )
+    if weaken.returncode != 0:
+        print(weaken.stderr, file=sys.stderr)
+        raise subprocess.CalledProcessError(weaken.returncode, weaken.args,
+                                            output=weaken.stdout, stderr=weaken.stderr)
+
+    if flip.exists():
+        flip_proc = subprocess.run(
+            ["python3", str(tools_dir / "flip_to_zig.py"), str(zig_lib),
+             str(flip)] + [str(c) for c in copies],
+            capture_output=True, text=True,
+        )
+        if flip_proc.returncode != 0:
+            print(flip_proc.stderr, file=sys.stderr)
+            raise subprocess.CalledProcessError(flip_proc.returncode, flip_proc.args,
+                                                output=flip_proc.stdout, stderr=flip_proc.stderr)
+    return (zig_lib, copies)
+
+
 def build_helperless_zigrt(
     zig: pathlib.Path,
     work_dir: pathlib.Path,
     cache_dir: pathlib.Path,
     build_dir: pathlib.Path,
+    cpp_archives: list[pathlib.Path],
     *,
     force: bool,
-) -> pathlib.Path:
+) -> tuple[pathlib.Path, list[pathlib.Path]]:
     runtime_dir = ROOT / "src" / "runtime" / "zig"
     meta = runtime_fingerprint(zig, runtime_dir)
     if not force and helperless_zigrt_cache_valid(cache_dir, meta):
         print("[cache] helperless Zig runtime")
-        return helperless_zigrt_lib_path(cache_dir)
+        cpp_copies = cached_cpp_archives(cache_dir)
+        if cpp_copies is not None:
+            return (helperless_zigrt_lib_path(cache_dir), cpp_copies)
+        # Cache hit for the runtime but the post-processed C++ copies are missing
+        # (e.g. cache partially cleared); fall through to rebuild them.
 
     print("building helperless Zig runtime")
     prefix = work_dir / "zigrt-nohelpers"
@@ -511,6 +638,15 @@ def build_helperless_zigrt(
         "-Dexport-lean-helpers=false",
         "-Dexport-kernel-symbols=false",
         "-Dexport-allocator-symbols=false",
+        # Compile the remaining C++ runtime shims (compact.cpp, mpz.cpp,
+        # exception.cpp, sharecommon.cpp, thread.cpp, object_ref.cpp, ...) into
+        # the Zig archive, exactly as the CMake cutover helperless build does
+        # with -Dcompile-cpp-cutover=true. Without these, the C++ mangled
+        # lean::mpz/lean::object_compactor/lean::throwable/lean::region_reader
+        # symbols referenced by libleancpp.a are undefined at link time.
+        "-Dcompile-cpp-cutover=true",
+        "-Duse-gmp=false",
+        f"-Dlean-include-dir={build_dir / 'include'}",
     ]
     result = subprocess.run(cmd, cwd=runtime_dir, capture_output=True, text=True)
     if result.returncode != 0:
@@ -520,7 +656,24 @@ def build_helperless_zigrt(
     lib = prefix / "lib" / "libleanrt_zig.a"
     if not lib.exists():
         raise FileNotFoundError(lib)
-    return save_helperless_zigrt_cache(cache_dir, lib, meta)
+
+    lib = save_helperless_zigrt_cache(cache_dir, lib, meta)
+
+    # Weaken duplicates + flip Phase-3 symbols on the zig archive and copies of
+    # the C++/stdlib archives so the executable links without duplicate-symbol
+    # errors. Persist the copies so cache hits reuse them.
+    print("post-processing helperless Zig runtime (weaken + Phase-3 flip)")
+    _, copies = postprocess_zigrt_for_linking(lib, cpp_archives, work_dir)
+    cpp_dir = helperless_zigrt_cpp_dir(cache_dir)
+    cpp_dir.mkdir(parents=True, exist_ok=True)
+    saved: list[pathlib.Path] = []
+    for c in copies:
+        dst = cpp_dir / c.name
+        shutil.copy2(c, dst)
+        saved.append(dst)
+    atomic_write_text(helperless_zigrt_cpp_manifest(cache_dir),
+                      json.dumps([c.name for c in saved]))
+    return (lib, saved)
 
 
 def extract_undefined_symbols(stderr: str) -> list[str]:
@@ -893,6 +1046,10 @@ def discover_dependencies(
     return order
 
 
+def no_codegen_marker(cache_dir: pathlib.Path, module: str) -> pathlib.Path:
+    return cache_dir / f"{module}.nocode"
+
+
 def build_stdlib_module_under_lock(
     module: str,
     lean: pathlib.Path,
@@ -907,6 +1064,21 @@ def build_stdlib_module_under_lock(
     obj_file = cache_dir / f"{module}.o"
     meta = expected_cache_meta(src, lean, module, cache_dir)
 
+    # A prior run observed `lean -z` abort on this module (stack overflow on a
+    # proof-only module). Upstream produces no code for it, so skip emission
+    # entirely unless the source changed. Re-checking the marker against
+    # `src.stat().st_mtime` lets a real edit (e.g. an `@[export]` added) clear it.
+    marker = no_codegen_marker(cache_dir, module)
+    if not force and marker.exists():
+        try:
+            marked_mtime = float(marker.read_text().strip())
+        except Exception:
+            marked_mtime = 0.0
+        if src.stat().st_mtime <= marked_mtime:
+            print(f"[no-codegen] {module}")
+            return (module, None, None)
+        marker.unlink(missing_ok=True)
+
     if not force and cache_valid(module, src, lean, cache_dir):
         print(f"[cache] {module}")
         return (module, obj_file, None)
@@ -919,6 +1091,18 @@ def build_stdlib_module_under_lock(
         if force:
             emit_zig(lean, src, src_root, zig_file)
     except subprocess.CalledProcessError as e:
+        if is_signal_abort(e):
+            # `lean -z` was killed by a signal (typically SIGABRT from a stack
+            # overflow on a deep proof-only module). Upstream `lean.mk` produces
+            # no C for such modules, so they contribute no runtime symbols; skip
+            # them rather than failing the whole stdlib build. The emitted file
+            # may be a partial/empty temp, so drop it to avoid corrupting cache.
+            zig_file.unlink(missing_ok=True)
+            atomic_write_text(marker, str(src.stat().st_mtime))
+            print(f"  skipped {module}: emit aborted by signal "
+                  f"(returncode {e.returncode}); treating as no runtime code",
+                  file=sys.stderr)
+            return (module, None, None)
         return (module, None, f"emit failed for {module}: {e}")
 
     if unchanged:
@@ -1082,10 +1266,29 @@ def main() -> int:
     cache_dir.mkdir(parents=True, exist_ok=True)
     work = pathlib.Path(tempfile.mkdtemp(prefix="zigc-stdlib-"))
 
+    # C++ runtime + C-compiled stdlib archives.  The helperless Zig runtime
+    # references kernel/library/stdlib symbols (e.g. lean_expr_mk_lambda,
+    # lean_level_mk_succ, lean_ir_find_env_decl) via extern fn.  These are
+    # defined in C-compiled Lean stdlib objects (libInit/libStd/libLean) and
+    # the C++ runtime (libleanrt_initial-exec, libleancpp).  build_helperless_zigrt
+    # post-processes copies of these archives (weaken duplicates + Phase-3 flip)
+    # so the link resolves without duplicate-symbol errors; we link the copies.
+    cpp_archive_sources = [
+        build_dir / "runtime" / "libleanrt_initial-exec.a",
+        build_dir / "lib" / "lean" / "libleancpp.a",
+        build_dir / "lib" / "temp" / "libleancpp_1.a",
+        build_dir / "lib" / "lean" / "libInit.a",
+        build_dir / "lib" / "lean" / "libStd.a",
+        build_dir / "lib" / "lean" / "libLean.a",
+    ]
+    cpp_archive_sources = [ar for ar in cpp_archive_sources if ar.exists()]
+
     try:
         zigrt_lock = acquire_cache_lock(cache_dir, ".zigrt-lock")
         try:
-            zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, build_dir, force=args.force)
+            zigrt_lib, cpp_archives = build_helperless_zigrt(
+                zig, work, cache_dir, build_dir, cpp_archive_sources, force=args.force
+            )
         finally:
             release_cache_lock(zigrt_lock)
 
@@ -1137,21 +1340,8 @@ def main() -> int:
         else:
             objs = stdlib_objs + [driver_obj]
         max_attempts = args.max_stub_iterations if args.allow_stubs else 1
-        # C++ runtime + C-compiled stdlib archives.  The helperless Zig runtime
-        # references kernel/library/stdlib symbols (e.g. lean_expr_mk_lambda,
-        # lean_level_mk_succ, lean_ir_find_env_decl) via extern fn.  These are
-        # defined in C-compiled Lean stdlib objects (libInit/libStd/libLean) and
-        # the C++ runtime (libleanrt_initial-exec, libleancpp).  Phase 3 symbol
-        # weakening in the CMake build ensures Zig definitions win where both exist.
-        cpp_archives = [
-            build_dir / "runtime" / "libleanrt_initial-exec.a",
-            build_dir / "lib" / "lean" / "libleancpp.a",
-            build_dir / "lib" / "temp" / "libleancpp_1.a",
-            build_dir / "lib" / "lean" / "libInit.a",
-            build_dir / "lib" / "lean" / "libStd.a",
-            build_dir / "lib" / "lean" / "libLean.a",
-        ]
-        cpp_archives = [ar for ar in cpp_archives if ar.exists()]
+        # cpp_archives are the post-processed copies from build_helperless_zigrt
+        # (weakened + Phase-3 flipped); link those so duplicate symbols resolve.
         for iteration in range(max_attempts):
             print(f"linking (attempt {iteration + 1})...")
             result = link(zig, objs, zigrt_lib, args.output, build_dir / "include", cpp_archives=cpp_archives)

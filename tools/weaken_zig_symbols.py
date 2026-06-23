@@ -28,6 +28,119 @@ N_EXT = 0x01
 N_TYPE_MASK = 0x0E
 N_UNDF = 0x00
 
+# ELF constants for the Linux cutover path (the Mach-O path above handles macOS).
+ELF_MAGIC = b"\x7fELF"
+ELFCLASS64 = 2
+ELFDATA2LSB = 1
+ELFDATA2MSB = 2
+SHT_SYMTAB = 2
+STB_GLOBAL = 1
+STB_WEAK = 2
+STT_FUNC = 2
+SHN_UNDEF = 0
+
+
+def _elf_endian(data: bytes):
+    """Return a struct prefix ('<' or '>') for the ELF object's endianness."""
+    if len(data) < 6:
+        return None
+    if data[:4] != ELF_MAGIC:
+        return None
+    ei_class = data[4]
+    ei_data = data[5]
+    if ei_class != ELFCLASS64:
+        return None
+    return "<" if ei_data == ELFDATA2LSB else (">" if ei_data == ELFDATA2MSB else None)
+
+
+def _elf64_symtab_entries(data: bytes):
+    """Yield (sym_offset, st_info, st_name) for each symbol in every SHT_SYMTAB.
+
+    sym_offset is the absolute offset of the 24-byte Elf64_Sym entry within
+    `data`; st_info is its current binding|type byte; st_name is the string-table
+    offset of its name. The caller resolves names against the symtab's linked
+    string-table section.
+    """
+    e = _elf_endian(data)
+    if e is None:
+        return
+    # Elf64_Ehdr fields (little/big per `e`).
+    e_shoff = struct.unpack_from(e + "Q", data, 40)[0]
+    e_shentsize = struct.unpack_from(e + "H", data, 58)[0]
+    e_shnum = struct.unpack_from(e + "H", data, 60)[0]
+    e_shstrndx = struct.unpack_from(e + "H", data, 62)[0]
+    if e_shoff == 0 or e_shnum == 0:
+        return
+    for si in range(e_shnum):
+        sh_off = e_shoff + si * e_shentsize
+        if sh_off + 64 > len(data):
+            break
+        sh_type = struct.unpack_from(e + "I", data, sh_off + 4)[0]
+        if sh_type != SHT_SYMTAB:
+            continue
+        sym_off = struct.unpack_from(e + "Q", data, sh_off + 24)[0]
+        sym_size = struct.unpack_from(e + "Q", data, sh_off + 32)[0]
+        sh_link = struct.unpack_from(e + "I", data, sh_off + 40)[0]  # strtab section index
+        entsize = struct.unpack_from(e + "Q", data, sh_off + 56)[0]
+        if entsize == 0:
+            entsize = 24
+        strtab_sh = e_shoff + sh_link * e_shentsize
+        strtab_off = struct.unpack_from(e + "Q", data, strtab_sh + 24)[0] if sh_link < e_shnum else 0
+        strtab_size = struct.unpack_from(e + "Q", data, strtab_sh + 32)[0] if sh_link < e_shnum else 0
+        n = sym_size // entsize
+        for i in range(n):
+            so = sym_off + i * entsize
+            if so + 24 > len(data):
+                break
+            st_name = struct.unpack_from(e + "I", data, so)[0]
+            st_info = data[so + 4]
+            st_shndx = struct.unpack_from(e + "H", data, so + 6)[0]
+            yield (so, st_info, st_name, st_shndx, strtab_off, strtab_size, e)
+
+
+def _elf_sym_name(data: bytes, st_name: int, strtab_off: int, strtab_size: int) -> str:
+    if strtab_size == 0 or st_name >= strtab_size:
+        return ""
+    start = strtab_off + st_name
+    end = data.find(b"\x00", start, start + 256)
+    if end < 0:
+        return ""
+    return data[start:end].decode("ascii", errors="replace")
+
+
+def extract_defined_elf_symbols(data: bytes, name_set: set) -> None:
+    """Add defined external `_lean_*` ELF symbol names to name_set."""
+    for (so, st_info, st_name, st_shndx, strtab_off, strtab_size, e) in _elf64_symtab_entries(data):
+        if st_shndx == SHN_UNDEF:
+            continue
+        bind = st_info >> 4
+        _ = bind  # binding irrelevant for collection
+        name = _elf_sym_name(data, st_name, strtab_off, strtab_size)
+        if name.startswith("_lean_") or name.startswith("lean_"):
+            # ELF symbols are not prefixed with '_' (unlike Mach-O). Normalize to
+            # the leading-underscore form used by the rest of the pipeline so the
+            # cpp_symbols set matches across object formats.
+            norm = name if name.startswith("_") else "_" + name
+            name_set.add(norm)
+
+
+def find_lean_symbols_in_elf(data: bytes, slice_offset: int, cpp_symbols: set):
+    """Yield (abs_offset_of_st_info, current_st_info) for each defined external
+    `_lean_*` ELF symbol that also exists in cpp_symbols and is not already weak."""
+    for (so, st_info, st_name, st_shndx, strtab_off, strtab_size, e) in _elf64_symtab_entries(data):
+        if st_shndx == SHN_UNDEF:
+            continue
+        bind = st_info >> 4
+        name = _elf_sym_name(data, st_name, strtab_off, strtab_size)
+        norm = name if name.startswith("_") else ("_" + name if name else "")
+        if not norm.startswith("_lean_"):
+            continue
+        if norm not in cpp_symbols:
+            continue  # Keep strong: only in Zig, fills a gap
+        if bind == STB_WEAK:
+            continue
+        yield (slice_offset + so + 4, st_info)
+
 
 def extract_defined_symbols(data: bytes, name_set: set) -> None:
     """Add all defined external `_lean_*` symbol names from a Mach-O slice."""
@@ -140,6 +253,8 @@ def collect_archive_symbols(archive_path: str) -> set:
                         asz_v = struct.unpack_from(">I", member_data, off + 12)[0]
                     slice_data = member_data[ao:ao + asz_v]
                     extract_defined_symbols(slice_data, symbols)
+            elif member_data[:4] == ELF_MAGIC:
+                extract_defined_elf_symbols(member_data, symbols)
 
         pos = member_data_end
         if pos % 2 == 1:
@@ -260,9 +375,10 @@ def process_archive(zig_path: str, cpp_paths: list) -> int:
             member_data = bytes(data[content_start:member_data_end])
             magic_val = struct.unpack_from("<I", member_data, 0)[0] if len(member_data) >= 4 else 0
 
-            offsets = []
+            # Mach-O weakening (u16 n_desc, set N_WEAK_DEF).
+            macho_offsets = []
             if magic_val == MH_MAGIC_64:
-                offsets = list(find_lean_symbols_in_macho(member_data, content_start, cpp_symbols))
+                macho_offsets = list(find_lean_symbols_in_macho(member_data, content_start, cpp_symbols))
             elif magic_val == FAT_MAGIC or magic_val == FAT_MAGIC_64:
                 is_64 = magic_val == FAT_MAGIC_64
                 nfat = struct.unpack_from(">I", member_data, 4)[0]
@@ -276,14 +392,20 @@ def process_archive(zig_path: str, cpp_paths: list) -> int:
                         ao = struct.unpack_from(">I", member_data, off + 8)[0]
                         asz_v = struct.unpack_from(">I", member_data, off + 12)[0]
                     slice_data = member_data[ao:ao + asz_v]
-                    offsets.extend(
+                    macho_offsets.extend(
                         find_lean_symbols_in_macho(slice_data, content_start + ao, cpp_symbols)
                     )
-
-            for abs_offset, old_desc in offsets:
+            for abs_offset, old_desc in macho_offsets:
                 new_desc = old_desc | N_WEAK_DEF
                 struct.pack_into("<H", data, abs_offset, new_desc)
                 count += 1
+
+            # ELF weakening (u8 st_info, set binding to STB_WEAK).
+            if member_data[:4] == ELF_MAGIC:
+                for abs_offset, old_info in find_lean_symbols_in_elf(member_data, content_start, cpp_symbols):
+                    new_info = (old_info & 0x0f) | (STB_WEAK << 4)
+                    data[abs_offset] = new_info
+                    count += 1
 
         pos = member_data_end
         if pos % 2 == 1:

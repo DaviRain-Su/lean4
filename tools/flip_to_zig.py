@@ -27,6 +27,87 @@ N_EXT = 0x01
 N_TYPE_MASK = 0x0E
 N_UNDF = 0x00
 
+# ELF constants for the Linux cutover path (the Mach-O path above handles macOS).
+ELF_MAGIC = b"\x7fELF"
+ELFCLASS64 = 2
+ELFDATA2LSB = 1
+ELFDATA2MSB = 2
+SHT_SYMTAB = 2
+STB_GLOBAL = 1
+STB_WEAK = 2
+SHN_UNDEF = 0
+
+
+def _elf_endian(data: bytes):
+    if len(data) < 6 or data[:4] != ELF_MAGIC or data[4] != ELFCLASS64:
+        return None
+    return "<" if data[5] == ELFDATA2LSB else (">" if data[5] == ELFDATA2MSB else None)
+
+
+def _elf64_symtab_entries(data: bytes):
+    """Yield (sym_offset, st_info, st_name, st_shndx, strtab_off, strtab_size) per symbol."""
+    e = _elf_endian(data)
+    if e is None:
+        return
+    e_shoff = struct.unpack_from(e + "Q", data, 40)[0]
+    e_shentsize = struct.unpack_from(e + "H", data, 58)[0]
+    e_shnum = struct.unpack_from(e + "H", data, 60)[0]
+    if e_shoff == 0 or e_shnum == 0:
+        return
+    for si in range(e_shnum):
+        sh_off = e_shoff + si * e_shentsize
+        if sh_off + 64 > len(data):
+            break
+        if struct.unpack_from(e + "I", data, sh_off + 4)[0] != SHT_SYMTAB:
+            continue
+        sym_off = struct.unpack_from(e + "Q", data, sh_off + 24)[0]
+        sym_size = struct.unpack_from(e + "Q", data, sh_off + 32)[0]
+        sh_link = struct.unpack_from(e + "I", data, sh_off + 40)[0]
+        entsize = struct.unpack_from(e + "Q", data, sh_off + 56)[0] or 24
+        strtab_sh = e_shoff + sh_link * e_shentsize
+        strtab_off = struct.unpack_from(e + "Q", data, strtab_sh + 24)[0] if sh_link < e_shnum else 0
+        strtab_size = struct.unpack_from(e + "Q", data, strtab_sh + 32)[0] if sh_link < e_shnum else 0
+        for i in range(sym_size // entsize):
+            so = sym_off + i * entsize
+            if so + 24 > len(data):
+                break
+            st_name = struct.unpack_from(e + "I", data, so)[0]
+            st_info = data[so + 4]
+            st_shndx = struct.unpack_from(e + "H", data, so + 6)[0]
+            yield (so, st_info, st_name, st_shndx, strtab_off, strtab_size)
+
+
+def _elf_sym_name(data: bytes, st_name: int, strtab_off: int, strtab_size: int) -> str:
+    if strtab_size == 0 or st_name >= strtab_size:
+        return ""
+    start = strtab_off + st_name
+    end = data.find(b"\x00", start, start + 256)
+    if end < 0:
+        return ""
+    return data[start:end].decode("ascii", errors="replace")
+
+
+def find_symbols_in_elf(data: bytes, slice_offset: int, target_syms: set, action: str):
+    """Yield (abs_offset_of_st_info, current_st_info) for each target ELF symbol.
+
+    ELF symbol names are not underscore-prefixed; target_syms holds the
+    leading-underscore form (from read_symbol_list), so we normalize before
+    matching. For 'weaken': yield defined global (strong) symbols. For
+    'unweaken': yield defined weak symbols.
+    """
+    for (so, st_info, st_name, st_shndx, strtab_off, strtab_size) in _elf64_symtab_entries(data):
+        if st_shndx == SHN_UNDEF:
+            continue
+        bind = st_info >> 4
+        name = _elf_sym_name(data, st_name, strtab_off, strtab_size)
+        norm = name if name.startswith("_") else ("_" + name if name else "")
+        if norm not in target_syms:
+            continue
+        if action == 'weaken' and bind == STB_GLOBAL:
+            yield (slice_offset + so + 4, st_info)
+        elif action == 'unweaken' and bind == STB_WEAK:
+            yield (slice_offset + so + 4, st_info)
+
 
 def read_symbol_list(path: str) -> set:
     """Read symbol names from a file, prefixing with '_'."""
@@ -153,10 +234,10 @@ def process_archive(archive_path: str, target_syms: set, action: str) -> int:
             member_data = bytes(data[content_start:member_data_end])
             magic_val = struct.unpack_from("<I", member_data, 0)[0] if len(member_data) >= 4 else 0
 
+            # Mach-O (u16 n_desc, set/clear N_WEAK_DEF).
             offsets = []
             if magic_val == MH_MAGIC_64:
                 offsets = list(find_symbols_in_macho(member_data, content_start, target_syms, action))
-
             for abs_offset, old_desc in offsets:
                 if action == 'weaken':
                     new_desc = old_desc | N_WEAK_DEF
@@ -164,6 +245,16 @@ def process_archive(archive_path: str, target_syms: set, action: str) -> int:
                     new_desc = old_desc & ~N_WEAK_DEF
                 struct.pack_into("<H", data, abs_offset, new_desc)
                 count += 1
+
+            # ELF (u8 st_info, flip binding STB_GLOBAL<->STB_WEAK).
+            if member_data[:4] == ELF_MAGIC:
+                for abs_offset, old_info in find_symbols_in_elf(member_data, content_start, target_syms, action):
+                    if action == 'weaken':
+                        new_info = (old_info & 0x0f) | (STB_WEAK << 4)
+                    else:  # unweaken
+                        new_info = (old_info & 0x0f) | (STB_GLOBAL << 4)
+                    data[abs_offset] = new_info
+                    count += 1
 
         pos = member_data_end
         if pos % 2 == 1:
