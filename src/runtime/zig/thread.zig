@@ -309,10 +309,12 @@ test "parseStackSizeKB handles missing valid invalid and default cases" {
     try testing.expectEqual(@as(?usize, 64 * 1024), parseStackSizeKB("64"));
     try testing.expectEqual(@as(?usize, 1024 * 1024), parseStackSizeKB("1024"));
     try testing.expectEqual(@as(?usize, 65536 * 1024), parseStackSizeKB("65536"));
-    try testing.expectEqual(@as(?usize, null), parseStackSizeKB("65537"));
+    try testing.expectEqual(@as(?usize, 65537 * 1024), parseStackSizeKB("65537"));
+    try testing.expectEqual(@as(?usize, 1024 * 1024 * 1024), parseStackSizeKB("1048576"));
+    try testing.expectEqual(@as(?usize, null), parseStackSizeKB("1048577"));
     try testing.expectEqual(@as(?usize, null), parseStackSizeKB("abc"));
     try testing.expectEqual(@as(?usize, null), parseStackSizeKB("12345678901234567890"));
-    try testing.expectEqual(@as(usize, 8192 * 1024), defaultStackSizeBytes());
+    try testing.expectEqual(@as(usize, 1024 * 1024 * 1024), defaultStackSizeBytes());
 }
 
 test "spawn uses LEAN_STACK_SIZE_KB when stack size is omitted" {

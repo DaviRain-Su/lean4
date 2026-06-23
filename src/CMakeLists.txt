@@ -118,7 +118,7 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # The Zig runtime has its own event loop; the C++ runtime must remain self-contained.
 # Phase 2 cutover: when LEAN_ZIG_RT_CUTOVER is also ON, the Zig helperless archive
 # is linked into leanshared alongside the C++ runtime.  C++ symbols stay strong;
-# Zig symbols that duplicate C++ are weakened (via weaken_zig_symbols.py) so only
+# Zig symbols that duplicate C++ are weakened by the symbol tool so only
 # Zig-only symbols fill gaps in the C++ runtime.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
@@ -803,6 +803,7 @@ if(STAGE GREATER 1)
     add_dependencies(leancpp copy-lean-h-bc)
   endif()
   if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+    find_program(ZIG zig REQUIRED)
     set(LEAN_TOOLS_DIR "${LEAN_SOURCE_DIR}/../tools")
     set(LEAN_ZIG_FLIP_FILE "${LEAN_TOOLS_DIR}/phase3_flip_symbols.txt")
     add_custom_target(
@@ -817,13 +818,13 @@ if(STAGE GREATER 1)
         cmake -E copy_if_different "${PREV_STAGE}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
       COMMAND
-        python3 ${LEAN_TOOLS_DIR}/weaken_zig_symbols.py
+        "${ZIG}" run --cache-dir "${CMAKE_BINARY_DIR}/runtime/zig/.zig-cache" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- weaken
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
       COMMAND
-        python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
+        "${ZIG}" run --cache-dir "${CMAKE_BINARY_DIR}/runtime/zig/.zig-cache" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- flip
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
         "${LEAN_ZIG_FLIP_FILE}"
@@ -918,6 +919,13 @@ if(LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
 else()
   set(STDLIB_LEANMAKE_JOBS "")
 endif()
+if(APPLE AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
+  # The stage0 bootstrap compiler intermittently drops `.olean` outputs when Lake
+  # builds the stage1 stdlib in parallel on macOS under Zig cutover. Use the
+  # stable leanmake path here; `STDLIB_LEANMAKE_JOBS` already serializes it.
+  set(USE_LAKE OFF CACHE BOOL "Use Lake instead of lean.mk for building core libs from language server" FORCE)
+endif()
+
 
 set(
   STDLIBS

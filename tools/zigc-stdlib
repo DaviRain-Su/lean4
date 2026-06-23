@@ -551,6 +551,7 @@ def phase3_flip_file() -> pathlib.Path:
 
 
 def postprocess_zigrt_for_linking(
+    zig: pathlib.Path,
     zig_lib: pathlib.Path,
     cpp_archives: list[pathlib.Path],
     work_dir: pathlib.Path,
@@ -558,13 +559,14 @@ def postprocess_zigrt_for_linking(
     """Weaken duplicate Zig symbols and flip Phase-3 symbols so the link resolves.
 
     Mirrors the post-processing CMake applies to the cutover helperless runtime
-    (src/runtime/zig/CMakeLists.txt): run `weaken_zig_symbols.py` so Zig symbols
-    that duplicate a C++/stdlib definition become weak (the C++/stdlib one wins),
-    then `flip_to_zig.py` so symbols in `phase3_flip_symbols.txt` become weak in
-    the C++/stdlib archives and strong in Zig.
+    (src/runtime/zig/CMakeLists.txt): run `macho_symbols.zig weaken` so Zig
+    symbols that duplicate a C++/stdlib definition become weak (the C++/stdlib
+    one wins), then `macho_symbols.zig flip` so symbols in
+    `phase3_flip_symbols.txt` become weak in the C++/stdlib archives and strong
+    in Zig.
 
-    The C++/stdlib archives are copied into `work_dir` first, because both scripts
-    mutate archives in place and we must not perturb the shared CMake build
+    The C++/stdlib archives are copied into `work_dir` first, because the tool
+    mutates archives in place and we must not perturb the shared CMake build
     archives. The zig archive itself is mutated in place (it is a fresh copy in
     the cache, never the CMake one).
     """
@@ -580,8 +582,9 @@ def postprocess_zigrt_for_linking(
         copies.append(dst)
 
     tools_dir = ROOT / "tools"
+    symbol_tool = tools_dir / "macho_symbols.zig"
     weaken = subprocess.run(
-        ["python3", str(tools_dir / "weaken_zig_symbols.py"), str(zig_lib)]
+        [str(zig), "run", str(symbol_tool), "--", "weaken", str(zig_lib)]
         + [str(c) for c in copies],
         capture_output=True, text=True,
     )
@@ -592,7 +595,7 @@ def postprocess_zigrt_for_linking(
 
     if flip.exists():
         flip_proc = subprocess.run(
-            ["python3", str(tools_dir / "flip_to_zig.py"), str(zig_lib),
+            [str(zig), "run", str(symbol_tool), "--", "flip", str(zig_lib),
              str(flip)] + [str(c) for c in copies],
             capture_output=True, text=True,
         )
@@ -663,7 +666,7 @@ def build_helperless_zigrt(
     # the C++/stdlib archives so the executable links without duplicate-symbol
     # errors. Persist the copies so cache hits reuse them.
     print("post-processing helperless Zig runtime (weaken + Phase-3 flip)")
-    _, copies = postprocess_zigrt_for_linking(lib, cpp_archives, work_dir)
+    _, copies = postprocess_zigrt_for_linking(zig, lib, cpp_archives, work_dir)
     cpp_dir = helperless_zigrt_cpp_dir(cache_dir)
     cpp_dir.mkdir(parents=True, exist_ok=True)
     saved: list[pathlib.Path] = []

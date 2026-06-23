@@ -11,7 +11,6 @@ fn requireExistingPath(path: []const u8, what: []const u8) void {
     };
 }
 
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -61,36 +60,24 @@ pub fn build(b: *std.Build) void {
             zig_rt_link_lib = stage1_zig_rt_lib;
         } else if (lean_zig_rt_cutover) {
             const zig_rt = b.addSystemCommand(&.{
-                "zig", "build", "--prefix", zig_rt_helperless_prefix,
-                "-Dexport-lean-helpers=false",
-                "-Dexport-allocator-symbols=false",
-                "-Dexport-kernel-symbols=true",
-                "-Dcompile-cpp-cutover=true",
-                "-Duse-gmp=false",
-                b.fmt("-Dlean-include-dir={s}", .{prev_stage_include_dir}),
+                "zig",                         "build",                                                    "--prefix",                     zig_rt_helperless_prefix,
+                "-Dexport-lean-helpers=false", "-Dexport-allocator-symbols=false",                         "-Dexport-kernel-symbols=true", "-Dcompile-cpp-cutover=true",
+                "-Duse-gmp=false",             b.fmt("-Dlean-include-dir={s}", .{prev_stage_include_dir}),
             });
             zig_rt.setCwd(b.path("src/runtime/zig"));
 
             const weaken = b.addSystemCommand(&.{
-                "python3", "tools/weaken_zig_symbols.py",
-                zig_rt_helperless_lib,
-                stage1_rt_archive,
-                stage1_cpp_archive,
-                stage1_cpp_1_archive,
+                "zig",                 "run",             "tools/macho_symbols.zig", "--",                 "weaken",
+                zig_rt_helperless_lib, stage1_rt_archive, stage1_cpp_archive,        stage1_cpp_1_archive,
             });
             weaken.step.dependOn(&zig_rt.step);
             weaken.setCwd(b.path("."));
 
             const stage1_init_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libInit.a");
             const flip = b.addSystemCommand(&.{
-                "python3", "tools/flip_to_zig.py",
-                zig_rt_helperless_lib,
-                zig_rt_kernel_entrypoints_lib,
-                "tools/phase3_flip_symbols.txt",
-                stage1_rt_archive,
-                stage1_cpp_archive,
-                stage1_cpp_1_archive,
-                stage1_init_archive,
+                "zig",                 "run",                         "tools/macho_symbols.zig",       "--",              "flip",
+                zig_rt_helperless_lib, zig_rt_kernel_entrypoints_lib, "tools/phase3_flip_symbols.txt", stage1_rt_archive, stage1_cpp_archive,
+                stage1_cpp_1_archive,  stage1_init_archive,
             });
             flip.step.dependOn(&weaken.step);
             flip.setCwd(b.path("."));
@@ -100,9 +87,8 @@ pub fn build(b: *std.Build) void {
             zig_rt_link_lib = zig_rt_helperless_lib;
         } else {
             const zig_rt = b.addSystemCommand(&.{
-                "zig", "build", "--prefix", zig_rt_prefix,
-                "-Dexport-lean-helpers=true",
-                "-Dexport-allocator-symbols=false",
+                "zig",                        "build",                            "--prefix", zig_rt_prefix,
+                "-Dexport-lean-helpers=true", "-Dexport-allocator-symbols=false",
             });
             zig_rt.setCwd(b.path("src/runtime/zig"));
             b.getInstallStep().dependOn(&zig_rt.step);
@@ -143,9 +129,9 @@ pub fn build(b: *std.Build) void {
     const is_linux = target.result.os.tag == .linux;
     var cxx_flags: std.ArrayList([]const u8) = .empty;
     cxx_flags.appendSlice(b.allocator, &.{
-        "-std=c++20", "-Wall", "-ffp-contract=off",
-        "-fdata-sections", "-ffunction-sections", "-fvisibility=hidden",
-        "-ftls-model=initial-exec", "-DLEAN_MULTI_THREAD", "-DLEAN_EXPORTING",
+        "-std=c++20",                        "-Wall",               "-ffp-contract=off",
+        "-fdata-sections",                   "-ffunction-sections", "-fvisibility=hidden",
+        "-ftls-model=initial-exec",          "-DLEAN_MULTI_THREAD", "-DLEAN_EXPORTING",
         "-Wno-unused-command-line-argument",
     }) catch unreachable;
     if (is_linux) {
@@ -168,8 +154,7 @@ pub fn build(b: *std.Build) void {
         "src/runtime/exception.cpp",   "src/runtime/interrupt.cpp",
         "src/runtime/stackinfo.cpp",   "src/runtime/compact.cpp",
         "src/runtime/alloc.cpp",       "src/runtime/sharecommon.cpp",
-        "src/runtime/object_ref.cpp",
-        "src/runtime/io_error_helpers.cpp",
+        "src/runtime/object_ref.cpp",  "src/runtime/io_error_helpers.cpp",
         "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
     };
     const initial_exec_rt_files = [_][]const u8{
@@ -179,8 +164,7 @@ pub fn build(b: *std.Build) void {
         "src/runtime/interrupt.cpp",   "src/runtime/stackinfo.cpp",
         "src/runtime/mpz.cpp",         "src/runtime/utf8.cpp",
         "src/runtime/sharecommon.cpp", "src/runtime/debug.cpp",
-        "src/runtime/thread.cpp",
-        "src/runtime/io_error_helpers.cpp",
+        "src/runtime/thread.cpp",      "src/runtime/io_error_helpers.cpp",
         "src/runtime/uv/net_addr.cpp", "src/runtime/uv/zig_link_compat.cpp",
     };
     const libs = [_]LibSpec{
@@ -191,26 +175,24 @@ pub fn build(b: *std.Build) void {
             "src/kernel/expr_eq_fn.cpp",   "src/kernel/for_each_fn.cpp",
             "src/kernel/replace_fn.cpp",   "src/kernel/abstract.cpp",
             "src/kernel/instantiate.cpp",  "src/kernel/local_ctx.cpp",
-            "src/kernel/declaration.cpp",   "src/kernel/environment.cpp",
-            "src/kernel/type_checker.cpp",  "src/kernel/init_module.cpp",
+            "src/kernel/declaration.cpp",  "src/kernel/environment.cpp",
+            "src/kernel/type_checker.cpp", "src/kernel/init_module.cpp",
             "src/kernel/expr_cache.cpp",   "src/kernel/equiv_manager.cpp",
             "src/kernel/quot.cpp",         "src/kernel/inductive.cpp",
             "src/kernel/trace.cpp",
         } },
         .{ .name = "library", .needs_uv = true, .files = &.{
-            "src/library/module.cpp",      "src/library/util.cpp",
-            "src/library/constants.cpp",   "src/library/annotation.cpp",
-            "src/library/bin_app.cpp",     "src/library/formatter.cpp",
-            "src/library/num.cpp",         "src/library/replace_visitor.cpp",
-            "src/library/init_module.cpp", "src/library/max_sharing.cpp",
-            "src/library/print.cpp",       "src/library/dynlib.cpp",
-            "src/library/elab_environment.cpp", "src/library/expr_lt.cpp",
-            "src/library/ir_interpreter.cpp", "src/library/instantiate_mvars.cpp",
-            "src/library/profiling.cpp",
-            "src/library/time_task.cpp",   "src/library/init_attribute.cpp",
-            "src/library/constructions/cases_on.cpp",
-            "src/library/constructions/init_module.cpp",
-            "src/library/constructions/util.cpp",
+            "src/library/module.cpp",                    "src/library/util.cpp",
+            "src/library/constants.cpp",                 "src/library/annotation.cpp",
+            "src/library/bin_app.cpp",                   "src/library/formatter.cpp",
+            "src/library/num.cpp",                       "src/library/replace_visitor.cpp",
+            "src/library/init_module.cpp",               "src/library/max_sharing.cpp",
+            "src/library/print.cpp",                     "src/library/dynlib.cpp",
+            "src/library/elab_environment.cpp",          "src/library/expr_lt.cpp",
+            "src/library/ir_interpreter.cpp",            "src/library/instantiate_mvars.cpp",
+            "src/library/profiling.cpp",                 "src/library/time_task.cpp",
+            "src/library/init_attribute.cpp",            "src/library/constructions/cases_on.cpp",
+            "src/library/constructions/init_module.cpp", "src/library/constructions/util.cpp",
         } },
         .{ .name = "util", .files = &.{
             "src/util/name.cpp",           "src/util/name_set.cpp",
@@ -260,8 +242,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // ── Step 4: Lean bootstrap (.lean → .olean + .c → .o) ─────────────────
-    // Uses leanmake (Make + lean.mk) for proper dependency tracking via lean --deps.
-    const leanmake_bin = resolveRootedPath(b, bootstrap_stage_dir, "bin/leanmake");
+    // Uses make + lean.mk for dependency tracking via lean --deps.
     const lean_bin = resolveRootedPath(b, bootstrap_stage_dir, "bin/lean");
     const lean_mk_dir = resolveRootedPath(b, bootstrap_stage_dir, "share/lean");
     const leanc_bin = std.fs.path.join(b.allocator, &.{ root, b.option([]const u8, "leanc-bin", "Path to leanc (C compiler for .c→.o)") orelse "build/zig-out/bin/zigleanc" }) catch unreachable;
@@ -269,8 +250,8 @@ pub fn build(b: *std.Build) void {
     const olean_out = std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{stdlib_out}) catch unreachable;
     const temp_out = std.fmt.allocPrint(b.allocator, "{s}/lib/temp", .{stdlib_out}) catch unreachable;
 
-    const skip_stdlib_build = b.option(bool, "skip-stdlib-build", "Skip leanmake stdlib rebuild and reuse prev-stage-dir artifacts") orelse true;
-    const lean_compile_step = b.step("lean-compile", "Compile .lean stdlib to .olean/.c/.o using leanmake");
+    const skip_stdlib_build = b.option(bool, "skip-stdlib-build", "Skip stdlib rebuild and reuse prev-stage-dir artifacts") orelse true;
+    const lean_compile_step = b.step("lean-compile", "Compile .lean stdlib to .olean/.c/.o using lean.mk");
 
     // Package build order: Init → Std → Lean → Lake
     // Init builds with EXTRA_SRC_ROOTS for parallel .olean generation of downstream packages
@@ -293,57 +274,57 @@ pub fn build(b: *std.Build) void {
 
     if (!skip_stdlib_build) {
         for (stdlib_pkgs) |pkg| {
-        const make_cmd = b.addSystemCommand(&.{leanmake_bin});
-        // -f lean.mk to use the configured makefile
-        make_cmd.addArg("-f");
-        make_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lean.mk", .{lean_mk_dir}) catch unreachable);
+            const make_cmd = b.addSystemCommand(&.{
+                "make",
+                "-f",
+                std.fmt.allocPrint(b.allocator, "{s}/lean.mk", .{lean_mk_dir}) catch unreachable,
+            });
 
-        // If package has a src_dir, change to it (like CMake does for Lake: -C lake)
-        if (pkg.src_dir) |src_dir| {
-            make_cmd.setCwd(b.path(src_dir));
-            // Lake uses relative paths from within src_dir
-            // OUT="../${stdlib_out}" LIB_OUT="../${olean_out}" TEMP_OUT="../${temp_out}" OLEAN_OUT="../${olean_out}"
-            make_cmd.addArgs(&.{ "objs", "lib", "lib.export" });
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEAN={s}", .{lean_bin}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEANC={s}", .{leanc_bin}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "../{s}/LakeMain.o.export", .{temp_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "PKG={s}", .{pkg.name}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OUT=../{s}", .{stdlib_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LIB_OUT=../{s}", .{olean_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "TEMP_OUT=../{s}", .{temp_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OLEAN_OUT=../{s}", .{olean_out}) catch unreachable);
-        } else {
-            // Init/Std/Lean: run from src/ directory
-            make_cmd.setCwd(b.path("src"));
-            make_cmd.addArgs(&.{ "objs", "lib", "lib.export" });
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEAN={s}", .{lean_bin}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEANC={s}", .{leanc_bin}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "PKG={s}", .{pkg.name}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OUT=../{s}", .{stdlib_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LIB_OUT=../{s}", .{olean_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "TEMP_OUT=../{s}", .{temp_out}) catch unreachable);
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OLEAN_OUT=../{s}", .{olean_out}) catch unreachable);
-        }
-        if (pkg.extra_src_roots.len > 0) {
-            make_cmd.addArg(std.fmt.allocPrint(b.allocator, "EXTRA_SRC_ROOTS={s}", .{pkg.extra_src_roots}) catch unreachable);
-        }
-
-        // Environment: LEAN, LEANC, LEAN_PATH
-        make_cmd.setEnvironmentVariable("LEAN", lean_bin);
-        make_cmd.setEnvironmentVariable("LEANC", leanc_bin);
-        // LEAN_PATH is set by lean.mk (line 35: export LEAN_PATH += :$(OLEAN_OUT))
-        // The stage0 lean binary searches OLEAN_OUT (= stage1/lib/lean) internally.
-        // leanmake is a shell script that adds its own bindir to PATH internally
-
-        // Wire dependencies on prior package steps
-        for (pkg.deps) |dep| {
-            if (pkg_steps.get(dep)) |dep_step| {
-                make_cmd.step.dependOn(dep_step);
+            // If package has a src_dir, change to it (like CMake does for Lake: -C lake)
+            if (pkg.src_dir) |src_dir| {
+                make_cmd.setCwd(b.path(src_dir));
+                // Lake uses relative paths from within src_dir
+                // Absolute output paths keep the lean.mk invocation independent
+                // of the package cwd.
+                make_cmd.addArgs(&.{ "objs", "lib", "lib.export" });
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEAN={s}", .{lean_bin}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEANC={s}", .{leanc_bin}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/LakeMain.o.export", .{temp_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "PKG={s}", .{pkg.name}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OUT={s}", .{stdlib_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LIB_OUT={s}", .{olean_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "TEMP_OUT={s}", .{temp_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OLEAN_OUT={s}", .{olean_out}) catch unreachable);
+            } else {
+                // Init/Std/Lean: run from src/ directory
+                make_cmd.setCwd(b.path("src"));
+                make_cmd.addArgs(&.{ "objs", "lib", "lib.export" });
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEAN={s}", .{lean_bin}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LEANC={s}", .{leanc_bin}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "PKG={s}", .{pkg.name}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OUT={s}", .{stdlib_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "LIB_OUT={s}", .{olean_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "TEMP_OUT={s}", .{temp_out}) catch unreachable);
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "OLEAN_OUT={s}", .{olean_out}) catch unreachable);
             }
-        }
+            if (pkg.extra_src_roots.len > 0) {
+                make_cmd.addArg(std.fmt.allocPrint(b.allocator, "EXTRA_SRC_ROOTS={s}", .{pkg.extra_src_roots}) catch unreachable);
+            }
 
-        lean_compile_step.dependOn(&make_cmd.step);
-        pkg_steps.put(pkg.name, &make_cmd.step) catch {};
+            // Environment: LEAN, LEANC, LEAN_PATH
+            make_cmd.setEnvironmentVariable("LEAN", lean_bin);
+            make_cmd.setEnvironmentVariable("LEANC", leanc_bin);
+            // LEAN_PATH is set by lean.mk (line 49: export LEAN_PATH += :$(OLEAN_OUT)).
+
+            // Wire dependencies on prior package steps
+            for (pkg.deps) |dep| {
+                if (pkg_steps.get(dep)) |dep_step| {
+                    make_cmd.step.dependOn(dep_step);
+                }
+            }
+
+            lean_compile_step.dependOn(&make_cmd.step);
+            pkg_steps.put(pkg.name, &make_cmd.step) catch {};
         }
     }
     const install_stdlib_dir = b.addInstallDirectory(.{
@@ -424,7 +405,7 @@ pub fn build(b: *std.Build) void {
         mkdir_lib_lean.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{b.install_path}) catch unreachable);
         lean_exe_step.dependOn(&mkdir_lib_lean.step);
 
-        const copy_shared_libs = b.addSystemCommand(&.{ "cp" });
+        const copy_shared_libs = b.addSystemCommand(&.{"cp"});
         copy_shared_libs.step.dependOn(&mkdir_lib_lean.step);
         copy_shared_libs.addArgs(&.{
             stage1_leanshared_dylib,
@@ -434,7 +415,7 @@ pub fn build(b: *std.Build) void {
         });
         lean_exe_step.dependOn(&copy_shared_libs.step);
 
-        const copy_init_shared = b.addSystemCommand(&.{ "cp" });
+        const copy_init_shared = b.addSystemCommand(&.{"cp"});
         copy_init_shared.step.dependOn(&mkdir_lib_lean.step);
         copy_init_shared.addArgs(&.{
             stage1_init_shared_dylib,
@@ -451,15 +432,14 @@ pub fn build(b: *std.Build) void {
         lean_exe_cmd.addArg(b.fmt("-L{s}", .{install_lib}));
         lean_exe_cmd.addArg(b.fmt("-L{s}/lean", .{install_lib}));
         lean_exe_cmd.addArgs(&.{
-            "-lInit_shared", "-lleanshared_2", "-lleanshared_1", "-lleanshared",
-            "-Wl,-rpath,@executable_path/../lib", "-Wl,-rpath,@executable_path/../lib/lean",
-            "-o",
+            "-lInit_shared",                      "-lleanshared_2",                          "-lleanshared_1", "-lleanshared",
+            "-Wl,-rpath,@executable_path/../lib", "-Wl,-rpath,@executable_path/../lib/lean", "-o",
         });
         lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
         lean_exe_step.dependOn(&lean_exe_cmd.step);
         lean_exe_cmd.step.dependOn(&install_stdlib_dir.step);
     } else {
-        const lean_exe_cmd = b.addSystemCommand(&.{"zig", "c++"});
+        const lean_exe_cmd = b.addSystemCommand(&.{ "zig", "c++" });
         lean_exe_cmd.step.dependOn(&mkdir_bin.step);
         lean_exe_cmd.addArg("-o");
         lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
@@ -483,4 +463,32 @@ pub fn build(b: *std.Build) void {
     const test_cmd = b.addSystemCommand(&.{ "zig", "build", "test" });
     test_cmd.setCwd(b.path("src/runtime/zig"));
     test_step.dependOn(&test_cmd.step);
+
+    // ── Transitional stage wrappers ─────────────────────────────────────────
+    //
+    // These keep `zig build <target>` aligned with the existing top-level
+    // bootstrap targets until the unified build fully owns stage orchestration.
+    const release_make_dir = b.pathFromRoot("build/release");
+
+    inline for ([_]struct { name: []const u8, desc: []const u8 }{
+        .{ .name = "stage0", .desc = "Build stage0 via the existing bootstrap make target" },
+        .{ .name = "stage1", .desc = "Build stage1 via the existing bootstrap make target" },
+        .{ .name = "stage2", .desc = "Build stage2 via the existing bootstrap make target" },
+        .{ .name = "stage3", .desc = "Build stage3 via the existing bootstrap make target" },
+        .{ .name = "update-stage0", .desc = "Update stage0 via the existing bootstrap make target" },
+        .{ .name = "bench", .desc = "Run the existing benchmark target" },
+    }) |bootstrap_target| {
+        const step = b.step(bootstrap_target.name, bootstrap_target.desc);
+        const cmd = b.addSystemCommand(&.{ "make", "-C", release_make_dir, bootstrap_target.name });
+        step.dependOn(&cmd.step);
+    }
+
+    const check_stage3_step = b.step("check-stage3", "Diff stage2 and stage3 lean binaries");
+    const check_stage3_cmd = b.addSystemCommand(&.{
+        "diff",
+        "build/release/stage2/bin/lean",
+        "build/release/stage3/bin/lean",
+    });
+    check_stage3_cmd.setCwd(b.path("."));
+    check_stage3_step.dependOn(&check_stage3_cmd.step);
 }

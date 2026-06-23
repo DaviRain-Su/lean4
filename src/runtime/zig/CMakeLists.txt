@@ -156,12 +156,12 @@ if(ZIG)
     set(LEAN_ZIG_FLIP_FILE "${LEAN_TOOLS_DIR}/phase3_flip_symbols.txt")
     add_custom_command(
       OUTPUT "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
-      COMMAND python3 ${LEAN_TOOLS_DIR}/weaken_zig_symbols.py
+      COMMAND "${ZIG}" run --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- weaken
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
-      COMMAND python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
+      COMMAND "${ZIG}" run --cache-dir "${LEAN_ZIG_RUNTIME_CACHE_DIR}" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- flip
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
         "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}"
         "${LEAN_ZIG_FLIP_FILE}"

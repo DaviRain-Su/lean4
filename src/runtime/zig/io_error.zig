@@ -276,8 +276,19 @@ fn lean_io_error_to_string_impl(err: *anyopaque) callconv(.c) *anyopaque {
     // has the full formatting but is not available in cutover mode.
     return lean_mk_string_unchecked("IO error".ptr, 8, 8);
 }
+
+fn lean_io_error_to_string(err: *anyopaque) callconv(.c) *anyopaque {
+    return lean_io_error_to_string_impl(err);
+}
+
 // Not exported: the C++ version from IOError.lean (compiled into libInit.a)
 // provides full error formatting for all IO.Error constructors. The Zig stub
+
+comptime {
+    if (runtime_options.export_lean_helpers) {
+        @export(&lean_io_error_to_string, .{ .name = "lean_io_error_to_string" });
+    }
+}
 // above only handles a subset. When not flipped, the C++ version remains
 // strong and is used. When flipped, this stub takes over (not recommended).
 

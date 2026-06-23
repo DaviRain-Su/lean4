@@ -171,7 +171,6 @@ fn kvmapEq(a: *anyopaque, b: *anyopaque) u8 {
     return if (lhs == rhs) 1 else 0;
 }
 
-
 // ── Expression structural equality ───────────────────────────────────────────
 
 /// Structural equality with binder info (lean_expr_equal / expr_eq_fn<true>).
@@ -368,7 +367,6 @@ inline fn exprLetNonDep(e: *anyopaque) u8 {
     return ctor.lean_ctor_get_uint8(e, @intCast(4 * @sizeOf(*anyopaque) + @sizeOf(u64)));
 }
 
-
 inline fn looseBVarRange(e: *anyopaque) u32 {
     return @intCast(eData(e) >> 44);
 }
@@ -390,6 +388,7 @@ inline fn retain(e: *anyopaque) *anyopaque {
 // ── Expression constructor externs (Lean-exported) ───────────────────────────
 
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
@@ -399,6 +398,46 @@ extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callcon
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_elab_add_decl(env: *anyopaque, mh: usize, decl: *anyopaque, ax: *anyopaque, tl: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque;
+
+fn mkAppTrailingArgs(f: *anyopaque, rev_args: []const *anyopaque, skip: usize) *anyopaque {
+    var r = retain(f);
+    var i = skip;
+    while (i < rev_args.len) : (i += 1) {
+        r = lean_expr_mk_app(r, rc.lean_inc_ret(rev_args[rev_args.len - 1 - i]));
+    }
+    return r;
+}
+
+fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque {
+    if (eTag(e) != 5) return retain(e);
+
+    var fn_expr = e;
+    var rev_args = std.ArrayListUnmanaged(*anyopaque).empty;
+    defer rev_args.deinit(std.heap.c_allocator);
+    while (eTag(fn_expr) == 5) {
+        rev_args.append(std.heap.c_allocator, ctor.lean_ctor_get(fn_expr, 1) orelse return retain(e)) catch
+            @panic("lean_kernel_cheap_beta_reduce: out of memory");
+        fn_expr = ctor.lean_ctor_get(fn_expr, 0) orelse return retain(e);
+    }
+    if (eTag(fn_expr) != 6) return retain(e);
+
+    var i: usize = 0;
+    while (eTag(fn_expr) == 6 and i < rev_args.items.len) : (i += 1) {
+        fn_expr = ctor.lean_ctor_get(fn_expr, 2) orelse return retain(e);
+    }
+
+    if (looseBVarRange(fn_expr) == 0) {
+        return mkAppTrailingArgs(fn_expr, rev_args.items, i);
+    }
+    if (eTag(fn_expr) == 0) {
+        const idx = object.lean_unbox(ctor.lean_ctor_get(fn_expr, 0) orelse return retain(e));
+        if (idx < i) {
+            const normal_arg_idx = i - idx - 1;
+            return mkAppTrailingArgs(rev_args.items[rev_args.items.len - 1 - normal_arg_idx], rev_args.items, i);
+        }
+    }
+    return retain(e);
+}
 
 // ── Lower / Lift loose bound variables ───────────────────────────────────────
 
@@ -900,6 +939,64 @@ fn recurseChild(e: *anyopaque, offset: u32, kind: RecKind, ctx: RecCtx) *anyopaq
     };
 }
 
+fn testSortExpr(level: usize) *anyopaque {
+    return lean_expr_mk_sort(object.lean_box(level) orelse @panic("failed to box sort level"));
+}
+
+fn testBVarExpr(idx: usize) *anyopaque {
+    return lean_expr_mk_bvar(object.lean_box(idx) orelse @panic("failed to box bvar index"));
+}
+
+fn testLambdaExpr(body: *anyopaque) *anyopaque {
+    const name = object.lean_box(0) orelse @panic("failed to box anonymous name");
+    const domain = testSortExpr(0);
+    return lean_expr_mk_lambda(name, domain, body, 0);
+}
+
+test "cheap beta reduce constant lambda body" {
+    const body = testSortExpr(0);
+    defer rc.lean_dec(body);
+    const arg = testSortExpr(1);
+    const lam = testLambdaExpr(rc.lean_inc_ret(body));
+    const app = lean_expr_mk_app(lam, arg);
+    defer rc.lean_dec(app);
+
+    const reduced = lean_kernel_cheap_beta_reduce(app);
+    defer rc.lean_dec(reduced);
+    try std.testing.expect(lean_expr_equal(reduced, body) != 0);
+}
+
+test "cheap beta reduce selects projected argument" {
+    const first_arg = testSortExpr(0);
+    defer rc.lean_dec(first_arg);
+    const second_arg = testSortExpr(1);
+    const inner = testLambdaExpr(testBVarExpr(1));
+    const outer = testLambdaExpr(inner);
+    const app = lean_expr_mk_app(lean_expr_mk_app(outer, rc.lean_inc_ret(first_arg)), second_arg);
+    defer rc.lean_dec(app);
+
+    const reduced = lean_kernel_cheap_beta_reduce(app);
+    defer rc.lean_dec(reduced);
+    try std.testing.expect(lean_expr_equal(reduced, first_arg) != 0);
+}
+
+test "cheap beta reduce preserves trailing arguments" {
+    const selected = testSortExpr(0);
+    defer rc.lean_dec(selected);
+    const trailing = testSortExpr(1);
+    defer rc.lean_dec(trailing);
+    const expected = lean_expr_mk_app(rc.lean_inc_ret(selected), rc.lean_inc_ret(trailing));
+    defer rc.lean_dec(expected);
+
+    const lam = testLambdaExpr(testBVarExpr(0));
+    const app = lean_expr_mk_app(lean_expr_mk_app(lam, rc.lean_inc_ret(selected)), rc.lean_inc_ret(trailing));
+    defer rc.lean_dec(app);
+
+    const reduced = lean_kernel_cheap_beta_reduce(app);
+    defer rc.lean_dec(reduced);
+    try std.testing.expect(lean_expr_equal(reduced, expected) != 0);
+}
+
 comptime {
     if (export_kernel_symbols) {
         @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .strong });
@@ -917,6 +1014,7 @@ comptime {
         @export(&lean_expr_instantiate_rev_range, .{ .name = "lean_expr_instantiate_rev_range", .linkage = .strong });
         @export(&lean_expr_abstract, .{ .name = "lean_expr_abstract", .linkage = .strong });
         @export(&lean_expr_abstract_range, .{ .name = "lean_expr_abstract_range", .linkage = .strong });
+        @export(&lean_kernel_cheap_beta_reduce, .{ .name = "lean_kernel_cheap_beta_reduce", .linkage = .strong });
         @export(&lean_replace_expr, .{ .name = "lean_replace_expr", .linkage = .strong });
         @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
         @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });

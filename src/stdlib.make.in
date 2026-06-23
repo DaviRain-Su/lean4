@@ -46,20 +46,7 @@ LEANMAKE_OPTS=\
 	${EXTRA_LEANMAKE_OPTS}\
 	CMAKE_LIKE_OUTPUT=1
 
-ifeq "$(USE_ZIG)" "1"
 LEANMAKE_CMD=$(MAKE) -f "${CMAKE_BINARY_DIR}/share/lean/lean.mk"
-else
-# stage0 builds stdlib from the CMake build directory, which contains a CMake
-# `Makefile`; the `leanmake` wrapper treats any `Makefile` as a user project
-# and runs `make -I share/lean` (include mode), which has no `objs` target.
-# Use `make -f lean.mk` directly for stage0 to bypass that misdetection.
-# stage1+ keep the `leanmake` wrapper (their invocation works as before).
-ifeq "${STAGE}" "0"
-LEANMAKE_CMD=$(MAKE) -f "${CMAKE_BINARY_DIR}/share/lean/lean.mk"
-else
-LEANMAKE_CMD="${LEAN_BIN}/leanmake"
-endif
-endif
 
 ifeq "${STAGE}" "0"
   LEANMAKE_OPTS+=C_ONLY=1 C_OUT=${LEAN_SOURCE_DIR}/../stdlib/
@@ -181,14 +168,14 @@ ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
 ifeq "${LEAN_ZIG_RT_CUTOVER}" "ON"
 ifneq "${STAGE}" "0"
 	$(LEANC_SH) -shared -o $@ \
- 	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -Wl,-force_load,${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -Wl,-force_load,${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
 	$(LEANC_SH) -shared -o $@ \
- 	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 endif
 else
 	$(LEANC_SH) -shared -o $@ \
- 	  ${LIB}/temp/Lean.*o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 endif
 else
 	$(LEANC_SH) -shared -o $@ \

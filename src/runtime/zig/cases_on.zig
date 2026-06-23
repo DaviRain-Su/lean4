@@ -1,14 +1,14 @@
 // Copyright (c) 2026 Lean FRO, LLC. All rights reserved.
 // Released under Apache 2.0 license as described in the file LICENSE.
 
-//! Minimal Zig stub for `lean_mk_cases_on`.
+//! `lean_mk_cases_on` bridge.
 //!
-//! `lean_mk_cases_on` is a C++-only entrypoint used by `Lean.Meta.Constructions.CasesOn`.
-//! A full port would replicate the local-context/recursor manipulation in
-//! `src/library/constructions/cases_on.cpp`. For now we perform the same input
-//! validation and return the same `Except Kernel.Exception` shape the C++ wrapper
-//! produces, returning `Kernel.Exception.other` for valid inputs that are not yet
-//! handled in Zig.
+//! The full algorithm still lives in `src/library/constructions/cases_on.cpp`.
+//! In helperless cutover builds, `libleanshared` already links `libleancpp`, so
+//! we intentionally let the C++ implementation provide `lean_mk_cases_on`.
+//! That avoids routing valid `casesOn` requests through this old Zig stub.
+//! For standalone pure-Zig kernel experiments (no C++ cutover objects), we keep
+//! the stub available as a diagnostic fallback.
 
 const std = @import("std");
 const object = @import("object.zig");
@@ -78,7 +78,7 @@ fn lean_mk_cases_on(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque {
 pub const force_link = true;
 
 comptime {
-    if (runtime_options.export_kernel_symbols) {
+    if (runtime_options.export_kernel_symbols and !runtime_options.compile_cpp_cutover) {
         @export(&lean_mk_cases_on, .{ .name = "lean_mk_cases_on", .linkage = .strong });
     }
 }
