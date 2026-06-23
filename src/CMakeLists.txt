@@ -802,6 +802,19 @@ if(STAGE GREATER 1)
     )
     add_dependencies(leancpp copy-lean-h-bc)
   endif()
+  if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+    add_custom_target(
+      leanrt_zig_helperless
+      COMMAND
+        cmake -E make_directory "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib"
+      COMMAND
+        cmake -E copy_if_different "${PREV_STAGE}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
+        "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
+      COMMAND
+        cmake -E copy_if_different "${PREV_STAGE}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
+        "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
+    )
+  endif()
 else()
   add_subdirectory(runtime)
   if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
