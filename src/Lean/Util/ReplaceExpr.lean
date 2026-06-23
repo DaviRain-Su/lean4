@@ -15,9 +15,14 @@ namespace Lean.Expr
 
 @[extern "lean_replace_expr"]
 opaque replaceImpl (f? : @& (Expr → Option Expr)) (e : @& Expr) : Expr
+@[extern "lean_replace_expr_zig_impl"]
+opaque replaceZigImpl (f? : @& (Expr → Option Expr)) (e : @& Expr) : Expr
 
 @[inline] def replace (f? : Expr → Option Expr) (e : Expr) : Expr :=
   replaceImpl f? e
+
+@[inline] def replaceZig (f? : Expr → Option Expr) (e : Expr) : Expr :=
+  replaceZigImpl f? e
 
 @[specialize]
 def replaceNoCache (f? : Expr → Option Expr) (e : Expr) : Expr :=

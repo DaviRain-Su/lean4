@@ -16,6 +16,7 @@ pub const force_link = true;
 const std = @import("std");
 const builtin = @import("builtin");
 const object = @import("object.zig");
+const lean = @import("lean_object.zig");
 const alloc = @import("alloc.zig");
 const ctor = @import("ctor.zig");
 const rc = @import("rc.zig");
@@ -26,6 +27,8 @@ const io_min = @import("io_min.zig");
 const apply_mod = @import("apply.zig");
 const ea = @import("expr_accessors.zig");
 const runtime_helpers = @import("runtime_helpers.zig");
+const string = @import("string.zig");
+const sync = @import("sync.zig");
 
 const runtime_options = @import("runtime_options");
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
@@ -527,6 +530,12 @@ fn lookupSymbolInCurexe(sym: [*:0]const u8) ?*anyopaque {
 }
 extern fn lean_string_cstr(s: *anyopaque) callconv(.c) [*:0]const u8;
 
+fn closureSet(cls: *anyopaque, i: c_uint, val: *anyopaque) void {
+    const closure: *lean.lean_closure_object = @ptrCast(@alignCast(cls));
+    const slots: [*]?*anyopaque = @ptrCast(&closure.m_objs);
+    slots[i] = val;
+}
+
 // ── Interpreter ──────────────────────────────────────────────────────────────
 
 const Frame = struct {
@@ -545,6 +554,48 @@ const ConstantCacheEntry = struct {
     is_scalar: bool,
     val: Value,
 };
+
+const InitGlobalEntry = struct {
+    decl: *anyopaque,
+    value: *anyopaque,
+};
+
+var g_init_globals: std.ArrayListUnmanaged(InitGlobalEntry) = .empty;
+var g_init_globals_lock: sync.Mutex = .{};
+
+fn lookupInitGlobal(fn_name: *anyopaque, t: IRType) ?Value {
+    g_init_globals_lock.lock();
+    defer g_init_globals_lock.unlock();
+
+    for (g_init_globals.items) |entry| {
+        if (lean_name_eq(entry.decl, fn_name) != 0) {
+            return if (typeIsScalar(t))
+                unboxT(entry.value, t)
+            else
+                Value.fromObj(entry.value);
+        }
+    }
+
+    return null;
+}
+
+fn storeInitGlobal(decl: *anyopaque, value: *anyopaque) void {
+    g_init_globals_lock.lock();
+    defer g_init_globals_lock.unlock();
+
+    for (g_init_globals.items) |*entry| {
+        if (lean_name_eq(entry.decl, decl) != 0) {
+            entry.value = value;
+            return;
+        }
+    }
+
+    rc.lean_inc(decl);
+    g_init_globals.append(std.heap.page_allocator, .{
+        .decl = decl,
+        .value = value,
+    }) catch @panic("storeInitGlobal: OOM");
+}
 
 const Interpreter = struct {
     arg_stack: std.ArrayListUnmanaged(Value) = .empty,
@@ -638,16 +689,16 @@ const Interpreter = struct {
         const cls_size = 3 + arity;
         const cls = alloc.lean_alloc_closure(getStub(cls_size), @intCast(cls_size), @intCast(3 + n));
         rc.lean_inc(self.env);
-        ctor.lean_ctor_set(cls, 0, self.env);
+        closureSet(cls, 0, self.env);
         rc.lean_inc(self.opts);
-        ctor.lean_ctor_set(cls, 1, self.opts);
+        closureSet(cls, 1, self.opts);
         rc.lean_inc(d);
-        ctor.lean_ctor_set(cls, 2, d);
+        closureSet(cls, 2, d);
 
         if (args) |arg_ptr| {
             var i: usize = 0;
             while (i < n) : (i += 1) {
-                ctor.lean_ctor_set(cls, @intCast(3 + i), arg_ptr[i]);
+                closureSet(cls, @intCast(3 + i), arg_ptr[i]);
             }
         }
         return cls;
@@ -699,7 +750,6 @@ const Interpreter = struct {
     }
 
     fn lookupSymbolWithDecl(self: *Interpreter, fn_name: *anyopaque, d: *anyopaque) SymbolCacheEntry {
-        if (self.symbol_cache.get(fn_name)) |e| return e;
         var entry = SymbolCacheEntry{
             .decl = ownedArg(d),
             .native_addr = null,
@@ -737,7 +787,6 @@ const Interpreter = struct {
                 }
             }
         }
-        self.symbol_cache.put(fn_name, entry) catch {};
         return entry;
     }
 
@@ -828,7 +877,7 @@ const Interpreter = struct {
                     var i: usize = 0;
                     while (i < num_args) : (i += 1) {
                         const arg = array.lean_array_uget(args, i) orelse continue;
-                        ctor.lean_ctor_set(cls, @intCast(i), self.evalObjArg(arg));
+                        closureSet(cls, @intCast(i), self.evalObjArg(arg));
                     }
                     return Value.fromObj(cls);
                 } else {
@@ -1071,6 +1120,9 @@ const Interpreter = struct {
         if (self.constant_cache.get(fn_name)) |cached| {
             return cached.val;
         }
+        if (lookupInitGlobal(fn_name, t)) |initialized| {
+            return initialized;
+        }
         const sym = self.lookupSymbol(fn_name);
         if (sym.native_addr) |addr| {
             // Native constant: read directly
@@ -1274,6 +1326,17 @@ const Interpreter = struct {
     }
 };
 
+threadlocal var g_active_interpreter: ?*Interpreter = null;
+
+fn activeInterpreterFor(env: *anyopaque, opts: *anyopaque) ?*Interpreter {
+    if (g_active_interpreter) |interp| {
+        if (interp.env == env and interp.opts == opts) {
+            return interp;
+        }
+    }
+    return null;
+}
+
 const StubObj = ?*anyopaque;
 
 fn stubObj(o: StubObj) *anyopaque {
@@ -1296,7 +1359,14 @@ fn stubAux(args: [*]StubObj) StubObj {
         arg_buf.append(std.heap.page_allocator, stubObj(args[3 + i])) catch @panic("interpreter stub: OOM");
     }
 
+    if (activeInterpreterFor(env, opts)) |interp| {
+        return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
+    }
+
     var interp = Interpreter.init(env, opts, std.heap.page_allocator);
+    const prev = g_active_interpreter;
+    g_active_interpreter = &interp;
+    defer g_active_interpreter = prev;
     defer interp.deinit();
     return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
 }
@@ -1397,77 +1467,99 @@ fn getStub(params: usize) *anyopaque {
 
 // Curry native function with N args
 fn curry(addr: *anyopaque, n: usize, args: [*]*anyopaque) *anyopaque {
-    // The native function has a homogeneous boxed ABI.
-    // For simplicity, call apply_n which handles currying.
-    const cls = alloc.lean_alloc_closure(addr, @intCast(n), 0);
-    return apply_mod.lean_apply_n(cls, @intCast(n), @ptrCast(args)) orelse object.lean_box(0).?;
+    // Match C++ interpreter::curry: call the homogeneous boxed function directly.
+    return apply_mod.curryDirect(addr, @intCast(n), @ptrCast(args)) orelse object.lean_box(0).?;
 }
 
 // ── Entry points ────────────────────────────────────────────────────────────
 
 fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl: *anyopaque) callconv(.c) u32 {
+    if (activeInterpreterFor(env, opts)) |interp| {
+        return interp.runMainDecl(args, decl);
+    }
+
     const a = std.heap.page_allocator;
     var interp = Interpreter.init(env, opts, a);
+    const prev = g_active_interpreter;
+    g_active_interpreter = &interp;
+    defer g_active_interpreter = prev;
     defer interp.deinit();
     return interp.runMainDecl(args, decl);
 }
 
 fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
-    const a = std.heap.page_allocator;
-    var interp = Interpreter.init(env, opts, a);
-    defer interp.deinit();
-    // Check sorry dep
     const sorry_dep = lean_decl_get_sorry_dep(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
     defer rc.lean_dec(sorry_dep);
     if (!object.lean_is_scalar(sorry_dep)) {
-        // Has sorry dep — return error
-        const err_str = object.lean_box(0).?; // simplified
+        const err_str = string.lean_mk_string(
+            "cannot evaluate code because a dependency uses sorry and/or contains errors",
+        );
         const err_ctor = alloc.lean_alloc_ctor(0, 1, 0);
         ctor.lean_ctor_set(err_ctor, 0, err_str);
         return err_ctor;
     }
+
+    if (activeInterpreterFor(env, opts)) |interp| {
+        const r = interp.callBoxed(c, 0, @ptrCast(&empty_args));
+        const ok_ctor = alloc.lean_alloc_ctor(1, 1, 0);
+        ctor.lean_ctor_set(ok_ctor, 0, r);
+        return ok_ctor;
+    }
+
+    const a = std.heap.page_allocator;
+    var interp = Interpreter.init(env, opts, a);
+    const prev = g_active_interpreter;
+    g_active_interpreter = &interp;
+    defer g_active_interpreter = prev;
+    defer interp.deinit();
     const r = interp.callBoxed(c, 0, @ptrCast(&empty_args));
-    // Wrap in Except.ok (ctor 1, 1 field)
     const ok_ctor = alloc.lean_alloc_ctor(1, 1, 0);
     ctor.lean_ctor_set(ok_ctor, 0, r);
     return ok_ctor;
 }
 // ── lean_run_init ───────────────────────────────────────────────────────────
 // Run the init function for a declaration and cache the result.
-// Mirrors C++ interpreter::run_init: call init_decl with no args, mark the
-// result persistent, and store it in the symbol cache for decl.
+// Mirrors C++ interpreter::run_init: apply init_decl to the erased RealWorld
+// token, mark the result persistent, and store it in the symbol cache for decl.
 fn leanRunInit(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *anyopaque) callconv(.c) *anyopaque {
+    const run = struct {
+        fn go(interp: *Interpreter, decl_name: *anyopaque, init_name: *anyopaque) *anyopaque {
+            var init_args = [_]*anyopaque{object.lean_box(0).?};
+            const r = interp.callBoxed(init_name, 1, &init_args);
+            if (io_min.lean_io_result_is_ok(r)) {
+                const o = io_min.lean_io_result_get_value(r) orelse {
+                    rc.lean_dec(r);
+                    return io_min.lean_io_result_mk_error(object.lean_box(0).?);
+                };
+                rc.lean_mark_persistent(o);
+                rc.lean_dec(r);
+
+                const sym = interp.lookupSymbol(decl_name);
+                if (sym.native_addr) |addr| {
+                    const slot: *?*anyopaque = @ptrCast(@alignCast(addr));
+                    slot.* = o;
+                } else {
+                    storeInitGlobal(decl_name, o);
+                }
+
+                return io_min.lean_io_result_mk_ok(object.lean_box(0).?);
+            } else {
+                return r;
+            }
+        }
+    }.go;
+
+    if (activeInterpreterFor(env, opts)) |interp| {
+        return run(interp, decl, init_decl);
+    }
+
     const a = std.heap.page_allocator;
     var interp = Interpreter.init(env, opts, a);
+    const prev = g_active_interpreter;
+    g_active_interpreter = &interp;
+    defer g_active_interpreter = prev;
     defer interp.deinit();
-
-    // Call init_decl with 0 arguments
-    const no_args: [*]*anyopaque = @ptrCast(&empty_args);
-    const r = interp.callBoxed(init_decl, 0, no_args);
-
-    if (io_min.lean_io_result_is_ok(r)) {
-        const o = io_min.lean_io_result_get_value(r) orelse {
-            rc.lean_dec(r);
-            return io_min.lean_io_result_mk_error(object.lean_box(0).?);
-        };
-        rc.lean_mark_persistent(o);
-        rc.lean_dec(r);
-
-        // Store the initialized value in the symbol cache for decl
-        const sym = interp.lookupSymbol(decl);
-        if (sym.native_addr) |addr| {
-            const slot: *?*anyopaque = @ptrCast(@alignCast(addr));
-            slot.* = o;
-        } else {
-            // No native address — hold a reference to keep it alive
-            rc.lean_inc(o);
-        }
-
-        return io_min.lean_io_result_mk_ok(object.lean_box(0).?);
-    } else {
-        // Error — return as-is
-        return r;
-    }
+    return run(&interp, decl, init_decl);
 }
 
 var empty_args: [*]u8 = undefined;

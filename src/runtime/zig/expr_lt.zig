@@ -12,6 +12,7 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const ctor = @import("ctor.zig");
 const ea = @import("expr_accessors.zig");
+const rc = @import("rc.zig");
 const rt = @import("lean_rt.zig");
 const util_name = @import("util_name.zig");
 
@@ -21,6 +22,17 @@ extern fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_data_value_bool(v: *anyopaque) callconv(.c) u8;
+
+inline fn dataValueBeq(a: *anyopaque, b: *anyopaque) bool {
+    rc.lean_inc(a);
+    rc.lean_inc(b);
+    return lean_data_value_beq(a, b) != 0;
+}
+
+inline fn dataValueBool(v: *anyopaque) bool {
+    rc.lean_inc(v);
+    return lean_data_value_bool(v) != 0;
+}
 
 inline fn eTag(e: *anyopaque) u8 {
     if (object.lean_is_scalar(e)) return 0; // bvar
@@ -148,7 +160,7 @@ fn dataValueLt(a: *anyopaque, b: *anyopaque) bool {
             const sb = ctor.lean_ctor_get(b, 0) orelse return false;
             return lean_string_lt(sa, sb) != 0;
         },
-        1 => return lean_data_value_bool(a) == 0 and lean_data_value_bool(b) != 0,
+        1 => return !dataValueBool(a) and dataValueBool(b),
         2 => {
             const na = ctor.lean_ctor_get(a, 0) orelse return false;
             const nb = ctor.lean_ctor_get(b, 0) orelse return false;
@@ -174,7 +186,7 @@ fn kvmapLt(ma: *anyopaque, mb: *anyopaque) bool {
     if (lean_name_eq(ea_key, eb_key) == 0) return nameLt(ea_key, eb_key);
     const ea_val = ctor.lean_ctor_get(ea_pair, 1) orelse return false;
     const eb_val = ctor.lean_ctor_get(eb_pair, 1) orelse return false;
-    if (lean_data_value_beq(ea_val, eb_val) == 0) return dataValueLt(ea_val, eb_val);
+    if (!dataValueBeq(ea_val, eb_val)) return dataValueLt(ea_val, eb_val);
     const ea_tail = ctor.lean_ctor_get(ma, 1) orelse object.lean_box(0).?;
     const eb_tail = ctor.lean_ctor_get(mb, 1) orelse object.lean_box(0).?;
     return kvmapLt(ea_tail, eb_tail);

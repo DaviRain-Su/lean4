@@ -313,7 +313,7 @@ export fn lean_apply_m(f: *anyopaque, n: c_uint, args: [*]Obj) callconv(.c) Obj 
     return applySlice(f, args[0..n]);
 }
 
-fn cpp_curry(f: *anyopaque, n: c_uint, as: [*]Obj) callconv(.c) Obj {
+pub fn curryDirect(f: *anyopaque, n: c_uint, as: [*]Obj) Obj {
     return switch (n) {
         0 => @panic("lean::curry: n == 0"),
         1 => castFun(Fn1, f)(as[0]),
@@ -334,6 +334,10 @@ fn cpp_curry(f: *anyopaque, n: c_uint, as: [*]Obj) callconv(.c) Obj {
         16 => castFun(Fn16, f)(as[0], as[1], as[2], as[3], as[4], as[5], as[6], as[7], as[8], as[9], as[10], as[11], as[12], as[13], as[14], as[15]),
         else => castFun(Fnn, f)(as),
     };
+}
+
+fn cpp_curry(f: *anyopaque, n: c_uint, as: [*]Obj) callconv(.c) Obj {
+    return curryDirect(f, n, as);
 }
 
 comptime {

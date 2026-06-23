@@ -8,6 +8,7 @@
 const std = @import("std");
 const object = @import("object.zig");
 const ctor = @import("ctor.zig");
+const rc = @import("rc.zig");
 const Name = @import("util_name.zig").Name;
 const string = @import("string.zig");
 const nat_constructors = @import("nat_constructors.zig");
@@ -19,8 +20,8 @@ extern fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 pub const DataValueKind = enum(u8) {
     string = 0,
     bool = 1,
-    nat = 2,
-    name = 3,
+    name = 2,
+    nat = 3,
 };
 
 pub const DataValue = struct {
@@ -50,6 +51,7 @@ pub const DataValue = struct {
     }
 
     pub fn getBool(self: DataValue) bool {
+        rc.lean_inc(self.obj);
         return lean_data_value_bool(self.obj) != 0;
     }
 };
@@ -67,6 +69,8 @@ pub const KVMap = struct {
 };
 
 pub fn dataValueEq(a: DataValue, b: DataValue) bool {
+    rc.lean_inc(a.obj);
+    rc.lean_inc(b.obj);
     return lean_data_value_beq(a.obj, b.obj) != 0;
 }
 

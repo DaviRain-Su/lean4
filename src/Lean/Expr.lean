@@ -810,6 +810,8 @@ Binder annotations are ignored.
 -/
 @[extern "lean_expr_eqv"]
 opaque eqv (a : @& Expr) (b : @& Expr) : Bool
+@[extern "lean_expr_eqv_zig_impl"]
+opaque eqvZig (a : @& Expr) (b : @& Expr) : Bool
 
 instance : BEq Expr where
   beq := Expr.eqv
@@ -820,6 +822,8 @@ Binder names and annotations are taken into account.
 -/
 @[extern "lean_expr_equal"]
 opaque equal (a : @& Expr) (b : @& Expr) : Bool
+@[extern "lean_expr_equal_zig_impl"]
+opaque equalZig (a : @& Expr) (b : @& Expr) : Bool
 
 /-- Return `true` if the given expression is a `.sort ..` -/
 def isSort : Expr → Bool

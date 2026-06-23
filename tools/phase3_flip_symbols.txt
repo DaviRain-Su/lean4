@@ -138,7 +138,10 @@ lean_event_loop_lock
 lean_event_loop_loop
 lean_event_loop_unlock
 lean_expr_data
+lean_expr_equal
+lean_expr_eqv
 lean_expr_lt
+lean_expr_quick_lt
 lean_expr_mk_app_data
 lean_expr_mk_data
 lean_extract_mpz_value
@@ -637,6 +640,7 @@ lean_promise_resolve
 lean_ptr_addr
 lean_ptr_tag
 lean_register_external_class
+lean_replace_expr
 lean_run_main
 lean_run_mod_init_core
 lean_runtime_forget
