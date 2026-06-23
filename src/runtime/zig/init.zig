@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const c = @cImport({
     @cInclude("pthread.h");
     @cInclude("unistd.h");
+    @cInclude("sys/resource.h");
 });
 const alloc = @import("alloc.zig");
 const io_errno = @import("io_errno.zig");
@@ -82,6 +83,19 @@ pub fn initializeRuntimeSubsystems() void {
     // C ABI symbols after flipping. C++ initialization functions are no
     // longer called (init_module.cpp's lean_initialize_runtime_module is
     // flipped to this Zig version).
+    //
+    // Increase main thread stack to match worker thread defaults.
+    // The C++ runtime handles this via lean_run_main spawning a worker
+    // thread with the large stack, but compilation mode (lean file.lean)
+    // uses lean_shell_main which runs on the main thread. Override the
+    // default 8 MB stack to the OS hard limit to avoid stack overflows
+    // during deep elaboration.
+    if (builtin.os.tag != .windows and builtin.os.tag != .wasi) {
+        var limit: c.struct_rlimit = undefined;
+        _ = c.getrlimit(c.RLIMIT_STACK, &limit);
+        limit.rlim_cur = limit.rlim_max;
+        _ = c.setrlimit(c.RLIMIT_STACK, &limit);
+    }
     alloc.initializeRuntimeAllocator();
     initializeRcSubsystem();
     io_errno.initializeDecodeCache();
