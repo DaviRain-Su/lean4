@@ -1057,3 +1057,10 @@ lean_compacted_region_save
 lean_smap_foreach_test
 lean_display_cumulative_profiling_times
 lean_profileit
+lean_level_eq
+lean_level_eqv
+lean_expr_has_loose_bvar
+lean_expr_lift_loose_bvars
+lean_expr_lower_loose_bvars
+lean_expr_abstract
+lean_expr_abstract_range
