@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
     opts.addOption(bool, "compile_cpp_cutover", compile_cpp_cutover);
+    opts.addOption(bool, "cpp_init_modules_available", compile_cpp_cutover);
     opts.addOption(bool, "cpp_use_mimalloc", cpp_use_mimalloc);
     opts.addOption([]const u8, "cpp_build_type", cpp_build_type);
     opts.addOption([]const u8, "leanc_extra_cc_flags", leanc_extra_cc_flags);
@@ -35,6 +36,22 @@ pub fn build(b: *std.Build) void {
     opts.addOption([]const u8, "leanc_internal_linker_flags", leanc_internal_linker_flags);
     opts.addOption([]const u8, "lean_extra_linker_flags", lean_extra_linker_flags);
     const opts_mod = opts.createModule();
+
+    const zigrt_opts = b.addOptions();
+    zigrt_opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
+    zigrt_opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
+    zigrt_opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
+    zigrt_opts.addOption(bool, "compile_cpp_cutover", compile_cpp_cutover);
+    zigrt_opts.addOption(bool, "cpp_init_modules_available", false);
+    zigrt_opts.addOption(bool, "cpp_use_mimalloc", cpp_use_mimalloc);
+    zigrt_opts.addOption([]const u8, "cpp_build_type", cpp_build_type);
+    zigrt_opts.addOption([]const u8, "leanc_extra_cc_flags", leanc_extra_cc_flags);
+    zigrt_opts.addOption([]const u8, "leanc_internal_flags", leanc_internal_flags);
+    zigrt_opts.addOption([]const u8, "leanc_static_linker_flags", leanc_static_linker_flags);
+    zigrt_opts.addOption([]const u8, "leanc_shared_linker_flags", leanc_shared_linker_flags);
+    zigrt_opts.addOption([]const u8, "leanc_internal_linker_flags", leanc_internal_linker_flags);
+    zigrt_opts.addOption([]const u8, "lean_extra_linker_flags", lean_extra_linker_flags);
+    const zigrt_opts_mod = zigrt_opts.createModule();
 
     const allocator_mod = b.addModule("lean_allocator", .{
         .root_source_file = b.path("allocator.zig"),
@@ -187,7 +204,7 @@ pub fn build(b: *std.Build) void {
     });
     zigrt_mod.addImport("mpz_zig", mpz_mod);
     zigrt_mod.addImport("lean_allocator", allocator_mod);
-    zigrt_mod.addImport("runtime_options", opts_mod);
+    zigrt_mod.addImport("runtime_options", zigrt_opts_mod);
     if (use_gmp) {
         zigrt_mod.linkSystemLibrary("gmp", .{});
     }
@@ -278,7 +295,7 @@ pub fn build(b: *std.Build) void {
     });
     zigrt_test_mod.addImport("mpz_zig", mpz_mod);
     zigrt_test_mod.addImport("lean_allocator", allocator_mod);
-    zigrt_test_mod.addImport("runtime_options", opts_mod);
+    zigrt_test_mod.addImport("runtime_options", zigrt_opts_mod);
     if (use_gmp) {
         zigrt_test_mod.linkSystemLibrary("gmp", .{});
     }

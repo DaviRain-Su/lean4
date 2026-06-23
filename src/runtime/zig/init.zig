@@ -212,7 +212,7 @@ pub export fn lean_initialize() callconv(.c) void {
     if (initialize_Init(is_builtin)) |r| lean_dec(r);
     if (initialize_Std(is_builtin)) |r| lean_dec(r);
     if (initialize_Lean(is_builtin)) |r| lean_dec(r);
-    if (runtime_options.compile_cpp_cutover) {
+    if (runtime_options.cpp_init_modules_available) {
         stackinfo.saveStackInfo(true);
         _ZN4lean22initialize_util_moduleEv();
         _ZN4lean24initialize_kernel_moduleEv();
