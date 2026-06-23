@@ -582,9 +582,8 @@ def postprocess_zigrt_for_linking(
         copies.append(dst)
 
     tools_dir = ROOT / "tools"
-    symbol_tool = tools_dir / "macho_symbols.zig"
     weaken = subprocess.run(
-        [str(zig), "run", str(symbol_tool), "--", "weaken", str(zig_lib)]
+        [sys.executable, str(tools_dir / "weaken_zig_symbols.py"), str(zig_lib)]
         + [str(c) for c in copies],
         capture_output=True, text=True,
     )
@@ -595,8 +594,8 @@ def postprocess_zigrt_for_linking(
 
     if flip.exists():
         flip_proc = subprocess.run(
-            [str(zig), "run", str(symbol_tool), "--", "flip", str(zig_lib),
-             str(flip)] + [str(c) for c in copies],
+            [sys.executable, str(tools_dir / "flip_to_zig.py"), str(zig_lib),
+             str(kernel_entrypoints), str(flip)] + [str(c) for c in copies],
             capture_output=True, text=True,
         )
         if flip_proc.returncode != 0:

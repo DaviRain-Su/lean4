@@ -67,17 +67,25 @@ pub fn build(b: *std.Build) void {
             zig_rt.setCwd(b.path("src/runtime/zig"));
 
             const weaken = b.addSystemCommand(&.{
-                "zig",                 "run",             "tools/macho_symbols.zig", "--",                 "weaken",
-                zig_rt_helperless_lib, stage1_rt_archive, stage1_cpp_archive,        stage1_cpp_1_archive,
+                "python3", "tools/weaken_zig_symbols.py",
+                zig_rt_helperless_lib,
+                stage1_rt_archive,
+                stage1_cpp_archive,
+                stage1_cpp_1_archive,
             });
             weaken.step.dependOn(&zig_rt.step);
             weaken.setCwd(b.path("."));
 
             const stage1_init_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libInit.a");
             const flip = b.addSystemCommand(&.{
-                "zig",                 "run",                         "tools/macho_symbols.zig",       "--",              "flip",
-                zig_rt_helperless_lib, zig_rt_kernel_entrypoints_lib, "tools/phase3_flip_symbols.txt", stage1_rt_archive, stage1_cpp_archive,
-                stage1_cpp_1_archive,  stage1_init_archive,
+                "python3", "tools/flip_to_zig.py",
+                zig_rt_helperless_lib,
+                zig_rt_kernel_entrypoints_lib,
+                "tools/phase3_flip_symbols.txt",
+                stage1_rt_archive,
+                stage1_cpp_archive,
+                stage1_cpp_1_archive,
+                stage1_init_archive,
             });
             flip.step.dependOn(&weaken.step);
             flip.setCwd(b.path("."));

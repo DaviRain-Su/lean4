@@ -59,7 +59,7 @@ endif()
 # 414 behavioral mismatches), we keep C++ strong and weaken only Zig symbols
 # that duplicate C++ definitions.  Zig-only symbols stay strong and fill gaps.
 # The weakening happens in src/runtime/zig/CMakeLists.txt after the Zig
-# helperless archive is built, using macho_symbols.zig.
+# helperless archive is built, using weaken_zig_symbols.py / flip_to_zig.py.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 
 # The above library, like all other C++ code, is built using `-ftls-model=initial-exec`, which is necessary for linking it into `leanshared`,

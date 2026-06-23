@@ -818,13 +818,13 @@ if(STAGE GREATER 1)
         cmake -E copy_if_different "${PREV_STAGE}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
       COMMAND
-        "${ZIG}" run --cache-dir "${CMAKE_BINARY_DIR}/runtime/zig/.zig-cache" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- weaken
+        python3 ${LEAN_TOOLS_DIR}/weaken_zig_symbols.py
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
       COMMAND
-        "${ZIG}" run --cache-dir "${CMAKE_BINARY_DIR}/runtime/zig/.zig-cache" "${LEAN_TOOLS_DIR}/macho_symbols.zig" -- flip
+        python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
         "${LEAN_ZIG_FLIP_FILE}"
