@@ -1054,4 +1054,3 @@ ZN4lean31initialize_constructions_moduleEv
 lean_compacted_region_read
 lean_compacted_region_free
 lean_compacted_region_save
-lean_io_error_to_string
