@@ -924,8 +924,8 @@ v_toLeanConfig_302_ = lean_ctor_get(v_config_301_, 0);
 v_pkg_303_ = lean_ctor_get(v_self_300_, 0);
 v_config_304_ = lean_ctor_get(v_pkg_303_, 6);
 v_toLeanConfig_305_ = lean_ctor_get(v_config_304_, 1);
-v_backend_306_ = lean_ctor_get_uint8(v_toLeanConfig_302_, sizeof(void*)*13 + 1);
-v_backend_307_ = lean_ctor_get_uint8(v_toLeanConfig_305_, sizeof(void*)*13 + 1);
+v_backend_306_ = lean_ctor_get_uint8(v_toLeanConfig_302_, sizeof(void*)*13 + 2);
+v_backend_307_ = lean_ctor_get_uint8(v_toLeanConfig_305_, sizeof(void*)*13 + 2);
 v___x_308_ = l_Lake_Backend_orPreferLeft(v_backend_306_, v_backend_307_);
 return v___x_308_;
 }
@@ -976,14 +976,14 @@ _start:
 lean_object* v_config_322_; lean_object* v_toLeanConfig_323_; uint8_t v_requiresModuleSystem_324_; 
 v_config_322_ = lean_ctor_get(v_self_321_, 2);
 v_toLeanConfig_323_ = lean_ctor_get(v_config_322_, 0);
-v_requiresModuleSystem_324_ = lean_ctor_get_uint8(v_toLeanConfig_323_, sizeof(void*)*13 + 2);
+v_requiresModuleSystem_324_ = lean_ctor_get_uint8(v_toLeanConfig_323_, sizeof(void*)*13 + 3);
 if (v_requiresModuleSystem_324_ == 0)
 {
 lean_object* v_pkg_325_; lean_object* v_config_326_; lean_object* v_toLeanConfig_327_; uint8_t v_requiresModuleSystem_328_; 
 v_pkg_325_ = lean_ctor_get(v_self_321_, 0);
 v_config_326_ = lean_ctor_get(v_pkg_325_, 6);
 v_toLeanConfig_327_ = lean_ctor_get(v_config_326_, 1);
-v_requiresModuleSystem_328_ = lean_ctor_get_uint8(v_toLeanConfig_327_, sizeof(void*)*13 + 2);
+v_requiresModuleSystem_328_ = lean_ctor_get_uint8(v_toLeanConfig_327_, sizeof(void*)*13 + 3);
 return v_requiresModuleSystem_328_;
 }
 else
@@ -1008,14 +1008,14 @@ _start:
 lean_object* v_config_333_; lean_object* v_toLeanConfig_334_; uint8_t v_allowNonModules_335_; 
 v_config_333_ = lean_ctor_get(v_self_332_, 2);
 v_toLeanConfig_334_ = lean_ctor_get(v_config_333_, 0);
-v_allowNonModules_335_ = lean_ctor_get_uint8(v_toLeanConfig_334_, sizeof(void*)*13 + 3);
+v_allowNonModules_335_ = lean_ctor_get_uint8(v_toLeanConfig_334_, sizeof(void*)*13 + 4);
 if (v_allowNonModules_335_ == 0)
 {
 lean_object* v_pkg_336_; lean_object* v_config_337_; lean_object* v_toLeanConfig_338_; uint8_t v_allowNonModules_339_; 
 v_pkg_336_ = lean_ctor_get(v_self_332_, 0);
 v_config_337_ = lean_ctor_get(v_pkg_336_, 6);
 v_toLeanConfig_338_ = lean_ctor_get(v_config_337_, 1);
-v_allowNonModules_339_ = lean_ctor_get_uint8(v_toLeanConfig_338_, sizeof(void*)*13 + 3);
+v_allowNonModules_339_ = lean_ctor_get_uint8(v_toLeanConfig_338_, sizeof(void*)*13 + 4);
 return v_allowNonModules_339_;
 }
 else

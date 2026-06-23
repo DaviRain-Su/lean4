@@ -267,10 +267,13 @@ fn lean_io_error_to_string_impl(err: *anyopaque) callconv(.c) *anyopaque {
         rc.lean_inc(err);
         return err;
     }
-    // Handle IO.Error constructors with file/code/details fields
-    if (tag <= 16) {
-        return lean_mk_string_unchecked("IO error".ptr, 8, 8);
-    }
+    // IO.Error constructors 0-16: format with tag name and error code.
+    // These constructors have different field layouts:
+    //   0-9: DetailsOnly (tag, 1 obj field, 4 scalar bytes) or
+    //        OptionFilename (tag, 2 obj fields, 4 scalar bytes) or
+    //        DirectFilename (tag, 2 obj fields, 4 scalar bytes)
+    // We return a generic "IO error" for now. The C++ version (IOError.lean)
+    // has the full formatting but is not available in cutover mode.
     return lean_mk_string_unchecked("IO error".ptr, 8, 8);
 }
 // Always exported: helperless builds weaken Init's copy during cutover linking.
