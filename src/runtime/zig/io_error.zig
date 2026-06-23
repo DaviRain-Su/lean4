@@ -246,21 +246,26 @@ pub export fn lean_mk_io_user_error_zig_impl(msg: *anyopaque) callconv(.c) *anyo
 extern fn lean_mk_string_unchecked(s: [*:0]const u8, sz: usize, len: usize) callconv(.c) *anyopaque;
 
 fn lean_io_error_to_string_impl(err: *anyopaque) callconv(.c) *anyopaque {
+    if (@intFromPtr(err) < 0x1000) {
+        return lean_mk_string_unchecked("IO error".ptr, 8, 8);
+    }
+    if (object.lean_is_scalar(err)) {
+        return lean_mk_string_unchecked("end of file".ptr, 11, 11);
+    }
     const tag = object.lean_obj_tag(err);
     if (tag == 17) {
         return lean_mk_string_unchecked("end of file".ptr, 11, 11);
     }
     if (tag == 18) {
-        const msg = ctor.lean_ctor_get(err, 0).?;
+        const msg = ctor.lean_ctor_get(err, 0) orelse return lean_mk_string_unchecked("IO error".ptr, 8, 8);
         rc.lean_inc(msg);
         return msg;
     }
     return lean_mk_string_unchecked("IO error".ptr, 8, 8);
 }
+// Always exported: helperless builds weaken Init's copy during cutover linking.
 comptime {
-    if (runtime_options.export_lean_helpers) {
-        @export(&lean_io_error_to_string_impl, .{ .name = "lean_io_error_to_string" });
-    }
+    @export(&lean_io_error_to_string_impl, .{ .name = "lean_io_error_to_string" });
 }
 
 fn expectOptionSome(option_value: ?*anyopaque, expected: ?*anyopaque) !void {

@@ -23,6 +23,9 @@ pub fn build(b: *std.Build) void {
 
     const lean_zig_runtime = b.option(bool, "lean-zig-runtime", "Build Zig runtime") orelse true;
     const lean_zig_rt_cutover = b.option(bool, "lean-zig-rt-cutover", "Link Zig helperless runtime into leanshared") orelse true;
+    const skip_zig_rt_rebuild = b.option(bool, "skip-zig-rt-rebuild", "Reuse prev-stage weakened Zig runtime archive") orelse true;
+    const skip_leanshared_rebuild = b.option(bool, "skip-leanshared-rebuild", "Reuse prev-stage libleanshared dylibs for lean-exe") orelse true;
+    const use_gmp = b.option(bool, "use-gmp", "Link libgmp (off under Zig cutover)") orelse false;
     const zig_rt_prefix = b.fmt("{s}/zig-runtime", .{b.install_path});
     const zig_rt_lib = b.fmt("{s}/lib/libleanrt_zig.a", .{zig_rt_prefix});
     const zig_rt_helperless_prefix = b.fmt("{s}/zig-runtime-helperless", .{b.install_path});
@@ -32,6 +35,14 @@ pub fn build(b: *std.Build) void {
     const stage1_cpp_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleancpp.a");
     const stage1_cpp_1_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleancpp_1.a");
     const stage1_shell_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleanshell.a");
+    const stage1_leanmain_archive = resolveRootedPath(b, prev_stage_dir, "lib/temp/libleanmain.a");
+    const stage1_zig_rt_lib = resolveRootedPath(b, prev_stage_dir, "runtime/zig/zig-out-helperless/lib/libleanrt_zig.a");
+    const stage1_kernel_entrypoints_lib = resolveRootedPath(b, prev_stage_dir, "runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a");
+    const stage1_leanshared_dylib = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleanshared.dylib");
+    const stage1_leanshared_1_dylib = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleanshared_1.dylib");
+    const stage1_leanshared_2_dylib = resolveRootedPath(b, prev_stage_dir, "lib/lean/libleanshared_2.dylib");
+    const stage1_init_shared_dylib = resolveRootedPath(b, prev_stage_dir, "lib/lean/libInit_shared.dylib");
+    const stage1_leanc_sh = resolveRootedPath(b, prev_stage_dir, "leanc.sh");
     const prev_stage_include_dir = resolveRootedPath(b, prev_stage_dir, "include");
 
     requireExistingPath(stage1_rt_archive, "previous-stage runtime archive");
@@ -44,13 +55,18 @@ pub fn build(b: *std.Build) void {
     var zig_rt_step: ?*std.Build.Step.Run = null;
     var zig_rt_link_lib: ?[]const u8 = null;
     if (lean_zig_runtime) {
-        if (lean_zig_rt_cutover) {
+        if (lean_zig_rt_cutover and skip_zig_rt_rebuild) {
+            requireExistingPath(stage1_zig_rt_lib, "previous-stage libleanrt_zig.a");
+            requireExistingPath(stage1_kernel_entrypoints_lib, "previous-stage libkernel_entrypoints.a");
+            zig_rt_link_lib = stage1_zig_rt_lib;
+        } else if (lean_zig_rt_cutover) {
             const zig_rt = b.addSystemCommand(&.{
                 "zig", "build", "--prefix", zig_rt_helperless_prefix,
                 "-Dexport-lean-helpers=false",
                 "-Dexport-allocator-symbols=false",
                 "-Dexport-kernel-symbols=true",
                 "-Dcompile-cpp-cutover=true",
+                "-Duse-gmp=false",
                 b.fmt("-Dlean-include-dir={s}", .{prev_stage_include_dir}),
             });
             zig_rt.setCwd(b.path("src/runtime/zig"));
@@ -65,13 +81,16 @@ pub fn build(b: *std.Build) void {
             weaken.step.dependOn(&zig_rt.step);
             weaken.setCwd(b.path("."));
 
+            const stage1_init_archive = resolveRootedPath(b, prev_stage_dir, "lib/lean/libInit.a");
             const flip = b.addSystemCommand(&.{
                 "python3", "tools/flip_to_zig.py",
                 zig_rt_helperless_lib,
+                zig_rt_kernel_entrypoints_lib,
                 "tools/phase3_flip_symbols.txt",
                 stage1_rt_archive,
                 stage1_cpp_archive,
                 stage1_cpp_1_archive,
+                stage1_init_archive,
             });
             flip.step.dependOn(&weaken.step);
             flip.setCwd(b.path("."));
@@ -358,7 +377,7 @@ pub fn build(b: *std.Build) void {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/lean/libLean.a", .{stdlib_out}));
             link_cmd.addArg(stage1_cpp_archive);
             link_cmd.addArg(rt_lib);
-            link_cmd.addArg(zig_rt_kernel_entrypoints_lib);
+            link_cmd.addArg(if (skip_zig_rt_rebuild) stage1_kernel_entrypoints_lib else zig_rt_kernel_entrypoints_lib);
             link_cmd.addArg(stage1_rt_archive);
         } else {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}", .{rt_lib}));
@@ -375,7 +394,13 @@ pub fn build(b: *std.Build) void {
         link_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/libutil.a", .{b.install_path}));
         link_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/liblibrary.a", .{b.install_path}));
     }
-    link_cmd.addArgs(&.{ "-L/opt/homebrew/lib", "-luv", "-lpthread", "-lm", "-lgmp", "-lc++" });
+    var link_libs: std.ArrayList([]const u8) = .empty;
+    defer link_libs.deinit(b.allocator);
+    link_libs.appendSlice(b.allocator, &.{ "-L/opt/homebrew/lib", "-luv", "-lpthread", "-lm", "-lc++" }) catch unreachable;
+    if (use_gmp) {
+        link_libs.append(b.allocator, "-lgmp") catch unreachable;
+    }
+    link_cmd.addArgs(link_libs.items);
     link_step.dependOn(&link_cmd.step);
     if (!skip_stdlib_build) {
         link_cmd.step.dependOn(lean_compile_step);
@@ -387,16 +412,70 @@ pub fn build(b: *std.Build) void {
     const mkdir_bin = b.addSystemCommand(&.{ "mkdir", "-p" });
     mkdir_bin.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin", .{b.install_path}) catch unreachable);
     lean_exe_step.dependOn(&mkdir_bin.step);
-    const lean_exe_cmd = b.addSystemCommand(&.{ "zig", "c++" });
-    lean_exe_cmd.step.dependOn(&mkdir_bin.step);
-    lean_exe_cmd.addArg("-o");
-    lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
-    lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/libleanshared.dylib", .{b.install_path}) catch unreachable);
-    lean_exe_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/libleanmain.a", .{b.install_path}));
-    lean_exe_cmd.addArgs(&.{ "-L/opt/homebrew/lib", "-luv", "-lpthread", "-lm", "-lc++", "-Wl,-rpath,@loader_path/../lib" });
-    lean_exe_step.dependOn(&lean_exe_cmd.step);
-    lean_exe_cmd.step.dependOn(link_step);
-    lean_exe_cmd.step.dependOn(&install_stdlib_dir.step);
+
+    if (skip_leanshared_rebuild) {
+        requireExistingPath(stage1_leanmain_archive, "previous-stage libleanmain.a");
+        requireExistingPath(stage1_leanshared_dylib, "previous-stage libleanshared.dylib");
+        requireExistingPath(stage1_leanshared_1_dylib, "previous-stage libleanshared_1.dylib");
+        requireExistingPath(stage1_leanshared_2_dylib, "previous-stage libleanshared_2.dylib");
+        requireExistingPath(stage1_init_shared_dylib, "previous-stage libInit_shared.dylib");
+
+        const mkdir_lib_lean = b.addSystemCommand(&.{ "mkdir", "-p" });
+        mkdir_lib_lean.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{b.install_path}) catch unreachable);
+        lean_exe_step.dependOn(&mkdir_lib_lean.step);
+
+        const copy_shared_libs = b.addSystemCommand(&.{ "cp" });
+        copy_shared_libs.step.dependOn(&mkdir_lib_lean.step);
+        copy_shared_libs.addArgs(&.{
+            stage1_leanshared_dylib,
+            stage1_leanshared_1_dylib,
+            stage1_leanshared_2_dylib,
+            std.fmt.allocPrint(b.allocator, "{s}/lib", .{b.install_path}) catch unreachable,
+        });
+        lean_exe_step.dependOn(&copy_shared_libs.step);
+
+        const copy_init_shared = b.addSystemCommand(&.{ "cp" });
+        copy_init_shared.step.dependOn(&mkdir_lib_lean.step);
+        copy_init_shared.addArgs(&.{
+            stage1_init_shared_dylib,
+            std.fmt.allocPrint(b.allocator, "{s}/lib/lean", .{b.install_path}) catch unreachable,
+        });
+        lean_exe_step.dependOn(&copy_init_shared.step);
+
+        const lean_exe_cmd = b.addSystemCommand(&.{ "bash", stage1_leanc_sh });
+        lean_exe_cmd.step.dependOn(&mkdir_bin.step);
+        lean_exe_cmd.step.dependOn(&copy_shared_libs.step);
+        lean_exe_cmd.step.dependOn(&copy_init_shared.step);
+        lean_exe_cmd.addArg(stage1_leanmain_archive);
+        const install_lib = std.fmt.allocPrint(b.allocator, "{s}/lib", .{b.install_path}) catch unreachable;
+        lean_exe_cmd.addArg(b.fmt("-L{s}", .{install_lib}));
+        lean_exe_cmd.addArg(b.fmt("-L{s}/lean", .{install_lib}));
+        lean_exe_cmd.addArgs(&.{
+            "-lInit_shared", "-lleanshared_2", "-lleanshared_1", "-lleanshared",
+            "-Wl,-rpath,@executable_path/../lib", "-Wl,-rpath,@executable_path/../lib/lean",
+            "-o",
+        });
+        lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
+        lean_exe_step.dependOn(&lean_exe_cmd.step);
+        lean_exe_cmd.step.dependOn(&install_stdlib_dir.step);
+    } else {
+        const lean_exe_cmd = b.addSystemCommand(&.{"zig", "c++"});
+        lean_exe_cmd.step.dependOn(&mkdir_bin.step);
+        lean_exe_cmd.addArg("-o");
+        lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/bin/lean", .{b.install_path}) catch unreachable);
+        lean_exe_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/libleanshared.dylib", .{b.install_path}) catch unreachable);
+        lean_exe_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/libleanmain.a", .{b.install_path}));
+        var exe_libs: std.ArrayList([]const u8) = .empty;
+        defer exe_libs.deinit(b.allocator);
+        exe_libs.appendSlice(b.allocator, &.{ "-L/opt/homebrew/lib", "-luv", "-lpthread", "-lm", "-lc++", "-Wl,-rpath,@loader_path/../lib" }) catch unreachable;
+        if (use_gmp) {
+            exe_libs.append(b.allocator, "-lgmp") catch unreachable;
+        }
+        lean_exe_cmd.addArgs(exe_libs.items);
+        lean_exe_step.dependOn(&lean_exe_cmd.step);
+        lean_exe_cmd.step.dependOn(link_step);
+        lean_exe_cmd.step.dependOn(&install_stdlib_dir.step);
+    }
     b.getInstallStep().dependOn(lean_exe_step);
 
     // ── Test step ──────────────────────────────────────────────────────────

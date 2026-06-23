@@ -628,10 +628,13 @@ test "compacted region save/read closure with v3 format" {
     try std.testing.expect(io_result.lean_io_result_is_ok(free_result));
 }
 
-// Bridge exports: expose zig_lean_compacted_region_* under the canonical
-// lean_compacted_region_* names expected by the Lean stdlib.
+// Bridge exports: when compile-cpp-cutover is off, Zig provides compact region I/O.
+// With cutover, C++ compact.cpp in libleanrt_zig.a is the sole provider.
+const runtime_options = @import("runtime_options");
 comptime {
-    @export(&zig_lean_compacted_region_save, .{ .name = "lean_compacted_region_save", .linkage = .strong });
-    @export(&zig_lean_compacted_region_read, .{ .name = "lean_compacted_region_read", .linkage = .strong });
-    @export(&zig_lean_compacted_region_free, .{ .name = "lean_compacted_region_free", .linkage = .strong });
+    if (!runtime_options.compile_cpp_cutover) {
+        @export(&zig_lean_compacted_region_save, .{ .name = "lean_compacted_region_save", .linkage = .strong });
+        @export(&zig_lean_compacted_region_read, .{ .name = "lean_compacted_region_read", .linkage = .strong });
+        @export(&zig_lean_compacted_region_free, .{ .name = "lean_compacted_region_free", .linkage = .strong });
+    }
 }

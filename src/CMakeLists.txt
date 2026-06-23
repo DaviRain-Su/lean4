@@ -122,7 +122,11 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Zig-only symbols fill gaps in the C++ runtime.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
-if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
+  # GMP-free path: Zig big_int + gmp_mpz_compat provide __mpz_struct layout and
+  # arithmetic; C++ mpz.cpp is compiled without LEAN_USE_GMP in the cutover archive.
+  set(USE_GMP OFF CACHE BOOL "USE_GMP" FORCE)
+  message(STATUS "LEAN_ZIG_RT_CUTOVER: USE_GMP=OFF (GMP-free Zig big_int runtime)")
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
@@ -873,6 +877,12 @@ if(LEAN_ZIG_CODEGEN AND STAGE GREATER 0)
 else()
   set(LEAN_ZIG_CODEGEN_TOML "false")
   set(STDLIB_ZIG "zig")
+endif()
+if(LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
+  # Stage0 + Zig cutover: parallel leanmake can crash the bootstrap compiler on macOS.
+  set(STDLIB_LEANMAKE_JOBS "-j1")
+else()
+  set(STDLIB_LEANMAKE_JOBS "")
 endif()
 
 set(
