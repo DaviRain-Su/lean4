@@ -51,3 +51,37 @@ stage0/util/
 stage0/lean
 stage0/githash.h
 stage0/stdlib/
+# Zig build outputs
+zig-out/
+src/runtime/zig/zig-out/
+src/runtime/zig/zig-out-helperless/
+src/runtime/zig/zig-out-test/
+
+# stage0 build artifacts
+stage0/CMakeCache.txt
+stage0/CMakeFiles/
+stage0/CTestTestfile.cmake
+stage0/DartConfiguration.tcl
+stage0/bin/
+stage0/include/
+stage0/lib/
+stage0/library/
+stage0/share/
+stage0/src/lean
+stage0/stdlib.make
+
+# stage0/src generated runtime files
+stage0/src/runtime/zig/rc_barrier.c
+stage0/src/runtime/zig/zigrt_stubs.c
+
+# EmitZig test outputs (expanded)
+tests/emitzig/Exception*
+tests/emitzig/Float*
+tests/emitzig/JoinPoint*
+tests/emitzig/List*
+tests/emitzig/Recursion*
+tests/emitzig/SetStdout*
+tests/emitzig/Smoke*
+tests/emitzig/Stderr*
+tests/emitzig/StdlibString*
+tests/emitzig/Task*
