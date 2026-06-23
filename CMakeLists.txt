@@ -45,6 +45,13 @@ foreach(var ${vars})
   endif()
 endforeach()
 
+# stage0 must remain a full-C++ bootstrap compiler by default.
+# The stage0/src project itself defaults LEAN_ZIG_RT_CUTOVER to ON, so we must
+# override it explicitly here unless the caller provided STAGE0_LEAN_ZIG_RT_CUTOVER.
+if(NOT DEFINED STAGE0_LEAN_ZIG_RT_CUTOVER)
+  list(APPEND STAGE0_ARGS "-DLEAN_ZIG_RT_CUTOVER=OFF")
+endif()
+
 project(LEAN CXX C)
 
 if(NOT (DEFINED STAGE0_CMAKE_EXECUTABLE_SUFFIX))
@@ -138,7 +145,7 @@ if(NOT STAGE1_PREV_STAGE)
     # do not rebuild stage0 when git hash changes; it's not from this commit anyway
     # (however, CI will override this as we need to embed the githash into the stage 1 library built
     # by stage 0)
-    CMAKE_ARGS -DSTAGE=0 -DUSE_GITHASH=OFF ${PLATFORM_ARGS} ${STAGE0_ARGS}
+    CMAKE_ARGS -DSTAGE=0 -DUSE_GITHASH=OFF -DPREV_STAGE=${CMAKE_BINARY_DIR}/stage0 ${PLATFORM_ARGS} ${STAGE0_ARGS}
     BUILD_ALWAYS
       ON # cmake doesn't auto-detect changes without a download method
     INSTALL_COMMAND

@@ -899,11 +899,12 @@ endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   # Lake's parallel stdlib build can exhaust the default 256/8192 fd limit on macOS.
+  # Convert STDLIBS list to space-separated string to avoid CMake list splitting
+  string(REPLACE ";" " " STDLIBS_STR "${STDLIBS}")
   set(LEAN_STDLIB_BUILD_COMMAND
-    bash -c "ulimit -n 65536 2>/dev/null || true; exec \"${MAKE}\" -f \"${CMAKE_BINARY_DIR}/stdlib.make\" ${STDLIBS}"
-  )
+    bash -lc "ulimit -n 65536 2>/dev/null || true && exec '${CMAKE_MAKE_PROGRAM}' -f '${CMAKE_BINARY_DIR}/stdlib.make' ${STDLIBS_STR}")
 else()
-  set(LEAN_STDLIB_BUILD_COMMAND $(MAKE) -f ${CMAKE_BINARY_DIR}/stdlib.make ${STDLIBS})
+  set(LEAN_STDLIB_BUILD_COMMAND ${CMAKE_MAKE_PROGRAM} -f ${CMAKE_BINARY_DIR}/stdlib.make ${STDLIBS})
 endif()
 add_custom_target(
   make_stdlib

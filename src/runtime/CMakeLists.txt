@@ -21,6 +21,7 @@ else()
   )
   # Full self-contained C++ runtime (stage0 bootstrap, no Zig archive).
   list(APPEND RUNTIME_OBJS
+    apply.cpp
     alloc.cpp
     utf8.cpp
     uv/net_addr.cpp

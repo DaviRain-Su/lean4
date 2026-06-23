@@ -23,6 +23,6 @@ add_library(
 )
 # When the Zig runtime cutover is active, llvm_stubs.zig provides the
 # lean_llvm_* stubs.  Otherwise C++ llvm.cpp must fill that role.
-if(NOT (LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER))
+if(NOT (LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0))
   target_sources(library PRIVATE llvm.cpp)
 endif()
