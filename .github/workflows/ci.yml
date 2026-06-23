@@ -303,6 +303,7 @@ jobs:
                 "enabled": true,
                 "test": true,
                 "skip-test-binary": true,
+                "zig-build": true,
                 "CMAKE_OPTIONS": "-DLEAN_ZIG_RUNTIME=ON",
                 "CTEST_OPTIONS": "-R 'runtime/zig|emitzig/zigrt|emitzig/stdlib|emitzig/zig-symbols'",
               },

@@ -914,15 +914,14 @@ else()
   set(STDLIB_ZIG "zig")
 endif()
 if(LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
-  # Stage0 + Zig cutover: parallel leanmake can crash the bootstrap compiler on macOS.
-  set(STDLIB_LEANMAKE_JOBS "-j1")
-else()
+  # With the direct `make -f lean.mk` path we can use the outer jobserver again.
+  # Keep `STDLIB_LEANMAKE_JOBS` empty so nested make inherits `-j` from the
+  # top-level build instead of forcing serialization.
   set(STDLIB_LEANMAKE_JOBS "")
 endif()
 if(APPLE AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
-  # The stage0 bootstrap compiler intermittently drops `.olean` outputs when Lake
-  # builds the stage1 stdlib in parallel on macOS under Zig cutover. Use the
-  # stable leanmake path here; `STDLIB_LEANMAKE_JOBS` already serializes it.
+  # Lake still drops `.olean` outputs intermittently on macOS under Zig cutover,
+  # so keep the stage1 stdlib on the lean.mk path for now.
   set(USE_LAKE OFF CACHE BOOL "Use Lake instead of lean.mk for building core libs from language server" FORCE)
 endif()
 

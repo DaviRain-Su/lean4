@@ -176,6 +176,12 @@ jobs:
         run: |
           ulimit -c unlimited  # coredumps
           time make -C build $TARGET_STAGE -j$NPROC
+      - name: Test transitional zig build
+        if: matrix.zig-build
+        run: |
+          ulimit -c unlimited  # coredumps
+          time zig build stage1
+          time zig build lean-compile -Dprev-stage-dir=build/release/stage1 -Dbootstrap-stage-dir=build/release/stage0 -Dskip-stdlib-build=false --prefix build/zig-unified-ci
       # Should be done as early as possible and in particular *before* "Check rebootstrap" which
       # changes the state of stage1/
       - name: Save Cache
