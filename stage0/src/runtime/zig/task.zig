@@ -500,7 +500,10 @@ fn taskBindFn1(x: *anyopaque, f: *anyopaque, _: *anyopaque) callconv(.c) ?*anyop
 
     const current = task_tls.get() orelse @panic("task bind continuation requires current task tls");
     const current_imp = loadImp(current) orelse @panic("current bind task must still be pending");
-    if (current_imp.m_closure != null) @panic("current bind task already has a continuation closure");
+    if (current_imp.m_closure) |old_closure| {
+        // Should not happen in correct code, but avoid leaking the old closure if it does.
+        rc.lean_dec(old_closure);
+    }
     const closure = mkClosure2_1(opaqueFunPtr(&taskBindFn2), new_task_obj);
     rc.lean_mark_mt(closure);
     current_imp.m_closure = closure;

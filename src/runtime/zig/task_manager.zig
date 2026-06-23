@@ -711,7 +711,11 @@ pub const TaskManager = struct {
             return;
         }
 
-        const rebound = imp.m_closure orelse @panic("pending task must reinstall its continuation closure");
+        const rebound = imp.m_closure orelse {
+            // Task was deactivated while the bind closure ran; dependents already freed.
+            freeTaskObject(task);
+            return;
+        };
         const nested_task = pendingDependencyTask(rebound);
         self.m_mutex.unlock();
         defer self.m_mutex.lock();
