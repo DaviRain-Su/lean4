@@ -22,9 +22,9 @@ threadlocal var g_thread_initialized = false;
 var g_live_spawn_contexts = std.atomic.Value(usize).init(0);
 var g_thread_stack_size: usize = 0;
 
-pub const default_stack_size_kb: usize = 8192;
+pub const default_stack_size_kb: usize = 1024 * 1024; // 1 GB, matches C++ LEAN_DEFAULT_THREAD_STACK_SIZE
 const min_stack_size_kb: usize = 64;
-const max_stack_size_kb: usize = 65536;
+const max_stack_size_kb: usize = 1024 * 1024; // 1 GB
 const stack_buffer_space_bytes: usize = 128 * 1024;
 
 pub const SpawnConfig = struct {
