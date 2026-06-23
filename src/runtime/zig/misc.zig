@@ -97,17 +97,19 @@ fn nameHashPtr(n: ?*anyopaque) u64 {
     std.debug.assert(n != null and !object.lean_is_scalar(n));
     const name = n.?;
     const kind = compatNameKind(name);
-    return switch (kind) {
-        .string => if (object.lean_ptr_tag(name) == 1 and ctor.ctorScalarBytes(name) >= @sizeOf(u64))
-            ctor.lean_ctor_get_uint64(name, pointer_bytes * 2)
-        else
-            rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), stringHashObj(ctor.lean_ctor_get(name, 1).?)),
-        .numeral => if (object.lean_ptr_tag(name) == 2 and ctor.ctorScalarBytes(name) >= @sizeOf(u64))
-            ctor.lean_ctor_get_uint64(name, pointer_bytes * 2)
-        else
-            rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), natHashObj(ctor.lean_ctor_get(name, 1))),
-        else => l_Lean_Name_hash___override(name),
-    };
+    if (kind == .string) {
+        if (object.lean_ptr_tag(name) == 1 and ctor.ctorScalarBytes(name) >= @sizeOf(u64)) {
+            return ctor.lean_ctor_get_uint64(name, pointer_bytes * 2);
+        }
+        return rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), stringHashObj(ctor.lean_ctor_get(name, 1).?));
+    }
+    if (kind == .numeral) {
+        if (object.lean_ptr_tag(name) == 2 and ctor.ctorScalarBytes(name) >= @sizeOf(u64)) {
+            return ctor.lean_ctor_get_uint64(name, pointer_bytes * 2);
+        }
+        return rt_hash.hash(nameHash(ctor.lean_ctor_get(name, 0)), natHashObj(ctor.lean_ctor_get(name, 1)));
+    }
+    return l_Lean_Name_hash___override(name);
 }
 
 fn nameHash(n: ?*anyopaque) u64 {
