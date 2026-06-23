@@ -85,3 +85,4 @@ tests/emitzig/Smoke*
 tests/emitzig/Stderr*
 tests/emitzig/StdlibString*
 tests/emitzig/Task*
+__pycache__/
