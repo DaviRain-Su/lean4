@@ -175,56 +175,58 @@ fn kvmapEq(a: *anyopaque, b: *anyopaque) u8 {
 // ── Expression structural equality ───────────────────────────────────────────
 
 /// Structural equality with binder info (lean_expr_equal / expr_eq_fn<true>).
-fn lean_expr_equal(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_expr_equal(a: ?*anyopaque, b: ?*anyopaque) callconv(.c) u8 {
     return exprEqRec(a, b, true);
 }
 
 /// Structural equality without binder info (lean_expr_eqv / expr_eq_fn<false>).
 /// Same as lean_expr_equal but ignores binder_info and let_nondep fields.
-fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+fn lean_expr_eqv(a: ?*anyopaque, b: ?*anyopaque) callconv(.c) u8 {
     return exprEqRec(a, b, false);
 }
 
 /// Core structural equality. compare_bi controls whether binder info is checked.
-fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
+fn exprEqRec(a: ?*anyopaque, b: ?*anyopaque, compare_bi: bool) u8 {
     if (a == b) return 1;
-    if (object.lean_is_scalar(a) or object.lean_is_scalar(b)) {
-        if (object.lean_is_scalar(a) and object.lean_is_scalar(b))
-            return if (object.lean_unbox(a) == object.lean_unbox(b)) 1 else 0;
+    const a_ptr = a orelse return 0;
+    const b_ptr = b orelse return 0;
+    if (object.lean_is_scalar(a_ptr) or object.lean_is_scalar(b_ptr)) {
+        if (object.lean_is_scalar(a_ptr) and object.lean_is_scalar(b_ptr))
+            return if (object.lean_unbox(a_ptr) == object.lean_unbox(b_ptr)) 1 else 0;
         return 0;
     }
-    const tag = object.lean_ptr_tag(a);
-    if (tag != object.lean_ptr_tag(b)) return 0;
+    const tag = object.lean_ptr_tag(a_ptr);
+    if (tag != object.lean_ptr_tag(b_ptr)) return 0;
     switch (tag) {
         0 => {
-            const ia = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const ib = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const ia = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const ib = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return if (object.lean_unbox(ia) == object.lean_unbox(ib)) 1 else 0;
         },
         1, 2 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const na = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return lean_name_eq(na, nb);
         },
         3 => {
-            const la = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const lb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const la = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const lb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return lean_level_eq(la, lb);
         },
         4 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const na = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             if (lean_name_eq(na, nb) == 0) return 0;
-            const la = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const lb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const la = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const lb = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             return levelListEq(la, lb);
         },
         5 => {
-            const aa = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const ab = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const aa = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const ab = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             if (exprEqRec(aa, ab, compare_bi) == 0) return 0;
-            var fa = ctor.lean_ctor_get(a, 0) orelse return 0;
-            var fb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            var fa = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            var fb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             while (true) {
                 if (fa == fb) return 1;
                 const fa_is_app = !object.lean_is_scalar(fa) and object.lean_ptr_tag(fa) == 5;
@@ -239,56 +241,56 @@ fn exprEqRec(a: *anyopaque, b: *anyopaque, compare_bi: bool) u8 {
             }
         },
         6, 7 => {
-            const da = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const db = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const da = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const db = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             if (exprEqRec(da, db, compare_bi) == 0) return 0;
-            const ba = ctor.lean_ctor_get(a, 2) orelse return 0;
-            const bb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            const ba = ctor.lean_ctor_get(a_ptr, 2) orelse return 0;
+            const bb = ctor.lean_ctor_get(b_ptr, 2) orelse return 0;
             if (exprEqRec(ba, bb, compare_bi) == 0) return 0;
             if (!compare_bi) return 1;
-            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const na = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             if (lean_name_eq(na, nb) == 0) return 0;
-            return if (exprBinderInfo(a) == exprBinderInfo(b)) 1 else 0;
+            return if (exprBinderInfo(a_ptr) == exprBinderInfo(b_ptr)) 1 else 0;
         },
         8 => {
-            const ta = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const tb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const ta = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const tb = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             if (exprEqRec(ta, tb, compare_bi) == 0) return 0;
-            const va = ctor.lean_ctor_get(a, 2) orelse return 0;
-            const vb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            const va = ctor.lean_ctor_get(a_ptr, 2) orelse return 0;
+            const vb = ctor.lean_ctor_get(b_ptr, 2) orelse return 0;
             if (exprEqRec(va, vb, compare_bi) == 0) return 0;
-            const ba = ctor.lean_ctor_get(a, 3) orelse return 0;
-            const bb = ctor.lean_ctor_get(b, 3) orelse return 0;
+            const ba = ctor.lean_ctor_get(a_ptr, 3) orelse return 0;
+            const bb = ctor.lean_ctor_get(b_ptr, 3) orelse return 0;
             if (exprEqRec(ba, bb, compare_bi) == 0) return 0;
-            if (exprLetNonDep(a) != exprLetNonDep(b)) return 0;
+            if (exprLetNonDep(a_ptr) != exprLetNonDep(b_ptr)) return 0;
             if (!compare_bi) return 1;
-            const na = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const na = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const nb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return lean_name_eq(na, nb);
         },
         9 => {
-            const la = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const lb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const la = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const lb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return litEq(la, lb);
         },
         10 => {
-            const ea = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const eb = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const ea = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const eb = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             if (exprEqRec(ea, eb, compare_bi) == 0) return 0;
-            const ma = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const mb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const ma = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const mb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             return kvmapEq(ma, mb);
         },
         11 => {
-            const ea = ctor.lean_ctor_get(a, 2) orelse return 0;
-            const eb = ctor.lean_ctor_get(b, 2) orelse return 0;
+            const ea = ctor.lean_ctor_get(a_ptr, 2) orelse return 0;
+            const eb = ctor.lean_ctor_get(b_ptr, 2) orelse return 0;
             if (exprEqRec(ea, eb, compare_bi) == 0) return 0;
-            const sa = ctor.lean_ctor_get(a, 0) orelse return 0;
-            const sb = ctor.lean_ctor_get(b, 0) orelse return 0;
+            const sa = ctor.lean_ctor_get(a_ptr, 0) orelse return 0;
+            const sb = ctor.lean_ctor_get(b_ptr, 0) orelse return 0;
             if (lean_name_eq(sa, sb) == 0) return 0;
-            const ia = ctor.lean_ctor_get(a, 1) orelse return 0;
-            const ib = ctor.lean_ctor_get(b, 1) orelse return 0;
+            const ia = ctor.lean_ctor_get(a_ptr, 1) orelse return 0;
+            const ib = ctor.lean_ctor_get(b_ptr, 1) orelse return 0;
             return natEq(ia, ib);
         },
         else => return 0,
