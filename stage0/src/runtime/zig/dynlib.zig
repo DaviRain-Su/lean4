@@ -72,14 +72,14 @@ fn mkOk(v: *anyopaque) *anyopaque {
 }
 
 fn mkOptionSome(v: *anyopaque) *anyopaque {
-    const some = alloc.lean_alloc_ctor(0, 1, 0);
+    const some = alloc.lean_alloc_ctor(1, 1, 0);
     const ctor = @import("ctor.zig");
     ctor.lean_ctor_set(some, 0, v);
     return some;
 }
 
 fn mkOptionNone() *anyopaque {
-    return alloc.lean_alloc_ctor(1, 0, 0);
+    return object.lean_box(0).?;
 }
 
 pub export fn lean_dynlib_load(path: *anyopaque) callconv(.c) *anyopaque {
