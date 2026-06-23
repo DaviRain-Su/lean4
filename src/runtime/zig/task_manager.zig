@@ -580,16 +580,23 @@ pub const TaskManager = struct {
     }
 
     fn spawnStandardWorkerLocked(self: *TaskManager) !void {
-        const worker = try std.Thread.spawn(.{}, standardWorkerMain, .{self});
+        const worker = try std.Thread.spawn(.{ .stack_size = workerStackSize() }, standardWorkerMain, .{self});
         try self.m_workers.append(self.allocator, worker);
     }
 
     fn spawnDedicatedWorkerLocked(self: *TaskManager, task: *lean.lean_task_object) !void {
         self.m_num_dedicated_workers += 1;
         self.m_dedicated_started += 1;
-        const worker = try std.Thread.spawn(.{}, dedicatedWorkerMain, .{ self, task });
+        const worker = try std.Thread.spawn(.{ .stack_size = workerStackSize() }, dedicatedWorkerMain, .{ self, task });
         worker.detach();
     }
+
+fn workerStackSize() usize {
+    const env = libc.getenv("LEAN_STACK_SIZE_KB") orelse return 1024 * 1024 * 1024; // 1 GB
+    const raw = std.mem.span(env);
+    const kb = std.fmt.parseUnsigned(usize, raw, 10) catch return 1024 * 1024 * 1024;
+    return kb * 1024;
+}
 
     fn standardWorkerMain(self: *TaskManager) void {
         self.m_mutex.lock();
