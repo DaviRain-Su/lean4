@@ -803,8 +803,11 @@ if(STAGE GREATER 1)
     add_dependencies(leancpp copy-lean-h-bc)
   endif()
   if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER)
+    set(LEAN_TOOLS_DIR "${LEAN_SOURCE_DIR}/../tools")
+    set(LEAN_ZIG_FLIP_FILE "${LEAN_TOOLS_DIR}/phase3_flip_symbols.txt")
     add_custom_target(
       leanrt_zig_helperless
+      DEPENDS copy-leancpp
       COMMAND
         cmake -E make_directory "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib"
       COMMAND
@@ -813,6 +816,24 @@ if(STAGE GREATER 1)
       COMMAND
         cmake -E copy_if_different "${PREV_STAGE}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
         "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
+      COMMAND
+        python3 ${LEAN_TOOLS_DIR}/weaken_zig_symbols.py
+        "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
+        "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
+        "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
+      COMMAND
+        python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
+        "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a"
+        "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a"
+        "${LEAN_ZIG_FLIP_FILE}"
+        "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
+        "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libInit.a"
+      WORKING_DIRECTORY "${LEAN_SOURCE_DIR}/runtime/zig"
+      COMMENT "Copying + weakening Zig runtime for stage > 1"
+      VERBATIM
     )
   endif()
 else()
