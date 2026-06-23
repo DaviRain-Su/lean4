@@ -18,7 +18,7 @@ const runtime_options = @import("runtime_options");
 const sync = @import("sync.zig");
 pub const lean_name_separator: []const u8 = ".";
 pub const id_begin_escape: u32 = 0xAB; // «
-pub const id_end_escape: u32 = 0xBB;   // »
+pub const id_end_escape: u32 = 0xBB; // »
 pub const anonymous_str: []const u8 = "[anonymous]";
 
 extern fn lean_name_mk_string(p: *anyopaque, s: *anyopaque) callconv(.c) *anyopaque;
@@ -152,6 +152,14 @@ pub const Name = struct {
         return fromObj(lean_name_mk_numeral(object.lean_box(0).?, n));
     }
 
+    pub fn fromPrefixStringObj(prefix: Name, s: *anyopaque) Name {
+        return fromObj(lean_name_mk_string(prefix.obj.?, s));
+    }
+
+    pub fn fromPrefixNumeralObj(prefix: Name, n: *anyopaque) Name {
+        return fromObj(lean_name_mk_numeral(prefix.obj.?, n));
+    }
+
     pub fn fromPrefixStr(prefix: Name, s: [*:0]const u8) Name {
         const str = string.lean_mk_string(s);
         return fromObj(lean_name_mk_string(prefix.obj.?, str));
@@ -274,7 +282,6 @@ pub const Name = struct {
             return fromObj(lean_name_mk_numeral(p.obj.?, self.getNumeralObj().?));
         }
     }
-
 
     fn displayCore(self: Name, writer: anytype, do_escape: bool, sep: []const u8) !void {
         std.debug.assert(!self.isAnonymous());
@@ -560,8 +567,6 @@ pub fn finalizeName() void {
 pub fn getAnonymous() Name {
     return g_anonymous.?;
 }
-
-
 
 comptime {
     _ = Name;

@@ -10,11 +10,11 @@ const util_name = @import("util_name.zig");
 const util_name_generator = @import("util_name_generator.zig");
 const util_options = @import("util_options.zig");
 
-extern fn initialize_runtime_module() callconv(.c) void;
-extern fn finalize_runtime_module() callconv(.c) void;
+extern fn lean_initialize_runtime_module() callconv(.c) void;
+extern fn _ZN4lean23finalize_runtime_moduleEv() callconv(.c) void;
 
 pub fn initializeUtilModule() void {
-    initialize_runtime_module();
+    lean_initialize_runtime_module();
     util_ascii.initializeAscii();
     util_name.initializeName();
     util_name_generator.initializeNameGenerator();
@@ -26,7 +26,7 @@ pub fn finalizeUtilModule() void {
     util_name_generator.finalizeNameGenerator();
     util_name.finalizeName();
     util_ascii.finalizeAscii();
-    finalize_runtime_module();
+    _ZN4lean23finalize_runtime_moduleEv();
 }
 
 test "init_module compiles" {

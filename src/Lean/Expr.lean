@@ -792,6 +792,8 @@ opaque dbgToString (e : @& Expr) : String
 /-- A total order for expressions. We say it is quick because it first compares the hashcodes. -/
 @[extern "lean_expr_quick_lt"]
 opaque quickLt (a : @& Expr) (b : @& Expr) : Bool
+@[extern "lean_expr_quick_lt_zig_impl"]
+opaque quickLtZig (a : @& Expr) (b : @& Expr) : Bool
 
 /-- A total order for expressions that takes the structure into account (e.g., variable names). -/
 @[extern "lean_expr_lt"]

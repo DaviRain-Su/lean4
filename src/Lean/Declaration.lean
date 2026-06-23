@@ -53,6 +53,10 @@ inductive ReducibilityHints where
 def mkReducibilityHintsRegularEx (h : UInt32) : ReducibilityHints :=
   ReducibilityHints.regular h
 
+@[export lean_mk_reducibility_hints_abbrev]
+def mkReducibilityHintsAbbrevEx : ReducibilityHints :=
+  ReducibilityHints.abbrev
+
 @[export lean_reducibility_hints_get_height]
 def ReducibilityHints.getHeightEx (h : ReducibilityHints) : UInt32 :=
   match h with
@@ -136,6 +140,7 @@ def mkDefinitionValEx (name : Name) (levelParams : List Name) (type : Expr) (val
   name, levelParams, type, hints, safety, value, all
 }
 
+
 @[export lean_definition_val_get_safety] def DefinitionVal.getSafetyEx (v : DefinitionVal) : DefinitionSafety :=
   v.safety
 
@@ -195,6 +200,10 @@ inductive Declaration where
 @[export lean_mk_inductive_decl]
 def mkInductiveDeclEs (lparams : List Name) (nparams : Nat) (types : List InductiveType) (isUnsafe : Bool) : Declaration :=
   Declaration.inductDecl lparams nparams types isUnsafe
+
+@[export lean_mk_definition_decl]
+def mkDefinitionDeclEx (val : DefinitionVal) : Declaration :=
+  .defnDecl val
 
 @[export lean_is_unsafe_inductive_decl]
 def Declaration.isUnsafeInductiveDeclEx : Declaration → Bool

@@ -253,6 +253,7 @@ lean_inc_ref_n
 lean_init_llvm
 lean_init_task_manager
 lean_init_task_manager_using
+lean_initialize
 lean_initialize_runtime_module
 lean_initialize_thread
 lean_int_add

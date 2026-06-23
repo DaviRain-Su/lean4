@@ -21,7 +21,7 @@ extern fn lean_name_mk_string(p: *anyopaque, s: *anyopaque) callconv(.c) *anyopa
 /// Lean String object.
 pub export fn lean_name_mk_str(pre: *anyopaque, s: [*:0]const u8) callconv(.c) *anyopaque {
     const str_obj = string.lean_mk_string(s);
-    return lean_name_mk_string(pre, str_obj);
+    return lean_name_mk_string(rc.lean_inc_ret(pre), str_obj);
 }
 
 /// Get the byte length of a Lean string (excluding null terminator).
@@ -251,4 +251,3 @@ pub export fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopa
     const lparams = ka.ciLevelParams(ci);
     return instantiateLparamsExpr(val, lparams, ls);
 }
-

@@ -19,6 +19,8 @@ extern fn lean_string_lt(s1: *anyopaque, s2: *anyopaque) callconv(.c) u8;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_expr_eqv(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_data_value_bool(v: *anyopaque) callconv(.c) u8;
 
 inline fn eTag(e: *anyopaque) u8 {
     if (object.lean_is_scalar(e)) return 0; // bvar
@@ -81,14 +83,27 @@ fn levelKind(l: *anyopaque) u8 {
     return object.lean_ptr_tag(l);
 }
 
+fn levelData(l: *anyopaque) u64 {
+    if (object.lean_is_scalar(l)) return 0;
+    const num_objs: usize = @intCast(ctor.ctorNumObjs(l));
+    const offset = num_objs * @sizeOf(?*anyopaque);
+    return ctor.lean_ctor_get_uint64(l, @intCast(offset));
+}
+
 fn levelHash(l: *anyopaque) u32 {
-    if (object.lean_is_scalar(l)) return @truncate(object.lean_unbox(l));
-    const lvl_data: u64 = @as(*align(1) u64, @ptrCast(@alignCast(@as([*]u8, @ptrCast(l)) + @sizeOf(lean.lean_ctor_object) + @sizeOf(usize)))).*;
-    return @truncate(lvl_data);
+    return @truncate(levelData(l));
+}
+
+fn levelDepth(l: *anyopaque) u32 {
+    return @truncate(levelData(l) >> 40);
 }
 
 fn levelLt(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
     if (a == b) return false;
+    const da = levelDepth(a);
+    const db = levelDepth(b);
+    if (da < db) return true;
+    if (da > db) return false;
     const ka = levelKind(a);
     const kb = levelKind(b);
     if (ka != kb) return ka < kb;
@@ -100,7 +115,7 @@ fn levelLt(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
     }
     if (lean_level_eq(a, b) != 0) return false;
     switch (ka) {
-        0 => return object.lean_unbox(a) < object.lean_unbox(b),
+        0 => return false,
         1 => {
             const pa = ctor.lean_ctor_get(a, 0) orelse return false;
             const pb = ctor.lean_ctor_get(b, 0) orelse return false;
@@ -109,18 +124,12 @@ fn levelLt(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
         2, 3 => {
             const la = ctor.lean_ctor_get(a, 0) orelse return false;
             const lb = ctor.lean_ctor_get(b, 0) orelse return false;
-            if (levelLt(la, lb, use_hash)) return true;
-            if (levelLt(lb, la, use_hash)) return false;
+            if (lean_level_eq(la, lb) == 0) return levelLt(la, lb, use_hash);
             const ra = ctor.lean_ctor_get(a, 1) orelse return false;
             const rb = ctor.lean_ctor_get(b, 1) orelse return false;
             return levelLt(ra, rb, use_hash);
         },
-        4 => {
-            const na = ctor.lean_ctor_get(a, 0) orelse return false;
-            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
-            return nameLt(na, nb);
-        },
-        5 => {
+        4, 5 => {
             const na = ctor.lean_ctor_get(a, 0) orelse return false;
             const nb = ctor.lean_ctor_get(b, 0) orelse return false;
             return nameLt(na, nb);
@@ -129,9 +138,51 @@ fn levelLt(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
     }
 }
 
+fn dataValueLt(a: *anyopaque, b: *anyopaque) bool {
+    const ka = object.lean_obj_tag(a);
+    const kb = object.lean_obj_tag(b);
+    if (ka != kb) return ka < kb;
+    switch (ka) {
+        0 => {
+            const sa = ctor.lean_ctor_get(a, 0) orelse return false;
+            const sb = ctor.lean_ctor_get(b, 0) orelse return false;
+            return lean_string_lt(sa, sb) != 0;
+        },
+        1 => return lean_data_value_bool(a) == 0 and lean_data_value_bool(b) != 0,
+        2 => {
+            const na = ctor.lean_ctor_get(a, 0) orelse return false;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
+            return nameLt(na, nb);
+        },
+        3 => {
+            const na = ctor.lean_ctor_get(a, 0) orelse return false;
+            const nb = ctor.lean_ctor_get(b, 0) orelse return false;
+            return natLt(na, nb);
+        },
+        4, 5 => return false,
+        else => return false,
+    }
+}
+
+fn kvmapLt(ma: *anyopaque, mb: *anyopaque) bool {
+    if (object.lean_is_scalar(ma)) return !object.lean_is_scalar(mb);
+    if (object.lean_is_scalar(mb)) return false;
+    const ea_pair = ctor.lean_ctor_get(ma, 0) orelse return false;
+    const eb_pair = ctor.lean_ctor_get(mb, 0) orelse return false;
+    const ea_key = ctor.lean_ctor_get(ea_pair, 0) orelse return false;
+    const eb_key = ctor.lean_ctor_get(eb_pair, 0) orelse return false;
+    if (lean_name_eq(ea_key, eb_key) == 0) return nameLt(ea_key, eb_key);
+    const ea_val = ctor.lean_ctor_get(ea_pair, 1) orelse return false;
+    const eb_val = ctor.lean_ctor_get(eb_pair, 1) orelse return false;
+    if (lean_data_value_beq(ea_val, eb_val) == 0) return dataValueLt(ea_val, eb_val);
+    const ea_tail = ctor.lean_ctor_get(ma, 1) orelse object.lean_box(0).?;
+    const eb_tail = ctor.lean_ctor_get(mb, 1) orelse object.lean_box(0).?;
+    return kvmapLt(ea_tail, eb_tail);
+}
+
 fn mdataLt(ma: *anyopaque, mb: *anyopaque) bool {
     if (ma == mb) return false;
-    return @intFromPtr(ma) < @intFromPtr(mb);
+    return kvmapLt(ma, mb);
 }
 
 inline fn exprEqv(a: *anyopaque, b: *anyopaque) bool {
@@ -214,6 +265,10 @@ fn isLtExpr(a: *anyopaque, b: *anyopaque, use_hash: bool) bool {
 pub export fn lean_expr_quick_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     return @intFromBool(isLtExpr(a, b, true));
 }
+pub export fn lean_expr_quick_lt_zig_impl(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    return @intFromBool(isLtExpr(a, b, true));
+}
+
 
 pub export fn lean_expr_lt(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
     return @intFromBool(isLtExpr(a, b, false));

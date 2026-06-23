@@ -96,6 +96,21 @@ def mkLetDeclEx (index : Nat) (fvarId : FVarId) (userName : Name) (type : Expr) 
 def LocalDecl.binderInfoEx : LocalDecl → BinderInfo
   | .cdecl _ _ _ _ bi _ => bi
   | _                   => BinderInfo.default
+@[export lean_local_decl_user_name]
+def LocalDecl.userNameEx : LocalDecl → Name
+  | .cdecl _ _ userName _ _ _ => userName
+  | .ldecl _ _ userName _ _ _ _ => userName
+
+@[export lean_local_decl_type]
+def LocalDecl.typeEx : LocalDecl → Expr
+  | .cdecl _ _ _ type _ _ => type
+  | .ldecl _ _ _ type _ _ _ => type
+
+@[export lean_local_decl_value]
+def LocalDecl.valueEx : LocalDecl → Option Expr
+  | .ldecl _ _ _ _ value false _ => some value
+  | _ => none
+
 namespace LocalDecl
 
 /--

@@ -18,23 +18,27 @@ const ea = @import("expr_accessors.zig");
 const ka = @import("kernel_accessors.zig");
 const constants = @import("constants.zig");
 const util_name = @import("util_name.zig");
+const util_name_generator = @import("util_name_generator.zig");
 const runtime_helpers = @import("runtime_helpers.zig");
 
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
 extern fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_append_index_after(n: *anyopaque, i: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_whnf(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_abstract(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_abstract_range(a: *anyopaque, n: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_lower_loose_bvars(e: *anyopaque, s: *anyopaque, d: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
 extern fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque;
@@ -541,6 +545,86 @@ pub fn instantiateLparam(e: *anyopaque, p: *anyopaque, l: *anyopaque) *anyopaque
     return result;
 }
 
+pub fn lparamsToLevels(lparams: *anyopaque) *anyopaque {
+    if (ka.isListNil(lparams)) return object.lean_box(0).?;
+    const head = ka.listHead(lparams);
+    const tail = ka.listTail(lparams);
+    const level = lean_level_mk_param(rc.lean_inc_ret(head));
+    return runtime_helpers.lean_list_cons(level, lparamsToLevels(tail));
+}
+
+pub fn mkAppN(f: *anyopaque, args: []const *anyopaque) *anyopaque {
+    var result = retain(f);
+    for (args) |arg| {
+        result = lean_expr_mk_app(result, retain(arg));
+    }
+    return result;
+}
+
+pub fn mkPiUnit(C: *anyopaque, unit: *anyopaque) *anyopaque {
+    if (ea.isPi(C)) {
+        const body = mkPiUnit(ea.bindingBody(C), unit);
+        return lean_expr_mk_forall(rc.lean_inc_ret(ea.bindingName(C)), rc.lean_inc_ret(ea.bindingDomain(C)), body, ea.bindingInfo(C));
+    }
+    return retain(unit);
+}
+
+pub fn mkFunUnit(C: *anyopaque, unit: *anyopaque) *anyopaque {
+    if (ea.isPi(C)) {
+        const body = mkFunUnit(ea.bindingBody(C), unit);
+        return lean_expr_mk_lambda(rc.lean_inc_ret(ea.bindingName(C)), rc.lean_inc_ret(ea.bindingDomain(C)), body, ea.bindingInfo(C));
+    }
+    return retain(unit);
+}
+
+pub fn mkLocalDeclWithGen(lctx: **anyopaque, ngen: *util_name_generator.NameGenerator, user_name: *anyopaque, type_expr: *anyopaque, bi: u8) *anyopaque {
+    const fvar_name = ngen.next();
+    lctx.* = lean_local_ctx_mk_local_decl(lctx.*, rc.lean_inc_ret(fvar_name.obj.?), rc.lean_inc_ret(user_name), rc.lean_inc_ret(type_expr), bi);
+    return lean_expr_mk_fvar(fvar_name.obj.?);
+}
+
+pub const BindingKind = enum { pi, lambda };
+
+fn abstractWithFVars(e: *anyopaque, fvars: []const *anyopaque) *anyopaque {
+    if (fvars.len == 0) return retain(e);
+    const subst = array.mkArrayFromSlice(@constCast(fvars));
+    defer rc.lean_dec(subst);
+    return lean_expr_abstract(e, subst);
+}
+
+fn abstractRangeWithFVars(e: *anyopaque, n: usize, fvars: []const *anyopaque) *anyopaque {
+    if (n == 0) return retain(e);
+    const subst = array.mkArrayFromSlice(@constCast(fvars));
+    defer rc.lean_dec(subst);
+    return lean_expr_abstract_range(e, object.lean_box(n).?, subst);
+}
+
+pub fn mkBindingFromFVars(comptime kind: BindingKind, lctx: *anyopaque, fvars: []const *anyopaque, body: *anyopaque) *anyopaque {
+    var result = abstractWithFVars(body, fvars);
+    var i = fvars.len;
+    while (i > 0) {
+        i -= 1;
+        const decl = ka.lctxFind(lctx, ea.fvarName(fvars[i])) orelse @panic("mkBindingFromFVars: missing local decl");
+        defer rc.lean_dec(decl);
+        std.debug.assert(ka.localDeclKind(decl) == .cdecl);
+        const ty = abstractRangeWithFVars(ka.localDeclType(decl), i, fvars);
+        const user_name = rc.lean_inc_ret(ka.localDeclUserName(decl));
+        result = switch (kind) {
+            .pi => lean_expr_mk_forall(user_name, ty, result, ka.localDeclBinderInfo(decl)),
+            .lambda => lean_expr_mk_lambda(user_name, ty, result, ka.localDeclBinderInfo(decl)),
+        };
+    }
+    return result;
+}
+
+pub fn mkPiFromFVars(lctx: *anyopaque, fvars: []const *anyopaque, body: *anyopaque) *anyopaque {
+    return mkBindingFromFVars(.pi, lctx, fvars, body);
+}
+
+pub fn mkLambdaFromFVars(lctx: *anyopaque, fvars: []const *anyopaque, body: *anyopaque) *anyopaque {
+    return mkBindingFromFVars(.lambda, lctx, fvars, body);
+}
+
 pub fn toTelescope(lctx: **anyopaque, ngen: *anyopaque, type_expr: *anyopaque, telescope: *std.ArrayList(*anyopaque), binfo: ?u8) *anyopaque {
     // Port of C++ to_telescope (util.cpp:303-314).
     // Pi version: strips Pi binders, creates fvars, instantiates body.
@@ -611,9 +695,15 @@ var g_bool_false: ?*anyopaque = null;
 var g_short_version_string: ?[]const u8 = null;
 var g_util_fresh: ?*anyopaque = null;
 
-pub fn mkTrue() *anyopaque { return retain(g_true.?); }
-pub fn isTrue(e: *anyopaque) bool { return e == g_true.?; }
-pub fn mkTrueIntro() *anyopaque { return retain(g_true_intro.?); }
+pub fn mkTrue() *anyopaque {
+    return retain(g_true.?);
+}
+pub fn isTrue(e: *anyopaque) bool {
+    return e == g_true.?;
+}
+pub fn mkTrueIntro() *anyopaque {
+    return retain(g_true_intro.?);
+}
 
 pub fn isAnd(e: *anyopaque) bool {
     return isAppOfN(e, constants.getAndName(), 2);
@@ -640,13 +730,25 @@ pub fn mkUnitMk(l: *anyopaque) *anyopaque {
     return lean_expr_mk_const(constants.getPunitUnitName(), mkList1(l));
 }
 
-pub fn mkUnitDefault() *anyopaque { return retain(g_unit.?); }
-pub fn mkUnitMkDefault() *anyopaque { return retain(g_unit_mk.?); }
+pub fn mkUnitDefault() *anyopaque {
+    return retain(g_unit.?);
+}
+pub fn mkUnitMkDefault() *anyopaque {
+    return retain(g_unit_mk.?);
+}
 
-pub fn mkNatType() *anyopaque { return retain(g_nat.?); }
-pub fn isNatType(e: *anyopaque) bool { return e == g_nat.?; }
-pub fn mkNatZero() *anyopaque { return retain(g_nat_zero.?); }
-pub fn mkNatOne() *anyopaque { return retain(g_nat_one.?); }
+pub fn mkNatType() *anyopaque {
+    return retain(g_nat.?);
+}
+pub fn isNatType(e: *anyopaque) bool {
+    return e == g_nat.?;
+}
+pub fn mkNatZero() *anyopaque {
+    return retain(g_nat_zero.?);
+}
+pub fn mkNatOne() *anyopaque {
+    return retain(g_nat_one.?);
+}
 
 pub fn mkNatBit0(e: *anyopaque) *anyopaque {
     return lean_expr_mk_app(g_nat_bit0_fn.?, e);
@@ -660,9 +762,15 @@ pub fn mkNatAdd(e1: *anyopaque, e2: *anyopaque) *anyopaque {
     return lean_expr_mk_app(lean_expr_mk_app(g_nat_add_fn.?, e1), e2);
 }
 
-pub fn mkIntType() *anyopaque { return retain(g_int.?); }
-pub fn isIntType(e: *anyopaque) bool { return e == g_int.?; }
-pub fn mkCharType() *anyopaque { return retain(g_char.?); }
+pub fn mkIntType() *anyopaque {
+    return retain(g_int.?);
+}
+pub fn isIntType(e: *anyopaque) bool {
+    return e == g_int.?;
+}
+pub fn mkCharType() *anyopaque {
+    return retain(g_char.?);
+}
 
 pub fn mkUnitProp(l: *anyopaque, prop: bool) *anyopaque {
     return if (prop) mkTrue() else mkUnit(l);
@@ -784,8 +892,12 @@ pub fn isHeqOut(e: *anyopaque, A: *?*anyopaque, lhs: *?*anyopaque, B: *?*anyopaq
     return false;
 }
 
-pub fn mkFalse() *anyopaque { return lean_expr_mk_const(constants.getFalseName(), object.lean_box(0).?); }
-pub fn mkEmpty() *anyopaque { return lean_expr_mk_const(constants.getEmptyName(), object.lean_box(0).?); }
+pub fn mkFalse() *anyopaque {
+    return lean_expr_mk_const(constants.getFalseName(), object.lean_box(0).?);
+}
+pub fn mkEmpty() *anyopaque {
+    return lean_expr_mk_const(constants.getEmptyName(), object.lean_box(0).?);
+}
 
 pub fn isFalse(e: *anyopaque) bool {
     return ea.isConst(e) and nameEq(ea.constName(e), constants.getFalseName());
@@ -1194,9 +1306,15 @@ pub const ImplicitInferKind = enum { Implicit, RelaxedImplicit };
 
 // ── Bool, recursors, version, mdata ─────────────────────────────────────────
 
-pub fn mkBool() *anyopaque { return retain(g_bool.?); }
-pub fn mkBoolTrue() *anyopaque { return retain(g_bool_true.?); }
-pub fn mkBoolFalse() *anyopaque { return retain(g_bool_false.?); }
+pub fn mkBool() *anyopaque {
+    return retain(g_bool.?);
+}
+pub fn mkBoolTrue() *anyopaque {
+    return retain(g_bool_true.?);
+}
+pub fn mkBoolFalse() *anyopaque {
+    return retain(g_bool_false.?);
+}
 pub fn toBoolExpr(b: bool) *anyopaque {
     return if (b) mkBoolTrue() else mkBoolFalse();
 }
@@ -1234,27 +1352,11 @@ pub fn toOptionalExpr(o: *anyopaque) ?*anyopaque {
 
 fn initializeNat() void {
     g_nat = lean_expr_mk_const(constants.getNatName(), object.lean_box(0).?);
-    g_nat_zero = lean_expr_mk_app(lean_expr_mk_app(
-        lean_expr_mk_const(constants.getHasZeroZeroName(), mkList1(object.lean_box(0).?)),
-        retain(g_nat.?)),
-        lean_expr_mk_const(constants.getNatHasZeroName(), object.lean_box(0).?));
-    g_nat_one = lean_expr_mk_app(lean_expr_mk_app(
-        lean_expr_mk_const(constants.getHasOneOneName(), mkList1(object.lean_box(0).?)),
-        retain(g_nat.?)),
-        lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?));
-    g_nat_bit0_fn = lean_expr_mk_app(lean_expr_mk_app(
-        lean_expr_mk_const(constants.getBit0Name(), mkList1(object.lean_box(0).?)),
-        retain(g_nat.?)),
-        lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
-    g_nat_bit1_fn = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(
-        lean_expr_mk_const(constants.getBit1Name(), mkList1(object.lean_box(0).?)),
-        retain(g_nat.?)),
-        lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?)),
-        lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
-    g_nat_add_fn = lean_expr_mk_app(lean_expr_mk_app(
-        lean_expr_mk_const(constants.getHasAddAddName(), mkList1(object.lean_box(0).?)),
-        retain(g_nat.?)),
-        lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
+    g_nat_zero = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_const(constants.getHasZeroZeroName(), mkList1(object.lean_box(0).?)), retain(g_nat.?)), lean_expr_mk_const(constants.getNatHasZeroName(), object.lean_box(0).?));
+    g_nat_one = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_const(constants.getHasOneOneName(), mkList1(object.lean_box(0).?)), retain(g_nat.?)), lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?));
+    g_nat_bit0_fn = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_const(constants.getBit0Name(), mkList1(object.lean_box(0).?)), retain(g_nat.?)), lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
+    g_nat_bit1_fn = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_const(constants.getBit1Name(), mkList1(object.lean_box(0).?)), retain(g_nat.?)), lean_expr_mk_const(constants.getNatHasOneName(), object.lean_box(0).?)), lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
+    g_nat_add_fn = lean_expr_mk_app(lean_expr_mk_app(lean_expr_mk_const(constants.getHasAddAddName(), mkList1(object.lean_box(0).?)), retain(g_nat.?)), lean_expr_mk_const(constants.getNatHasAddName(), object.lean_box(0).?));
 }
 
 fn initializeInt() void {
@@ -1340,9 +1442,9 @@ test "getArity counts nested pis" {
     const s = lean_expr_mk_sort(l);
     defer rc.lean_dec(s);
     const n = util_name.Name.fromCStr("x").obj.?;
-    const pi = lean_expr_mk_forall(n, s, s, object.lean_box(0).?);
+    const pi = lean_expr_mk_forall(n, s, s, 0);
     defer rc.lean_dec(pi);
-    const pi2 = lean_expr_mk_forall(n, s, pi, object.lean_box(0).?);
+    const pi2 = lean_expr_mk_forall(n, s, pi, 0);
     defer rc.lean_dec(pi2);
     try std_testing.expectEqual(@as(usize, 2), getArity(pi2));
 }
@@ -1353,4 +1455,93 @@ test "isAppOf detects constants and applications" {
     const nat = lean_expr_mk_const(constants.getNatName(), object.lean_box(0).?);
     defer rc.lean_dec(nat);
     try std_testing.expect(isAppOf(nat, constants.getNatName()));
+}
+
+test "lparamsToLevels builds param levels in order" {
+    const u = util_name.Name.fromCStr("u").obj.?;
+    const v = util_name.Name.fromCStr("v").obj.?;
+    const names = runtime_helpers.lean_list_cons(u, runtime_helpers.lean_list_cons(v, object.lean_box(0).?));
+    defer rc.lean_dec(names);
+
+    const levels = lparamsToLevels(names);
+    defer rc.lean_dec(levels);
+
+    try std_testing.expect(!ka.isListNil(levels));
+    const first = ka.listHead(levels);
+    try std_testing.expectEqual(@as(u8, 4), object.lean_ptr_tag(first));
+    try std_testing.expect(lean_name_eq(ctor.lean_ctor_get(first, 0).?, u) != 0);
+
+    const tail = ka.listTail(levels);
+    try std_testing.expect(!ka.isListNil(tail));
+    const second = ka.listHead(tail);
+    try std_testing.expectEqual(@as(u8, 4), object.lean_ptr_tag(second));
+    try std_testing.expect(lean_name_eq(ctor.lean_ctor_get(second, 0).?, v) != 0);
+    try std_testing.expect(ka.isListNil(ka.listTail(tail)));
+}
+
+test "mkPiUnit and mkFunUnit replace codomain with unit" {
+    initializeLibraryUtil();
+    defer finalizeLibraryUtil();
+
+    const sort0 = lean_expr_mk_sort(object.lean_box(0).?);
+    defer rc.lean_dec(sort0);
+    const a = util_name.Name.fromCStr("a").obj.?;
+    const b = util_name.Name.fromCStr("b").obj.?;
+    const inner = lean_expr_mk_forall(b, sort0, sort0, 0);
+    defer rc.lean_dec(inner);
+    const ty = lean_expr_mk_forall(a, sort0, inner, 0);
+    defer rc.lean_dec(ty);
+    const unit = mkUnit(object.lean_box(0).?);
+    defer rc.lean_dec(unit);
+
+    const pi_unit = mkPiUnit(ty, unit);
+    defer rc.lean_dec(pi_unit);
+    try std_testing.expect(ea.isPi(pi_unit));
+    try std_testing.expect(ea.isPi(ea.bindingBody(pi_unit)));
+    try std_testing.expect(ea.isConst(ea.bindingBody(ea.bindingBody(pi_unit))));
+    try std_testing.expect(nameEq(ea.constName(ea.bindingBody(ea.bindingBody(pi_unit))), constants.getPunitName()));
+
+    const fun_unit = mkFunUnit(ty, unit);
+    defer rc.lean_dec(fun_unit);
+    try std_testing.expect(ea.isLambda(fun_unit));
+    try std_testing.expect(ea.isLambda(ea.bindingBody(fun_unit)));
+    try std_testing.expect(ea.isConst(ea.bindingBody(ea.bindingBody(fun_unit))));
+    try std_testing.expect(nameEq(ea.constName(ea.bindingBody(ea.bindingBody(fun_unit))), constants.getPunitName()));
+}
+
+test "mkBindingFromFVars abstracts dependent domains" {
+    util_name_generator.initializeNameGenerator();
+    defer util_name_generator.finalizeNameGenerator();
+
+    var lctx: *anyopaque = object.lean_box(0).?;
+    var ngen = util_name_generator.mkConstructionsNameGenerator();
+    const sort0 = lean_expr_mk_sort(object.lean_box(0).?);
+    defer rc.lean_dec(sort0);
+
+    const x = mkLocalDeclWithGen(&lctx, &ngen, util_name.Name.fromCStr("x").obj.?, sort0, 0);
+    defer rc.lean_dec(x);
+    const y = mkLocalDeclWithGen(&lctx, &ngen, util_name.Name.fromCStr("y").obj.?, x, 0);
+    defer rc.lean_dec(y);
+
+    const lambda = mkLambdaFromFVars(lctx, &.{ x, y }, y);
+    defer rc.lean_dec(lambda);
+    try std_testing.expect(ea.isLambda(lambda));
+    try std_testing.expect(!ea.hasFVar(lambda));
+    const lambda_inner = ea.bindingBody(lambda);
+    try std_testing.expect(ea.isLambda(lambda_inner));
+    try std_testing.expect(ea.isBVar(ea.bindingDomain(lambda_inner)));
+    try std_testing.expectEqual(@as(usize, 0), object.lean_unbox(ea.bvarIdx(ea.bindingDomain(lambda_inner))));
+    try std_testing.expect(ea.isBVar(ea.bindingBody(lambda_inner)));
+    try std_testing.expectEqual(@as(usize, 0), object.lean_unbox(ea.bvarIdx(ea.bindingBody(lambda_inner))));
+
+    const pi = mkPiFromFVars(lctx, &.{ x, y }, y);
+    defer rc.lean_dec(pi);
+    try std_testing.expect(ea.isPi(pi));
+    try std_testing.expect(!ea.hasFVar(pi));
+    const pi_inner = ea.bindingBody(pi);
+    try std_testing.expect(ea.isPi(pi_inner));
+    try std_testing.expect(ea.isBVar(ea.bindingDomain(pi_inner)));
+    try std_testing.expectEqual(@as(usize, 0), object.lean_unbox(ea.bvarIdx(ea.bindingDomain(pi_inner))));
+    try std_testing.expect(ea.isBVar(ea.bindingBody(pi_inner)));
+    try std_testing.expectEqual(@as(usize, 0), object.lean_unbox(ea.bvarIdx(ea.bindingBody(pi_inner))));
 }

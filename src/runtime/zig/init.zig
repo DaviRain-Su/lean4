@@ -16,6 +16,8 @@ const thread = @import("thread.zig");
 const stack_overflow = @import("stack_overflow.zig");
 const stackinfo = @import("stackinfo.zig");
 const openssl = @import("openssl.zig");
+const util_init_module = @import("util_init_module.zig");
+const library_init_module = @import("init_module.zig");
 const runtime_options = @import("runtime_options");
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
@@ -210,18 +212,34 @@ pub export fn lean_initialize() callconv(.c) void {
     if (initialize_Init(is_builtin)) |r| lean_dec(r);
     if (initialize_Std(is_builtin)) |r| lean_dec(r);
     if (initialize_Lean(is_builtin)) |r| lean_dec(r);
+    if (runtime_options.compile_cpp_cutover) {
+        stackinfo.saveStackInfo(true);
+        _ZN4lean22initialize_util_moduleEv();
+        _ZN4lean24initialize_kernel_moduleEv();
+        _ZN4lean21init_default_print_fnEv();
+        _ZN4lean30initialize_library_core_moduleEv();
+        _ZN4lean25initialize_library_moduleEv();
+        _ZN4lean31initialize_constructions_moduleEv();
+    }
 }
 // (lean_io_consume_result removed — we use lean_dec directly)
 extern fn initialize_Init(builtin: u8) ?*anyopaque;
 extern fn initialize_Std(builtin: u8) ?*anyopaque;
 extern fn initialize_Lean(builtin: u8) ?*anyopaque;
+extern fn lean_save_stack_info(main: bool) callconv(.c) void;
+extern fn _ZN4lean22initialize_util_moduleEv() callconv(.c) void;
+extern fn _ZN4lean24initialize_kernel_moduleEv() callconv(.c) void;
+extern fn _ZN4lean21init_default_print_fnEv() callconv(.c) void;
+extern fn _ZN4lean30initialize_library_core_moduleEv() callconv(.c) void;
+extern fn _ZN4lean25initialize_library_moduleEv() callconv(.c) void;
+extern fn _ZN4lean31initialize_constructions_moduleEv() callconv(.c) void;
+
 extern fn lean_io_mark_end_initialization() callconv(.c) void;
 extern fn lean_dec(r: *anyopaque) callconv(.c) void;
 
 /// Test helper mirroring `lean_initialize` without the C-linkage export.
 fn lean_initialize_impl() void {
-    initializeRuntimeSubsystems();
-    initializeThreadSubsystems();
+    lean_initialize();
 }
 
 pub export fn lean_setup_args(argc: c_int, argv: [*c][*c]u8) callconv(.c) [*c][*c]u8 {

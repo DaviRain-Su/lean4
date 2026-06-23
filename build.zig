@@ -356,7 +356,6 @@ pub fn build(b: *std.Build) void {
     link_cmd.step.dependOn(&mkdir_lib.step);
     link_cmd.addArg("-o");
     link_cmd.addArg(std.fmt.allocPrint(b.allocator, "{s}/lib/libleanshared.dylib", .{b.install_path}) catch unreachable);
-    link_cmd.addArg("-Wl,-install_name,@rpath/libleanshared.dylib");
     if (lean_zig_runtime) {
         const rt_lib = zig_rt_link_lib orelse unreachable;
         if (lean_zig_rt_cutover) {
@@ -366,7 +365,6 @@ pub fn build(b: *std.Build) void {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}/lib/lean/libLean.a", .{stdlib_out}));
             link_cmd.addArg(stage1_cpp_archive);
             link_cmd.addArg(rt_lib);
-            link_cmd.addArg(if (skip_zig_rt_rebuild) stage1_kernel_entrypoints_lib else zig_rt_kernel_entrypoints_lib);
             link_cmd.addArg(stage1_rt_archive);
         } else {
             link_cmd.addArg(b.fmt("-Wl,-force_load,{s}", .{rt_lib}));

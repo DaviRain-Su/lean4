@@ -13,6 +13,7 @@ public section
 namespace Lean
 
 @[extern "lean_mk_cases_on"] opaque mkCasesOnImp (env : Kernel.Environment) (declName : @& Name) : Except Kernel.Exception Declaration
+@[extern "l_mkCasesOnImpZig"] opaque mkCasesOnImpZig (env : Kernel.Environment) (declName : @& Name) : Except Kernel.Exception Declaration
 
 open Meta
 

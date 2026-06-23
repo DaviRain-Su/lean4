@@ -1,5 +1,6 @@
 const std = @import("std");
 const alloc = @import("alloc.zig");
+const box = @import("box.zig");
 const ctor = @import("ctor.zig");
 const io_error = @import("io_error.zig");
 const io_result = @import("io_result.zig");
@@ -256,13 +257,13 @@ fn streamFlush(world_obj: *anyopaque) callconv(.c) *anyopaque {
 }
 
 fn streamReadEmpty(n_obj: *anyopaque, _: *anyopaque) callconv(.c) *anyopaque {
-    const n = object.lean_unbox(n_obj);
+    const n = box.lean_unbox_usize(n_obj);
     const ba: *lean.lean_sarray_object = @ptrCast(@alignCast(alloc.lean_alloc_sarray(1, 0, n)));
     return io_result.lean_io_result_mk_ok(ba);
 }
 
 fn stdinRead(n_obj: *anyopaque, _: *anyopaque) callconv(.c) *anyopaque {
-    const n = object.lean_unbox(n_obj);
+    const n = box.lean_unbox_usize(n_obj);
     const ba: *lean.lean_sarray_object = @ptrCast(@alignCast(alloc.lean_alloc_sarray(1, 0, n)));
     if (n > 0) {
         const bytes: [*]u8 = @ptrCast(&ba.m_data);

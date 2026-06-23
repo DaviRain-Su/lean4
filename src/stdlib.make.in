@@ -168,7 +168,7 @@ ifeq "${CMAKE_SYSTEM_NAME}" "Darwin"
 ifeq "${LEAN_ZIG_RT_CUTOVER}" "ON"
 ifneq "${STAGE}" "0"
 	$(LEANC_SH) -shared -o $@ \
-	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -Wl,-force_load,${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libkernel_entrypoints.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
+	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}
 else
 	$(LEANC_SH) -shared -o $@ \
 	  ${LIB}/temp/Lean.o.export -Wl,-force_load,${LIB}/temp/libleanshell.a -lInit -lStd -lLean -lleancpp ${LEAN_RT_LIB} ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS}

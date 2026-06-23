@@ -31,9 +31,13 @@ const ea = @import("expr_accessors.zig");
 extern fn lean_environment_find(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_environment_quot_init(env: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_find(lctx: *anyopaque, fvar_id: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_local_ctx_mk_let_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, value: *anyopaque, nondep: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_local_ctx_mk_let_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, value: *anyopaque, nondep: u8) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_is_empty(lctx: *anyopaque) callconv(.c) u8;
+extern fn lean_local_decl_binder_info(d: *anyopaque) callconv(.c) u8;
+extern fn lean_local_decl_user_name(d: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_local_decl_type(d: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_local_decl_value(d: *anyopaque) callconv(.c) *anyopaque;
 
 const runtime_helpers = @import("runtime_helpers.zig");
 
@@ -418,7 +422,7 @@ pub fn recRuleRhs(r: *anyopaque) *anyopaque {
 // ── Environment helpers ──────────────────────────────────────────────────────
 
 pub fn envFind(env: *anyopaque, n: *anyopaque) ?*anyopaque {
-    const opt = lean_environment_find(env, n);
+    const opt = lean_environment_find(rc.lean_inc_ret(env), rc.lean_inc_ret(n));
     if (isNone(opt)) {
         rc.lean_dec(opt);
         return null;
@@ -453,17 +457,24 @@ pub fn localDeclType(ld: *anyopaque) *anyopaque {
 }
 
 pub fn localDeclValue(ld: *anyopaque) ?*anyopaque {
-    const opt = ctor.lean_ctor_get(ld, 4) orelse return null;
-    if (isNone(opt)) return null;
-    return ctor.lean_ctor_get(opt, 0) orelse @panic("localDeclValue: malformed some");
+    const opt = lean_local_decl_value(rc.lean_inc_ret(ld));
+    if (isNone(opt)) {
+        rc.lean_dec(opt);
+        return null;
+    }
+    return someVal(opt);
 }
 
 pub fn localDeclUserName(ld: *anyopaque) *anyopaque {
-    return ctor.lean_ctor_get(ld, 1) orelse @panic("localDeclUserName");
+    return ctor.lean_ctor_get(ld, 2) orelse @panic("localDeclUserName");
+}
+
+pub fn localDeclBinderInfo(ld: *anyopaque) u8 {
+    return lean_local_decl_binder_info(rc.lean_inc_ret(ld));
 }
 
 pub fn lctxFind(lctx: *anyopaque, fvar_id: *anyopaque) ?*anyopaque {
-    const opt = lean_local_ctx_find(lctx, fvar_id);
+    const opt = lean_local_ctx_find(rc.lean_inc_ret(lctx), rc.lean_inc_ret(fvar_id));
     if (isNone(opt)) {
         rc.lean_dec(opt);
         return null;
@@ -472,5 +483,5 @@ pub fn lctxFind(lctx: *anyopaque, fvar_id: *anyopaque) ?*anyopaque {
 }
 
 pub fn lctxIsEmpty(lctx: *anyopaque) bool {
-    return lean_local_ctx_is_empty(lctx) != 0;
+    return lean_local_ctx_is_empty(rc.lean_inc_ret(lctx)) != 0;
 }
