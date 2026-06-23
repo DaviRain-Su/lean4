@@ -491,10 +491,10 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
         mimalloc.mi_free(o);
     } else {
         // Legacy non-mimalloc allocation:
-        // - arrays/strings/closures are direct malloc allocations
-        // - Zig MPZ objects in helperless mode are also direct malloc allocations
-        // - everything else is a size-prefixed small allocation from lean.h /
-        //   allocSmallObject
+        // - arrays/strings/closures/MPZ are direct libc malloc allocations
+        //   (lean_alloc_object large path / lean_alloc_sarray / etc.)
+        // - everything else is a size-prefixed small allocation
+        //   (allocLegacySmallNoMimalloc / allocSmallObject), freed via free(ptr-8)
         switch (tag) {
             lean.LeanArray, lean.LeanScalarArray, lean.LeanString, lean.LeanClosure, lean.LeanMPZ => std.c.free(o),
             else => freeLegacySmallNoMimalloc(o),

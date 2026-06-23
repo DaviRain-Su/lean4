@@ -1,5 +1,9 @@
-if(LEAN_ZIG_RT_CUTOVER)
+if(LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
   # All runtime symbols are provided by the Zig archive (pure Zig + thin C++ shims).
+  # Only stage1+ cutover: the Zig helperless archive is linked into leanshared
+  # only when STAGE GREATER 0 (src/CMakeLists.txt), so stage0 must keep the full
+  # self-contained C++ runtime even with LEAN_ZIG_RT_CUTOVER=ON, otherwise
+  # leanshared has no provider for lean_dec_ref_cold/lean_free_object/etc.
   set(RUNTIME_OBJS runtime_cutover_stub.c)
 else()
   set(
