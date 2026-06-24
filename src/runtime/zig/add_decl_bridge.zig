@@ -33,6 +33,7 @@ extern fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_abstract(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_array_mk(arr: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_array_push(arr: *anyopaque, elem: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_instantiate1(e: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque;
 
 // Lean @[export] expression builders
 extern fn lean_level_mk_param(name: *anyopaque) callconv(.c) *anyopaque;
@@ -532,6 +533,24 @@ fn piDomain(e: *anyopaque, idx: u64) *anyopaque {
     }
     if (!isForall(curr)) @panic("piDomain: not enough binders");
     return forallDomain(curr);
+}
+
+/// Instantiate the first nparams forall binders of a constructor type with
+/// the given param_fvars. This replaces the constructor type's param bvars
+/// with our param fvars, stripping the param forall prefix.
+/// Returns the body of the type after stripping nparams binders.
+fn instantiateParams(ctype: *anyopaque, nparams: u64, param_fvars: []const *anyopaque) *anyopaque {
+    var curr = ctype;
+    var i: u64 = 0;
+    while (i < nparams) : (i += 1) {
+        if (!isForall(curr)) @panic("instantiateParams: not enough binders");
+        // lean_expr_instantiate1 replaces bvar(0) in body with the given expr
+        lean_inc(param_fvars[i]);
+        const new_body = lean_expr_instantiate1(forallBody(curr), param_fvars[i]);
+        lean_dec(curr); // old curr no longer needed (instantiate1 retains body, we consumed it)
+        curr = new_body;
+    }
+    return curr;
 }
 
 fn mkInductiveInfo(val: *anyopaque) *anyopaque {
@@ -1095,6 +1114,13 @@ fn buildRecursorType(
         const total_pi = countPiBinders(ctype);
         const num_fields = if (total_pi > nparams) total_pi - nparams else 0;
 
+        // Instantiate the constructor type's param binders with our param_fvars.
+        // This replaces the ctor type's param bvars with our fvars, so field
+        // domains extracted from the type reference our fvars instead of the
+        // ctor type's own param binders.
+        lean_inc(ctype);
+        const inst_ctype = instantiateParams(ctype, nparams, param_fvars);
+
         // Build the minor body: App(motive, App(c, params, fields))
         // Under 1 (motive) + minor_binder_count + num_fields binders:
         //   motive = bvar(binders_above + num_fields)
@@ -1179,7 +1205,7 @@ fn buildRecursorType(
         {
             var fi2: u64 = 0;
             while (fi2 < num_fields) : (fi2 += 1) {
-                const field_domain = piDomain(ctype, nparams + fi2);
+                const field_domain = piDomain(inst_ctype, fi2);
                 if (exprHeadIsConst(field_domain, ind_names)) {
                     rec_field_indices[num_rec_fields] = fi2;
                     num_rec_fields += 1;
@@ -1254,7 +1280,7 @@ fn buildRecursorType(
         {
             var fi: u64 = num_fields;
             while (fi > 0) : (fi -= 1) {
-                const field_domain = piDomain(ctype, nparams + fi - 1);
+                const field_domain = piDomain(inst_ctype, fi - 1);
                 lean_inc(field_domain);
                 minor_type = lean_expr_mk_forall(mkName("_"), field_domain, minor_type, 0);
             }
@@ -1269,6 +1295,7 @@ fn buildRecursorType(
         result = lifted;
         result = lean_expr_mk_forall(mkName("_"), minor_type, result, 0);
         minor_binder_count += 1;
+        lean_dec(inst_ctype); // release instantiated ctor type
     }
 
     // After minor loop, wrap with motive forall and param foralls.
@@ -1363,7 +1390,12 @@ fn buildRecursorRuleRHS(
     param_fvars: []const *anyopaque,
 ) *anyopaque {
     _ = cname;
-    _ = param_fvars; // Not used in RHS (direct bvar indices work for lambda binding)
+
+    // Instantiate the constructor type's param binders with our param_fvars.
+    // This replaces the ctor type's param bvars with our fvars so field
+    // domains reference our fvars.
+    lean_inc(ctype);
+    const inst_ctype = instantiateParams(ctype, nparams, param_fvars);
 
     // Determine which fields are recursive
     var rec_field_indices: [128]u64 = undefined;
@@ -1371,7 +1403,7 @@ fn buildRecursorRuleRHS(
     {
         var fi2: u64 = 0;
         while (fi2 < num_fields) : (fi2 += 1) {
-            const field_domain = piDomain(ctype, nparams + fi2);
+            const field_domain = piDomain(inst_ctype, fi2);
             if (exprHeadIsConst(field_domain, ind_names)) {
                 rec_field_indices[num_rec_fields] = fi2;
                 num_rec_fields += 1;
@@ -1441,7 +1473,7 @@ fn buildRecursorRuleRHS(
     {
         var fi: u64 = num_fields;
         while (fi > 0) : (fi -= 1) {
-            const field_domain = piDomain(ctype, nparams + fi - 1);
+            const field_domain = piDomain(inst_ctype, fi - 1);
             lean_inc(field_domain);
             rhs = lean_expr_mk_lambda(mkName("_"), field_domain, rhs, 0);
         }
@@ -1480,6 +1512,7 @@ fn buildRecursorRuleRHS(
         }
     }
 
+    lean_dec(inst_ctype);
     return rhs;
 }
 
