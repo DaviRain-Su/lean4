@@ -1090,24 +1090,23 @@ fn buildRecursorType(
         const minor_body = lean_expr_mk_app(bvar(motive_idx_with_ihs), c_app);
 
         // Wrap with IH binders (from last to first)
-        // No lift needed: minor_body is built under all IH + field binders,
-        // and nested Forall naturally binds bvar(0) to the innermost forall.
+        // IH forall domains are OUTSIDE the forall, so they don't count
+        // previously added (inner) IH binders. They only count field binders (below).
         var minor_type = minor_body;
         var ih_binder_count: u64 = 0;
         while (ih_binder_count < num_rec_fields) : (ih_binder_count += 1) {
-            const rec_fi = rec_field_indices[num_rec_fields - 1 - ih_binder_count]; // reverse order
-            // IH type = motive(field_i)
-            // At the IH forall domain position: under ih_binder_count IHs + num_fields fields
-            //   field_i = bvar(ih_binder_count + num_fields - 1 - rec_fi)
-            //   motive = bvar(ih_binder_count + num_fields)
-            const motive_bv = bvar(ih_binder_count + num_fields);
-            const field_bv = bvar(ih_binder_count + num_fields - 1 - rec_fi);
+            const rec_fi = rec_field_indices[num_rec_fields - 1 - ih_binder_count];
+            // IH domain is at 0 IHs (outer) + num_fields fields (below)
+            //   field_i = bvar(num_fields - 1 - rec_fi)
+            //   motive = bvar(num_fields)
+            const motive_bv = bvar(num_fields);
+            const field_bv = bvar(num_fields - 1 - rec_fi);
             const ih_type = lean_expr_mk_app(motive_bv, field_bv);
             minor_type = lean_expr_mk_forall(mkName("_"), ih_type, minor_type, 0);
         }
 
         // Wrap with field binders (from last field to first, so field_0 is outermost)
-        // No lift needed: nested Forall naturally binds bvar(0) to innermost forall.
+        // No lift needed.
         {
             var fi: u64 = num_fields;
             while (fi > 0) : (fi -= 1) {
