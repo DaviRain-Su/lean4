@@ -2456,6 +2456,8 @@ def displayStats (env : Environment) : IO Unit := do
 
 @[extern "lean_eval_const"]
 private unsafe opaque evalConstCore (α) (env : @& Environment) (opts : @& Options) (constName : @& Name) : Except String α
+@[extern "lean_eval_const_zig_impl"]
+private unsafe opaque evalConstZigCore (α) (env : @& Environment) (opts : @& Options) (constName : @& Name) : Except String α
 
 set_option compiler.ignoreBorrowAnnotation true in
 @[extern "lean_eval_check_meta"]
@@ -2476,6 +2478,11 @@ such as in `#eval`.
   if checkMeta then
     evalCheckMeta env constName
   evalConstCore α env opts constName
+
+@[noinline] unsafe def evalConstZig (α) (env : @& Environment) (opts : @& Options) (constName : @& Name) (checkMeta := true) : Except String α := do
+  if checkMeta then
+    evalCheckMeta env constName
+  evalConstZigCore α env opts constName
 
 private def throwUnexpectedType {α} (typeName : Name) (constName : Name) : ExceptT String Id α :=
   throw ("unexpected type at '" ++ toString constName ++ "', `" ++ toString typeName ++ "` expected")

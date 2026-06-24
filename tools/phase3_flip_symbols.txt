@@ -1062,6 +1062,8 @@ lean_compacted_region_save
 lean_smap_foreach_test
 lean_display_cumulative_profiling_times
 lean_profileit
+lean_eval_const
+lean_eval_main_decl
 lean_level_eq
 lean_level_eqv
 lean_expr_has_loose_bvar

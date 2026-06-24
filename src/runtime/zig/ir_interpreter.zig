@@ -39,6 +39,7 @@ extern fn lean_ir_find_env_decl(env: *anyopaque, n: *anyopaque) callconv(.c) *an
 extern fn lean_ir_find_env_decl_boxed(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_get_symbol_stem(env: *anyopaque, fn_name: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_mk_mangled_boxed_name(s: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_get_init_fn_name_for(env: *anyopaque, fn_name: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_get_regular_init_fn_name_for(env: *anyopaque, fn_name: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_get_export_name_for(env: *anyopaque, fn_name: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_decl_get_sorry_dep(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
@@ -627,6 +628,12 @@ const Interpreter = struct {
         return o;
     }
 
+    fn hasInitAttribute(self: *Interpreter, fn_name: *anyopaque) bool {
+        const init_fn = lean_get_init_fn_name_for(self.envArg(), ownedArg(fn_name));
+        defer rc.lean_dec(init_fn);
+        return !object.lean_is_scalar(init_fn);
+    }
+
     fn deinit(self: *Interpreter) void {
         // Clean up constant cache
         var it = self.constant_cache.valueIterator();
@@ -712,7 +719,7 @@ const Interpreter = struct {
             .native_addr = null,
             .native_boxed = false,
         };
-        if (self.prefer_native or declTag(d) == .Extern) {
+        if (self.prefer_native or declTag(d) == .Extern or self.hasInitAttribute(fn_name)) {
             const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
             defer rc.lean_dec(mangled);
             const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
@@ -755,7 +762,7 @@ const Interpreter = struct {
             .native_addr = null,
             .native_boxed = false,
         };
-        if (self.prefer_native or declTag(d) == .Extern) {
+        if (self.prefer_native or declTag(d) == .Extern or self.hasInitAttribute(fn_name)) {
             const mangled = lean_get_symbol_stem(self.envArg(), ownedArg(fn_name));
             defer rc.lean_dec(mangled);
             const boxed_mangled = lean_mk_mangled_boxed_name(ownedArg(mangled));
@@ -1343,6 +1350,19 @@ fn stubObj(o: StubObj) *anyopaque {
     return o orelse object.lean_box(0).?;
 }
 
+fn runStub(interp: *Interpreter, d: *anyopaque, args: [*]StubObj) StubObj {
+    const old_size = interp.arg_stack.items.len;
+    const arity = array.lean_array_size(declParams(d));
+    var i: usize = 0;
+    while (i < arity) : (i += 1) {
+        interp.arg_stack.append(interp.allocator, Value.fromObj(stubObj(args[3 + i]))) catch @panic("interpreter stub: OOM");
+    }
+    interp.pushFrame(d, old_size);
+    const r = interp.evalBody(declFunBody(d)).obj orelse object.lean_box(0).?;
+    interp.popFrame();
+    return r;
+}
+
 fn stubAux(args: [*]StubObj) StubObj {
     const env = stubObj(args[0]);
     const opts = stubObj(args[1]);
@@ -1351,16 +1371,8 @@ fn stubAux(args: [*]StubObj) StubObj {
     defer rc.lean_dec(opts);
     defer rc.lean_dec(d);
 
-    const arity = array.lean_array_size(declParams(d));
-    var arg_buf = std.ArrayListUnmanaged(*anyopaque).empty;
-    defer arg_buf.deinit(std.heap.page_allocator);
-    var i: usize = 0;
-    while (i < arity) : (i += 1) {
-        arg_buf.append(std.heap.page_allocator, stubObj(args[3 + i])) catch @panic("interpreter stub: OOM");
-    }
-
     if (activeInterpreterFor(env, opts)) |interp| {
-        return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
+        return runStub(interp, d, args);
     }
 
     var interp = Interpreter.init(env, opts, std.heap.page_allocator);
@@ -1368,7 +1380,7 @@ fn stubAux(args: [*]StubObj) StubObj {
     g_active_interpreter = &interp;
     defer g_active_interpreter = prev;
     defer interp.deinit();
-    return interp.callBoxedDecl(d, arity, arg_buf.items.ptr);
+    return runStub(&interp, d, args);
 }
 
 fn stub1(x1: StubObj) callconv(.c) StubObj {
@@ -1487,7 +1499,15 @@ fn leanEvalMain(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl: *anyo
     return interp.runMainDecl(args, decl);
 }
 
+fn leanEvalMainZigImpl(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl: *anyopaque) callconv(.c) u32 {
+    return leanEvalMain(env, opts, args, decl);
+}
+
 fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
+    const debug_stem = lean_get_symbol_stem(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
+    std.debug.print("zig eval_const {s}\n", .{lean_string_cstr(debug_stem)});
+    rc.lean_dec(debug_stem);
+
     const sorry_dep = lean_decl_get_sorry_dep(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
     defer rc.lean_dec(sorry_dep);
     if (!object.lean_is_scalar(sorry_dep)) {
@@ -1517,11 +1537,16 @@ fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) 
     ctor.lean_ctor_set(ok_ctor, 0, r);
     return ok_ctor;
 }
+
+fn leanEvalConstZigImpl(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
+    return leanEvalConst(env, opts, c);
+}
+
 // ── lean_run_init ───────────────────────────────────────────────────────────
 // Run the init function for a declaration and cache the result.
 // Mirrors C++ interpreter::run_init: apply init_decl to the erased RealWorld
 // token, mark the result persistent, and store it in the symbol cache for decl.
-fn leanRunInit(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *anyopaque) callconv(.c) *anyopaque {
+fn leanRunInit(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *anyopaque, _: *anyopaque) callconv(.c) *anyopaque {
     const run = struct {
         fn go(interp: *Interpreter, decl_name: *anyopaque, init_name: *anyopaque) *anyopaque {
             var init_args = [_]*anyopaque{object.lean_box(0).?};
@@ -1562,12 +1587,19 @@ fn leanRunInit(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *
     return run(&interp, decl, init_decl);
 }
 
+fn leanRunInitZigImpl(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_decl: *anyopaque, world: *anyopaque) callconv(.c) *anyopaque {
+    return leanRunInit(env, opts, decl, init_decl, world);
+}
+
 var empty_args: [*]u8 = undefined;
 
 comptime {
     if (export_kernel_symbols) {
         @export(&leanEvalMain, .{ .name = "lean_eval_main_decl", .linkage = .strong });
+        @export(&leanEvalMainZigImpl, .{ .name = "lean_eval_main_decl_zig_impl", .linkage = .strong });
         @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .strong });
+        @export(&leanEvalConstZigImpl, .{ .name = "lean_eval_const_zig_impl", .linkage = .strong });
         @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .strong });
+        @export(&leanRunInitZigImpl, .{ .name = "lean_run_init_zig_impl", .linkage = .strong });
     }
 }

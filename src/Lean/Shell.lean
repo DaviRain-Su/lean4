@@ -6,6 +6,8 @@ Authors: Leonardo de Moura, Mac Malone
 module
 
 prelude
+public import Lean.Environment
+public import Lean.Compiler.IR.Basic
 import Lean.Elab.Frontend
 import Lean.Elab.ParseImportsFast
 import Lean.Server.Watchdog
@@ -37,6 +39,8 @@ opaque decodeLossyUTF8 (a : @& ByteArray) : String
 /- Runs the `main` function of the module with `args` using the Lean interpreter. -/
 @[extern "lean_eval_main_decl"]
 opaque runMain (env : @& Environment) (opts : @& Options) (args : @& List String) (decl : @& Lean.IR.Decl) : BaseIO UInt32
+@[extern "lean_eval_main_decl_zig_impl"]
+public opaque runMainZig (env : @& Environment) (opts : @& Options) (args : @& List String) (decl : @& Lean.IR.Decl) : BaseIO UInt32
 
 /--
 Initializes the LLVM subsystem.
