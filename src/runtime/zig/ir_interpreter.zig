@@ -1583,12 +1583,14 @@ fn leanRunInitZigImpl(env: *anyopaque, opts: *anyopaque, decl: *anyopaque, init_
 var empty_args: [*]u8 = undefined;
 
 comptime {
+    // *_zig_impl variants have no C++ counterpart, so always export them
+    // regardless of export_kernel_symbols (needed by zigc-stdlib helperless build).
+    @export(&leanEvalMainZigImpl, .{ .name = "lean_eval_main_decl_zig_impl", .linkage = .strong });
+    @export(&leanEvalConstZigImpl, .{ .name = "lean_eval_const_zig_impl", .linkage = .strong });
+    @export(&leanRunInitZigImpl, .{ .name = "lean_run_init_zig_impl", .linkage = .strong });
     if (export_kernel_symbols) {
         @export(&leanEvalMain, .{ .name = "lean_eval_main_decl", .linkage = .strong });
-        @export(&leanEvalMainZigImpl, .{ .name = "lean_eval_main_decl_zig_impl", .linkage = .strong });
         @export(&leanEvalConst, .{ .name = "lean_eval_const", .linkage = .strong });
-        @export(&leanEvalConstZigImpl, .{ .name = "lean_eval_const_zig_impl", .linkage = .strong });
         @export(&leanRunInit, .{ .name = "lean_run_init", .linkage = .strong });
-        @export(&leanRunInitZigImpl, .{ .name = "lean_run_init_zig_impl", .linkage = .strong });
     }
 }
