@@ -1271,72 +1271,49 @@ fn buildRecursorType(
         minor_binder_count += 1;
     }
 
-    // Wrap with motive and params using lean_expr_abstract.
-    // Both motive_fvar and param_fvars are fvars that need to be abstracted to bvars.
-    // lean_expr_abstract replaces array[i] with bvar(n-1-i), where n is array size.
-    // We want: motive at bvar(0), param_n at bvar(1), ..., param_1 at bvar(nparams).
-    // So: array[nparams] = motive → bvar(0), array[nparams-1] = param_n → bvar(1), ..., array[0] = param_1 → bvar(nparams).
-    // Array order: [param_1, param_2, ..., param_n, motive_fvar]
-    // List order (for lean_array_mk): cons(param_1, cons(param_2, ..., cons(param_n, cons(motive_fvar, nil))))
+    // After minor loop, wrap with motive forall and param foralls.
+    // For each forall, abstract the corresponding fvar to bvar(0) in the body,
+    // then wrap with Pi. This mirrors C++ mk_pi which abstracts before wrapping.
 
-    var fvar_list = listNil();
-    // Add motive_fvar at the end (innermost = bvar(0))
-    lean_inc(motive_fvar);
-    fvar_list = lean_list_cons(motive_fvar, fvar_list);
-    // Add params in reverse so param_1 is first in list (= highest bvar)
-    {
-        var pi: u64 = nparams;
-        while (pi > 0) : (pi -= 1) {
-            lean_inc(param_fvars[pi - 1]);
-            fvar_list = lean_list_cons(param_fvars[pi - 1], fvar_list);
-        }
-    }
-
-    const subst_arr = lean_array_mk(fvar_list);
-    const abstracted = lean_expr_abstract(result, subst_arr);
-    lean_dec(result); // abstract retains result, we release our ref
-    lean_dec(subst_arr); // abstract retains subst, we release our ref
-    lean_dec(motive_fvar); // release original motive_fvar ref
-    // Release original param_fvar refs
-    for (0..nparams) |pi| {
-        lean_dec(param_fvars[pi]);
-    }
-    result = abstracted;
-
-    // Also abstract motive_type — it contains param_fvars that need to be converted to bvars.
-    // In motive_type (domain of motive forall), only params are visible (motive is NOT bound
-    // since we're in its domain, and minors are below). So params are:
-    //   param_n = bvar(0), param_1 = bvar(nparams-1)
-    // Build subst array: [param_1, ..., param_n] (param_1 first → bvar(nparams-1), param_n last → bvar(0))
-    var motive_type_abstracted = motive_type;
+    // First, abstract motive_type (only param_fvars, not motive_fvar).
+    // In motive_type, params are the only free vars: param_n=bvar(0), param_1=bvar(nparams-1)
+    var motive_type_final = motive_type;
     if (nparams > 0) {
-        var mt_fvar_list = listNil();
-        // Add params in reverse so param_1 is first in list
+        var mt_list = listNil();
         {
             var pi: u64 = nparams;
             while (pi > 0) : (pi -= 1) {
                 lean_inc(param_fvars[pi - 1]);
-                mt_fvar_list = lean_list_cons(param_fvars[pi - 1], mt_fvar_list);
+                mt_list = lean_list_cons(param_fvars[pi - 1], mt_list);
             }
         }
-        const mt_subst_arr = lean_array_mk(mt_fvar_list);
-        motive_type_abstracted = lean_expr_abstract(motive_type, mt_subst_arr);
-        lean_dec(motive_type); // abstract retains, release our ref
-        lean_dec(mt_subst_arr); // abstract retains, release our ref
+        const mt_arr = lean_array_mk(mt_list);
+        motive_type_final = lean_expr_abstract(motive_type, mt_arr);
+        lean_dec(motive_type);
+        lean_dec(mt_arr);
     }
 
-    // Wrap with motive forall (binder for motive_fvar, which is now bvar(0) after abstract)
-    result = lean_expr_mk_forall(mkName("motive"), motive_type_abstracted, result, 1);
+    // Wrap with motive forall: abstract motive_fvar to bvar(0) in result, then Pi wrap.
+    // lean_expr_abstract converts fvar to bvar(0) and lifts loose bvars by 1 (array size).
+    // This makes room for the motive binder at bvar(0), which the Pi binds.
+    {
+        lean_inc(motive_fvar);
+        const motive_arr = lean_array_mk(list1(motive_fvar));
+        const abstracted = lean_expr_abstract(result, motive_arr);
+        lean_dec(motive_arr);
+        lean_dec(result);
+        result = abstracted;
+        result = lean_expr_mk_forall(mkName("motive"), motive_type_final, result, 1);
+    }
 
-    // Wrap with param binders (from the inductive type's forall prefix)
-    // Extract param types from the first constructor's type
+    // Wrap with param foralls (from last to first, so param_0 is outermost)
+    // For each param, abstract param_fvars[i-1] to bvar(0) in result, then Pi wrap
     if (nparams > 0 and all_ctor_count > 0) {
         const first_ctype = all_ctor_types[0];
         var pi: u64 = nparams;
         while (pi > 0) : (pi -= 1) {
             const param_domain = piDomain(first_ctype, pi - 1);
             lean_inc(param_domain);
-            // Get param name from the ctor type
             var curr = first_ctype;
             var j: u64 = 0;
             while (j < pi - 1) : (j += 1) {
@@ -1344,8 +1321,23 @@ fn buildRecursorType(
             }
             const param_name = forallName(curr);
             lean_inc(param_name);
+
+            // Abstract this param's fvar to bvar(0)
+            lean_inc(param_fvars[pi - 1]);
+            const parr = lean_array_mk(list1(param_fvars[pi - 1]));
+            const abstracted = lean_expr_abstract(result, parr);
+            lean_dec(result);
+            lean_dec(parr);
+            result = abstracted;
+
             result = lean_expr_mk_forall(param_name, param_domain, result, 0);
         }
+    }
+
+    // Release fvar originals (they've been abstracted and consumed)
+    lean_dec(motive_fvar);
+    for (0..nparams) |pi| {
+        lean_dec(param_fvars[pi]);
     }
 
     // Apply infer_implicit to mark params as implicit where needed
