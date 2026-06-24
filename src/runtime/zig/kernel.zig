@@ -1114,5 +1114,6 @@ comptime {
         @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
         @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .strong });
         @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
+        @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
     }
 }
