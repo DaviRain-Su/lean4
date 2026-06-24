@@ -46,7 +46,15 @@ EXTRA_SRC_ROOTS =
 # ignore error messages from missing parts, e.g. Leanc/
 SRCS = $(shell find $(PKG) $(PKG).lean $(EXTRA_SRC_ROOTS) -name '*.lean' 2> /dev/null)
 DEPS = $(addprefix $(TEMP_OUT)/,$(SRCS:.lean=.depend))
+# Add the lean binary's own stdlib path (from rpath) BEFORE the current stage
+# so that already-compiled modules from the previous stage are found even
+# if the current stage hasn't built them yet.
+ifneq ($(LEAN),)
+LEAN_PATH := @LEAN_PATH_SEPARATOR@$(dir $(LEAN))../lib/lean@LEAN_PATH_SEPARATOR@$(OLEAN_OUT)
+export LEAN_PATH
+else
 export LEAN_PATH += @LEAN_PATH_SEPARATOR@$(OLEAN_OUT)
+endif
 OBJS = $(addprefix $(OLEAN_OUT)/, $(SRCS:.lean=.olean))
 ifdef C_ONLY
 # There are no .lean files in stage0/src/
@@ -92,7 +100,7 @@ endif
 	@mkdir -p $(OLEAN_OUT)/$(*D)
 	LEAN_OPTS="$(LEAN_OPTS)"; \
 	[[ -z "$(LLVM)" ]] || LEAN_OPTS+=" --bc=$(TEMP_OUT)/$*.bc.tmp"; \
-	$(LEAN) $$LEAN_OPTS -o "$@" -i "$(OLEAN_OUT)/$*.ilean" $(GEN_FLAG)"$(TEMP_OUT)/$*.$(GEN_EXT).tmp" "$<"
+	exec $(LEAN) $$LEAN_OPTS -o "$@" -i "$(OLEAN_OUT)/$*.ilean" $(GEN_FLAG)"$(TEMP_OUT)/$*.$(GEN_EXT).tmp" "$<"
 # create the generated file atomically
 	@mv "$(TEMP_OUT)/$*.$(GEN_EXT).tmp" "$(C_OUT)/$*.$(GEN_EXT)"
 ifdef LLVM
