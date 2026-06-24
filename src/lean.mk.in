@@ -119,7 +119,11 @@ ifdef CMAKE_LIKE_OUTPUT
 	@echo "[    ] Building $<"
 endif
 	@mkdir -p "$(@D)"
+ifeq ($(USE_ZIG),1)
+	$(ZIG) build-obj -fPIC -OReleaseFast $< -femit-bin=$@
+else
 	$(CC) -c -o $@ $< $(LEANC_OPTS) -DLEAN_EXPORTING
+endif
 
 # On Windows, rebuild .o not intended for shared libraries
 # without dllexport because of symbol limit;
@@ -134,7 +138,11 @@ ifdef CMAKE_LIKE_OUTPUT
 	@echo "[    ] Building $<"
 endif
 	@mkdir -p "$(@D)"
+ifeq ($(USE_ZIG),1)
+	$(ZIG) build-obj -fPIC -OReleaseFast $< -femit-bin=$@
+else
 	$(CC) -c -o $@ $< $(LEANC_OPTS)
+endif
 else
 $(TEMP_OUT)/%.o: $(TEMP_OUT)/%.o.export
 	ln -f $< $@

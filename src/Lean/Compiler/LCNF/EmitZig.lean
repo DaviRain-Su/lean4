@@ -1356,7 +1356,12 @@ def emitFnDecls : EmitM Unit := do
     if isSimpleGroundDecl env decl.name then
       continue
     match decl.value with
-    | .extern .. => pure ()
+    | .extern .. =>
+      let name := (getExternNameFor env `c decl.name).getD (← toZigSymbolName decl.name)
+      if !runtimeExternNames.contains name && !InlineHelpers.isInlineHelperName name then
+        emitSignature name decl.toSignature
+        if (isStandardExternC? env decl.name).isNone then
+          emitClosureSignatureFor decl.toSignature
     | _ =>
         if decl.params.isEmpty then
           let baseName ← toZigSymbolName decl.name
@@ -1599,8 +1604,8 @@ def emitMainFnIfNeeded : EmitM Unit := do
       "  var i = argc;",
       "  while (i > 1) {",
       "    i -= 1;",
-      "    var n = lean_alloc_ctor(@as(c_uint, 1), @as(c_uint, 2), @as(usize, 0));",
-      "    lean_ctor_set(n, @as(c_uint, 0), lean_mk_string(argv[i]));",
+      "    const n = lean_alloc_ctor(@as(c_uint, 1), @as(c_uint, 2), @as(usize, 0));",
+      "    lean_ctor_set(n, @as(c_uint, 0), lean_mk_string(@ptrCast(@constCast(argv[i]))));",
       "    lean_ctor_set(n, @as(c_uint, 1), in);",
       "    in = n;",
       "  }",

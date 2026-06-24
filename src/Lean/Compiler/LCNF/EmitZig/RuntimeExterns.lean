@@ -286,7 +286,7 @@ public def runtimeExternDeclsGenerated : List String := [
   "extern fn lean_get_external_data(_0: LeanObj) callconv(.c) ?*anyopaque;",
   "extern fn lean_get_githash(_0: LeanObj) callconv(.c) LeanObj;",
   "extern fn lean_get_internal_linker_flags(_0: LeanObj) callconv(.c) LeanObj;",
-  "extern fn lean_get_ir_extra_const_names(_0: LeanObj, _1: LeanObj, _2: u8) callconv(.c) LeanObj;",
+  "extern fn lean_get_ir_extra_const_names(_0: LeanObj, _1: u8, _2: u8) callconv(.c) LeanObj;",
   "extern fn lean_get_leanc_extra_flags(_0: LeanObj) callconv(.c) LeanObj;",
   "extern fn lean_get_leanc_internal_flags(_0: LeanObj) callconv(.c) LeanObj;",
   "extern fn lean_get_linker_flags(_0: u8) callconv(.c) LeanObj;",
