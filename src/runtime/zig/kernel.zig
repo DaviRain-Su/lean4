@@ -862,80 +862,24 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
     return ctor.lean_ctor_get(opt_cancel_tk, 0);
 }
 
-fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
-    return switch (object.lean_ptr_tag(decl)) {
-        // Tags 0-3: Axiom, Definition, Theorem, Opaque — pass through as-is
-        // Declaration and ConstantInfo share the same tag and payload for these kinds.
-        0...3 => blk: {
-            rc.lean_inc(decl);
-            break :blk decl;
-        },
-        // Tag 4: Quot — no constant_info payload needed, just return decl
-        4 => blk: {
-            rc.lean_inc(decl);
-            break :blk decl;
-        },
-        // Tag 5: MutualDefinition — handled by caller (iterate definitions)
-        // Tag 6: Inductive — handled by caller (delegates to C++)
-        else => unreachable,
-    };
-}
-
-/// Add a mutual definition block by iterating all definitions and adding each
-/// as a `defnInfo` (ConstantInfo tag 1) to the environment.
-fn addMutualDefinitions(env: *anyopaque, decl: *anyopaque) *anyopaque {
-    const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
-    var curr = defns;
-    var new_env = env;
-    rc.lean_inc(new_env);
-    while (!object.lean_is_scalar(curr)) {
-        const defn = ctor.lean_ctor_get(curr, 0) orelse @panic("mutual definition list missing head");
-        rc.lean_inc(defn);
-        // Wrap in ConstantInfo.defnInfo (tag 1)
-        const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
-        ctor.lean_ctor_set(cinfo, 0, defn);
-        const prev_env = new_env;
-        new_env = lean_environment_add(prev_env, cinfo);
-        rc.lean_dec(prev_env);
-        curr = ctor.lean_ctor_get(curr, 1) orelse @panic("mutual definition list missing tail");
-    }
-    rc.lean_dec(defns);
-    return new_env;
-}
-
-fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
-    const tag = object.lean_ptr_tag(decl);
-    if (tag == 6) {
-        // Inductive declarations require complex processing (nested inductives,
-        // constructor/recursor generation) that is not yet ported to Zig.
-        // Delegate to the C++ environment::add dispatch.
-        return lean_cpp_environment_add_without_checking(env, decl);
-    }
-    const new_env = if (tag == 5) blk: {
-        break :blk addMutualDefinitions(env, decl);
-    } else blk: {
-        const cinfo = declarationToPreliminaryConstantInfo(decl);
-        break :blk lean_environment_add(env, cinfo);
-    };
-    // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
-    const result = alloc.lean_alloc_ctor(1, 1, 0);
-    ctor.lean_ctor_set(result, 0, new_env);
-    return result;
-}
-
-// ── Type checking helpers for lean_add_decl ─────────────────────────────────
+// lean_add_decl_without_checking and its helpers
+// (declarationToPreliminaryConstantInfo, addMutualDefinitions) have been moved
+// to add_decl_bridge.zig (separate compilation unit) to prevent the ZCU
+// optimizer from seeing through reference counting and eliminating
+// rc.lean_inc/lean_dec calls. The bridge module exports
+// lean_add_decl_without_checking with strong linkage; the ZCU no longer
+// exports it.
 //
-// These mirror the checks performed by C++ environment::add(decl, check=true).
-// The Zig type checker (type_checker.zig) provides lean_kernel_check_impl and
-// lean_kernel_is_def_eq_impl for type inference and definitional equality.
+// Tags 0-4 are handled entirely in Zig via lean_environment_add.
+// Tag 5 (mutual) iterates definitions and adds each via lean_environment_add.
+// Tag 6 (inductive) still delegates to lean_cpp_environment_add_without_checking.
+
+extern fn lean_add_decl_bridge(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 
 fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
     _ = max_heartbeat;
     _ = opt_cancel_tk;
-    // Delegate to C++ helper (opaque extern fn) to prevent the ZCU optimizer
-    // from seeing through the call chain and eliminating reference counting
-    // in callers (e.g. elabAddDeclCore).
-    return lean_cpp_environment_add_without_checking(env, decl);
+    return lean_add_decl_bridge(env, decl);
 }
 
 // lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).
@@ -1112,7 +1056,8 @@ comptime {
         @export(&lean_replace_expr_zig_impl, .{ .name = "lean_replace_expr_zig_impl", .linkage = .strong });
         @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
         @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
-        @export(&lean_add_decl_without_checking, .{ .name = "lean_add_decl_without_checking", .linkage = .strong });
+        // lean_add_decl_without_checking is now provided by add_decl_bridge.zig
+        // (separate compilation unit) with strong linkage.
         @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
         @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
     }

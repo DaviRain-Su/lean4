@@ -127,7 +127,7 @@ if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
   # arithmetic; C++ mpz.cpp is compiled without LEAN_USE_GMP in the cutover archive.
   set(USE_GMP OFF CACHE BOOL "USE_GMP" FORCE)
   message(STATUS "LEAN_ZIG_RT_CUTOVER: USE_GMP=OFF (GMP-free Zig big_int runtime)")
-  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libadd_decl_bridge.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")

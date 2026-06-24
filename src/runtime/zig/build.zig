@@ -187,6 +187,23 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(kernel_entrypoints_lib);
 
+    // add_decl_bridge.zig — separate module that provides an opaque wrapper
+    // for lean_add_decl_without_checking. The ZCU optimizer cannot see through
+    // the extern fn boundary, preventing it from eliminating rc.lean_inc(env)
+    // in callers. This module exports only lean_add_decl_bridge (no conflicts).
+    const add_decl_bridge_mod = b.createModule(.{
+        .root_source_file = b.path("add_decl_bridge.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const add_decl_bridge_lib = b.addLibrary(.{
+        .name = "add_decl_bridge",
+        .root_module = add_decl_bridge_mod,
+        .linkage = .static,
+    });
+    b.installArtifact(add_decl_bridge_lib);
+
     root_mod.linkSystemLibrary("uv", .{});
 
     const lib = b.addLibrary(.{

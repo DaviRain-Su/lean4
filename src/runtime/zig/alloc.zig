@@ -543,7 +543,7 @@ pub fn freeSmallObject(o: *anyopaque) void {
     lean_free_small_object(o);
 }
 
-pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) *anyopaque {
+pub fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) callconv(.c) *anyopaque {
     if (tag > lean.LeanMaxCtorTag) @panic("constructor tag out of range");
     if (num_objs > std.math.maxInt(u8)) @panic("constructor object slot overflow");
     if (scalar_sz > std.math.maxInt(u16)) @panic("constructor scalar size overflow");
@@ -643,6 +643,9 @@ comptime {
     @export(&lean_inc_heartbeat, .{ .name = "lean_inc_heartbeat" });
     @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
     @export(&lean_free_object, .{ .name = "lean_free_object" });
+    // Export lean_alloc_ctor for use by add_decl_bridge.zig (separate module).
+    // C++ lean_alloc_ctor is static inline (local per-TU), no global conflict.
+    @export(&lean_alloc_ctor, .{ .name = "lean_alloc_ctor" });
 }
 test "lean_alloc_object returns aligned non-null pointers" {
     resetTestCounters();
