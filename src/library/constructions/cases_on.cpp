@@ -185,4 +185,10 @@ declaration mk_cases_on(environment const & env, name const & n) {
 extern "C" LEAN_EXPORT object * lean_mk_cases_on(object * env, object * n) {
     return catch_kernel_exceptions<declaration>([&]() { return mk_cases_on(environment(env), name(n, true)); });
 }
+
+/* C++ helper for Zig kernel: full mk_cases_on with catch_kernel_exceptions.
+   Called by Zig lean_mk_cases_on until the Zig implementation achieves parity. */
+extern "C" LEAN_EXPORT object * lean_cpp_mk_cases_on(object * env, object * n) {
+    return catch_kernel_exceptions<declaration>([&]() { return mk_cases_on(environment(env), name(n, true)); });
+}
 }

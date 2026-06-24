@@ -394,8 +394,14 @@ pub export fn lean_mk_cases_on_zig_impl(env: *anyopaque, n: *anyopaque) callconv
     return mkExceptOk(decl);
 }
 
+extern fn lean_cpp_mk_cases_on(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
+
 fn lean_mk_cases_on(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque {
-    return lean_mk_cases_on_zig_impl(env, n);
+    // Delegate to C++ implementation until Zig parity is achieved.
+    // The Zig implementation (lean_mk_cases_on_zig_impl) has a subtle
+    // behavioral difference in casesOn generation that causes the
+    // `cases` tactic to produce incorrect patterns.
+    return lean_cpp_mk_cases_on(env, n);
 }
 
 pub export fn l_mkCasesOnImpZig(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque {
