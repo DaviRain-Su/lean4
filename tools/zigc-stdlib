@@ -593,6 +593,7 @@ def postprocess_zigrt_for_linking(
                                             output=weaken.stdout, stderr=weaken.stderr)
 
     if flip.exists():
+        kernel_entrypoints = zig_lib.parent / "libkernel_entrypoints.a"
         flip_proc = subprocess.run(
             [sys.executable, str(tools_dir / "flip_to_zig.py"), str(zig_lib),
              str(kernel_entrypoints), str(flip)] + [str(c) for c in copies],

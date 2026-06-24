@@ -39,3 +39,44 @@ pub export fn lean_kernel_check(obj_env: *anyopaque, lctx: *anyopaque, a: *anyop
     defer lean_dec(kenv);
     return lean_kernel_check_impl(kenv, lctx, a);
 }
+
+// ── Lean @[export] fallbacks for helperless build ───────────────────────────
+//
+// These functions are Lean @[export] definitions normally provided by the
+// compiled stdlib. In the helperless Zig archive (libleanrt_zig.a) the stdlib
+// is absent, so we provide weak fallback implementations here. This module is
+// compiled separately from the ZCU, so the ZCU optimizer cannot see through
+// these calls and incorrectly eliminate reference counting in callers.
+//
+// DefinitionVal layout (structure extending ConstantVal):
+//   Object fields: name, levelParams, type, value, hints, all  (6 objects)
+//   Scalar fields: safety (1 byte, DefinitionSafety enum)
+// Declaration.defnDecl = tag 1, 1 object field (the DefinitionVal)
+
+extern fn lean_alloc_ctor(tag: c_uint, num_objs: c_uint, scalar_sz: c_uint) callconv(.c) *anyopaque;
+extern fn lean_ctor_set(o: *anyopaque, i: c_uint, v: *anyopaque) callconv(.c) void;
+extern fn lean_ctor_set_uint8(o: *anyopaque, offset: c_uint, v: u8) callconv(.c) void;
+
+fn lean_mk_definition_val(n: *anyopaque, lparams: *anyopaque, type_expr: *anyopaque, value: *anyopaque, hints: *anyopaque, safety: u8, all: *anyopaque) callconv(.c) *anyopaque {
+    const result = lean_alloc_ctor(0, 6, 1);
+    lean_ctor_set(result, 0, n);
+    lean_ctor_set(result, 1, lparams);
+    lean_ctor_set(result, 2, type_expr);
+    lean_ctor_set(result, 3, value);
+    lean_ctor_set(result, 4, hints);
+    lean_ctor_set(result, 5, all);
+    const scalar_offset: c_uint = @intCast(6 * @sizeOf(?*anyopaque));
+    lean_ctor_set_uint8(result, scalar_offset, safety);
+    return result;
+}
+
+fn lean_mk_definition_decl(v: *anyopaque) callconv(.c) *anyopaque {
+    const result = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(result, 0, v);
+    return result;
+}
+
+comptime {
+    @export(&lean_mk_definition_val, .{ .name = "lean_mk_definition_val", .linkage = .weak });
+    @export(&lean_mk_definition_decl, .{ .name = "lean_mk_definition_decl", .linkage = .weak });
+}
