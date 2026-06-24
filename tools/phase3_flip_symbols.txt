@@ -1085,3 +1085,4 @@ lean_run_init
 lean_elab_add_decl_without_checking
 lean_elab_add_decl
 lean_mk_cases_on
+lean_instantiate_expr_mvars

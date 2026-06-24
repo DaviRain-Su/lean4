@@ -846,8 +846,13 @@ fn runInstantiateAll(m: *anyopaque, e: *anyopaque) *anyopaque {
     return result;
 }
 
+extern fn lean_cpp_instantiate_expr_mvars(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
+
 fn lean_instantiate_expr_mvars(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    return runInstantiateAll(m, e);
+    // Delegate to C++ implementation until Zig port achieves parity.
+    // The Zig implementation (runInstantiateAll) has bugs in metavariable
+    // instantiation logic causing massive test failures.
+    return lean_cpp_instantiate_expr_mvars(m, e);
 }
 
 comptime {
