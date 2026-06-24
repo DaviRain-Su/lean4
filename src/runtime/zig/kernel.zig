@@ -440,6 +440,7 @@ extern fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaq
 extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_cpp_environment_add_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_elab_add_decl(env: *anyopaque, mh: usize, decl: *anyopaque, ax: *anyopaque, tl: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque;
 
 fn mkAppTrailingArgs(f: *anyopaque, rev_args: []const *anyopaque, skip: usize) *anyopaque {
@@ -864,6 +865,7 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
 fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
     return switch (object.lean_ptr_tag(decl)) {
         // Tags 0-3: Axiom, Definition, Theorem, Opaque — pass through as-is
+        // Declaration and ConstantInfo share the same tag and payload for these kinds.
         0...3 => blk: {
             rc.lean_inc(decl);
             break :blk decl;
@@ -873,34 +875,48 @@ fn declarationToPreliminaryConstantInfo(decl: *anyopaque) *anyopaque {
             rc.lean_inc(decl);
             break :blk decl;
         },
-        // Tag 5: MutualDefinition — add each definition in the block
-        5 => blk: {
-            const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
-            if (object.lean_is_scalar(defns)) {
-                @panic("empty mutual definition declaration");
-            }
-            const defn = ctor.lean_ctor_get(defns, 0) orelse @panic("mutual definition declaration missing head definition");
-            // For multi-definition mutual blocks, still use the head definition
-            // as the preliminary constant info. The remaining definitions
-            // are added by the caller (lean_add_decl_without_checking iterates
-            // the full block when check=false).
-            rc.lean_inc(defn);
-            const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
-            ctor.lean_ctor_set(cinfo, 0, defn);
-            break :blk cinfo;
-        },
-        // Tag 6: Inductive — pass through, the environment handles inductive decls
-        6 => blk: {
-            rc.lean_inc(decl);
-            break :blk decl;
-        },
-        else => @panic("unknown declaration kind in Zig kernel add path"),
+        // Tag 5: MutualDefinition — handled by caller (iterate definitions)
+        // Tag 6: Inductive — handled by caller (delegates to C++)
+        else => unreachable,
     };
 }
 
+/// Add a mutual definition block by iterating all definitions and adding each
+/// as a `defnInfo` (ConstantInfo tag 1) to the environment.
+fn addMutualDefinitions(env: *anyopaque, decl: *anyopaque) *anyopaque {
+    const defns = ctor.lean_ctor_get(decl, 0) orelse @panic("mutual definition declaration missing definitions");
+    var curr = defns;
+    var new_env = env;
+    rc.lean_inc(new_env);
+    while (!object.lean_is_scalar(curr)) {
+        const defn = ctor.lean_ctor_get(curr, 0) orelse @panic("mutual definition list missing head");
+        rc.lean_inc(defn);
+        // Wrap in ConstantInfo.defnInfo (tag 1)
+        const cinfo = alloc.lean_alloc_ctor(1, 1, 0);
+        ctor.lean_ctor_set(cinfo, 0, defn);
+        const prev_env = new_env;
+        new_env = lean_environment_add(prev_env, cinfo);
+        rc.lean_dec(prev_env);
+        curr = ctor.lean_ctor_get(curr, 1) orelse @panic("mutual definition list missing tail");
+    }
+    rc.lean_dec(defns);
+    return new_env;
+}
+
 fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
-    const cinfo = declarationToPreliminaryConstantInfo(decl);
-    const new_env = lean_environment_add(env, cinfo);
+    const tag = object.lean_ptr_tag(decl);
+    if (tag == 6) {
+        // Inductive declarations require complex processing (nested inductives,
+        // constructor/recursor generation) that is not yet ported to Zig.
+        // Delegate to the C++ environment::add dispatch.
+        return lean_cpp_environment_add_without_checking(env, decl);
+    }
+    const new_env = if (tag == 5) blk: {
+        break :blk addMutualDefinitions(env, decl);
+    } else blk: {
+        const cinfo = declarationToPreliminaryConstantInfo(decl);
+        break :blk lean_environment_add(env, cinfo);
+    };
     // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
     const result = alloc.lean_alloc_ctor(1, 1, 0);
     ctor.lean_ctor_set(result, 0, new_env);
@@ -915,9 +931,17 @@ fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_ca
     interrupt.setCancelToken(cancelTokenFromOption(opt_cancel_tk));
     defer interrupt.clearCancelToken();
 
-    const cinfo = declarationToPreliminaryConstantInfo(decl);
-    const new_env = lean_environment_add(env, cinfo);
-    // Wrap in Except.ok (constructor tag 1) to match C++ catch_kernel_exceptions
+    const tag = object.lean_ptr_tag(decl);
+    if (tag == 6) {
+        // Inductive declarations require complex processing — delegate to C++.
+        return lean_cpp_environment_add_without_checking(env, decl);
+    }
+    const new_env = if (tag == 5) blk: {
+        break :blk addMutualDefinitions(env, decl);
+    } else blk: {
+        const cinfo = declarationToPreliminaryConstantInfo(decl);
+        break :blk lean_environment_add(env, cinfo);
+    };
     const result = alloc.lean_alloc_ctor(1, 1, 0);
     ctor.lean_ctor_set(result, 0, new_env);
     return result;

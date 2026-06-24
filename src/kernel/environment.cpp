@@ -287,6 +287,15 @@ extern "C" LEAN_EXPORT object * lean_add_decl_without_checking(object * env, obj
         });
 }
 
+/* C++ helper for Zig kernel: full environment::add dispatch for complex
+   declaration kinds (inductive, mutual) that the Zig fast-path cannot handle.
+   Called by Zig lean_add_decl_without_checking for tags 5-6. */
+extern "C" LEAN_EXPORT object * lean_cpp_environment_add_without_checking(object * env, object * decl) {
+    return catch_kernel_exceptions<environment>([&]() {
+            return environment(env).add(declaration(decl, true), false);
+        });
+}
+
 void environment::for_each_constant(std::function<void(constant_info const & d)> const & f) const {
     smap_foreach(cnstr_get(raw(), 1), [&](object *, object * v) {
             constant_info cinfo(v, true);

@@ -409,7 +409,7 @@ pub export fn l_mkCasesOnImpZig___boxed(env: *anyopaque, n: *anyopaque) callconv
 pub const force_link = true;
 
 comptime {
-    if (runtime_options.export_kernel_symbols and !runtime_options.compile_cpp_cutover) {
+    if (runtime_options.export_kernel_symbols) {
         @export(&lean_mk_cases_on, .{ .name = "lean_mk_cases_on", .linkage = .strong });
     }
 }
