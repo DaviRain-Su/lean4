@@ -143,6 +143,7 @@ const BuildCtx = struct {
     star: *anyopaque,
     c_ids: *std.ArrayList(*anyopaque),
     c_main_id: *anyopaque,
+    rec_fvars: *std.ArrayList(*anyopaque),
     rec_fvar_types: *std.ArrayList(*anyopaque),
     rec_fvar_bis: *std.ArrayList(u8),
     cases_on_params: *std.ArrayList(*anyopaque),
@@ -170,8 +171,15 @@ const BuildCtx = struct {
         var minor_params: std.ArrayList(*anyopaque) = .empty;
         defer minor_params.deinit(std.heap.c_allocator);
 
-        const minor_bi = self.rec_fvar_bis.items[minor_idx];
-        var minor_type = rc.lean_inc_ret(self.rec_fvar_types.items[minor_idx]);
+        // Look up the minor premise fvar's local declaration to get user name and binder info,
+        // matching C++ `lctx.get_local_decl(minor)`.
+        const minor_fvar = self.rec_fvars.items[minor_idx];
+        const minor_decl = ka.lctxFind(self.lctx, ea.fvarName(minor_fvar)) orelse @panic("processMinor: missing minor decl");
+        defer rc.lean_dec(minor_decl);
+        const minor_user_name = rc.lean_inc_ret(ka.localDeclUserName(minor_decl));
+        defer rc.lean_dec(minor_user_name);
+        const minor_bi = ka.localDeclBinderInfo(minor_decl);
+        var minor_type = rc.lean_inc_ret(ka.localDeclType(minor_decl));
         defer rc.lean_dec(minor_type);
 
         while (ea.isPi(minor_type)) {
@@ -210,7 +218,7 @@ const BuildCtx = struct {
         if (is_main) {
             const new_c_type = library_util.mkPiFromFVars(self.lctx, minor_non_rec_params.items, minor_type);
             defer rc.lean_dec(new_c_type);
-            const new_c_user = runtime_helpers.lean_name_mk_str(object.lean_box(0).?, "_minor");
+            const new_c_user = rc.lean_inc_ret(minor_user_name);
             defer rc.lean_dec(new_c_user);
             const new_c = self.mkLocal(new_c_user, new_c_type, minor_bi);
             self.cases_on_params.append(std.heap.c_allocator, new_c) catch @panic("processMinor: oom");
@@ -342,6 +350,7 @@ pub export fn lean_mk_cases_on_zig_impl(env: *anyopaque, n: *anyopaque) callconv
         .star = star,
         .c_ids = &c_ids,
         .c_main_id = main_motive_id,
+        .rec_fvars = &rec_fvars,
         .rec_fvar_types = &rec_fvar_types,
         .rec_fvar_bis = &rec_fvar_bis,
         .cases_on_params = &cases_on_params,
@@ -394,14 +403,8 @@ pub export fn lean_mk_cases_on_zig_impl(env: *anyopaque, n: *anyopaque) callconv
     return mkExceptOk(decl);
 }
 
-extern fn lean_cpp_mk_cases_on(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
-
 fn lean_mk_cases_on(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque {
-    // Delegate to C++ implementation until Zig parity is achieved.
-    // The Zig implementation (lean_mk_cases_on_zig_impl) has a subtle
-    // behavioral difference in casesOn generation that causes the
-    // `cases` tactic to produce incorrect patterns.
-    return lean_cpp_mk_cases_on(env, n);
+    return lean_mk_cases_on_zig_impl(env, n);
 }
 
 pub export fn l_mkCasesOnImpZig(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque {
