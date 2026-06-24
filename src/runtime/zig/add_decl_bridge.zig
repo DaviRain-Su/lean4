@@ -29,6 +29,10 @@ extern fn lean_ptr_tag(o: *anyopaque) callconv(.c) u8;
 extern fn lean_box(n: u64) callconv(.c) *anyopaque;
 extern fn lean_unbox(o: *anyopaque) callconv(.c) u64;
 extern fn lean_ctor_get_uint8(o: *anyopaque, offset: c_uint) callconv(.c) u8;
+extern fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_abstract(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_array_mk(arr: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_array_push(arr: *anyopaque, elem: *anyopaque) callconv(.c) *anyopaque;
 
 // Lean @[export] expression builders
 extern fn lean_level_mk_param(name: *anyopaque) callconv(.c) *anyopaque;
@@ -359,6 +363,86 @@ fn forallBody(e: *anyopaque) *anyopaque {
     return lean_ctor_get(e, 2) orelse @panic("forall missing body");
 }
 
+fn forallName(e: *anyopaque) *anyopaque {
+    return lean_ctor_get(e, 0) orelse @panic("forall missing name");
+}
+
+/// BinderInfo: 0=explicit, 1=implicit, 2=strictImplicit, 3=instImplicit
+/// Forall has 3 pointer fields (name, domain, body) then binder_info as uint8 scalar.
+fn forallBinderInfo(e: *anyopaque) u8 {
+    return lean_ctor_get_uint8(e, @intCast(3 * @sizeOf(*anyopaque)));
+}
+
+/// Check if loose bvar `vidx` occurs in expression `e`.
+/// Uses the exported lean_expr_has_loose_bvar (takes boxed Nat index).
+extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
+
+fn hasLooseBVar(e: *anyopaque, vidx: u64) bool {
+    const idx_obj = lean_box(vidx);
+    return lean_expr_has_loose_bvar(e, idx_obj) != 0;
+}
+
+/// has_loose_bvars_in_domain from C++ expr.cpp:
+/// Check if bvar(vidx) occurs in the domain of any explicit binder in `b`,
+/// or (when strict) in the result type.
+fn hasLooseBVarsInDomain(b: *anyopaque, vidx: u64, strict: bool) bool {
+    if (isForall(b)) {
+        const dom = forallDomain(b);
+        if (hasLooseBVar(dom, vidx)) {
+            const bi = forallBinderInfo(b);
+            if (bi == 0) { // explicit
+                return true;
+            } else {
+                // Transitivity: vidx occurs in current implicit argument,
+                // so we search for current argument (bvar 0) in the body
+                if (hasLooseBVarsInDomain(forallBody(b), 0, strict)) {
+                    return true;
+                }
+            }
+        }
+        // Search for vidx in the body (incremented because body is under one binder)
+        return hasLooseBVarsInDomain(forallBody(b), vidx + 1, strict);
+    } else if (!strict) {
+        return hasLooseBVar(b, vidx);
+    } else {
+        return false;
+    }
+}
+
+/// infer_implicit from C++ expr.cpp:
+/// Mark the first `num_params` forall binders as implicit if their bvar appears
+/// in a later explicit binder's domain (or the result type when strict=true).
+fn inferImplicit(t: *anyopaque, num_params: u64, strict: bool) *anyopaque {
+    if (num_params == 0) {
+        return t;
+    }
+    if (!isForall(t)) {
+        return t;
+    }
+    // Recursively process the body
+    const body = forallBody(t);
+    lean_inc(body); // lean_expr_mk_forall consumes body
+    const new_body = inferImplicit(body, num_params - 1, strict);
+    const bi = forallBinderInfo(t);
+    if (bi != 0) {
+        // Already implicit, keep as-is
+        lean_inc(forallName(t));
+        lean_inc(forallDomain(t));
+        return lean_expr_mk_forall(forallName(t), forallDomain(t), new_body, bi);
+    }
+    // Check if bvar(0) appears in new_body's explicit domains or result
+    if (hasLooseBVarsInDomain(new_body, 0, strict)) {
+        // Mark as implicit (bi = 1)
+        lean_inc(forallName(t));
+        lean_inc(forallDomain(t));
+        return lean_expr_mk_forall(forallName(t), forallDomain(t), new_body, 1);
+    }
+    // Keep explicit
+    lean_inc(forallName(t));
+    lean_inc(forallDomain(t));
+    return lean_expr_mk_forall(forallName(t), forallDomain(t), new_body, 0);
+}
+
 fn appFn(e: *anyopaque) *anyopaque {
     return lean_ctor_get(e, 0) orelse @panic("app missing fn");
 }
@@ -545,9 +629,9 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
     // Check if we can handle this inductive in pure Zig:
     // - Single type (no mutual)
     // - No indices (num_indices == 0 for all types)
-    // - No params (nparams == 0)
+    // Params are now supported (nparams > 0 is OK).
     // If not, fall back to C++.
-    var can_handle = num_types == 1 and nparams == 0;
+    var can_handle = num_types == 1;
     if (can_handle) {
         for (0..num_types) |ti| {
             const total_binders = countPiBinders(type_exprs[ti]);
@@ -723,11 +807,33 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         lean_inc(tname);
         const ind_const = constOf(tname, lparamsToLevels(lparams));
 
-        // Motive type: I → Sort u
-        // = forall("_", I, Sort u, default)
-        // mkArrow consumes ind_const, so inc it first to keep a ref for buildRecursorType
+        // Create param fvars for parameterized inductives.
+        // These are used in motive_type and buildRecursorType, then abstracted at the end.
+        const param_names: [8][*:0]const u8 = .{ "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7" };
+        var param_fvars: [128]*anyopaque = undefined;
+        for (0..@min(nparams, 8)) |pi| {
+            param_fvars[pi] = lean_expr_mk_fvar(mkName(param_names[pi]));
+        }
+
+        // Motive type: I(params) → Sort u
+        // For nparams = 0: I → Sort u (simple, consumes ind_const)
+        // For nparams > 0: I(params) → Sort u where params are param_fvars (builds new const)
+        // ind_const needs to survive for buildRecursorType, so inc it.
         lean_inc(ind_const);
-        const motive_type = mkArrow(ind_const, sort_u);
+        const motive_type: *anyopaque = blk: {
+            if (nparams == 0) {
+                break :blk mkArrow(ind_const, sort_u); // consumes ind_const
+            }
+            // Build I(params) = App...(Const(I, levels), param_1, ..., param_n)
+            lean_inc(tname);
+            var i_app = constOf(tname, lparamsToLevels(lparams));
+            var pi: u64 = 0;
+            while (pi < nparams) : (pi += 1) {
+                lean_inc(param_fvars[pi]);
+                i_app = lean_expr_mk_app(i_app, param_fvars[pi]);
+            }
+            break :blk mkArrow(i_app, sort_u);
+        };
 
         // Under 1 binder (motive), motive_ref = bvar(0)
         const motive_ref = bvar(0);
@@ -764,6 +870,7 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
                     @as(u64, num_types),
                     all_names[0..num_types], // for isRec field detection
                     rec_name, rec_lparams,    // for IH construction
+                    param_fvars[0..@intCast(nparams)],
                 );
 
                 lean_inc(cname); // mkRecursorRule consumes ctor
@@ -791,6 +898,7 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
             type_ctor_lists[0..num_types], nparams,
             num_types, lparams,
             all_names[0..num_types], rec_name, rec_lparams,
+            param_fvars[0..@intCast(nparams)],
         );
 
         const k_target: u8 = 0;
@@ -897,10 +1005,12 @@ fn buildRecursorType(
     ind_names: []const *anyopaque,
     _rec_name: *anyopaque,
     _rec_lparams: *anyopaque,
+    param_fvars: []const *anyopaque,
 ) *anyopaque {
     _ = _motive_ref;
     _ = _lparams;
     _ = _rec_name;
+    _ = _rec_lparams;
     _ = _rec_lparams;
     // Under 1 binder (motive):
     //   For constructor c with type Pi(params, Pi(fields, I params)):
@@ -916,28 +1026,11 @@ fn buildRecursorType(
     // Actually, we need to count the binders carefully
 
     // After all minors, we have 1 (motive) + total_ctors (minors) binders
-    // major : I  →  forall("t", ind_const, body, default)
-    // Under 1 + total_ctors + 1 (major) binders:
-    //   motive = bvar(1 + total_ctors)  -- motive is at index 1 + total_ctors
-    //   major = bvar(0)
-    //   body = App(motive, major) = App(bvar(1 + total_ctors), bvar(0))
+    // major : I(params)  →  forall("t", I_app_params, body, default)
+    // For nparams = 0: I_app_params = ind_const (just the constant)
+    // For nparams > 0: I_app_params = App...(ind_const, param_1, ..., param_n)
 
-    // motive is 1 level above the major forall (loose bvar, will be bound by motive forall later)
-    // Each minor forall lift will increment this by 1; after total_ctors minors, motive is at
-    // bvar(1 + total_ctors) which matches its position in the final recursor type.
-    const motive_idx: u64 = 1;
-    const rec_body = lean_expr_mk_app(bvar(motive_idx), bvar(0)); // motive t
-
-    // Wrap with major: forall("t", I, rec_body, default)
-    const with_major = lean_expr_mk_forall(mkName("t"), ind_const, rec_body, 0);
-
-    // Build minor types (inside out, from last to first)
-    // We need to build each minor type, accounting for the binders above it
-    var result = with_major;
-    var minor_binder_count: u64 = 0; // how many minor binders are above us
-
-    // Iterate constructors in reverse order to build from inside out
-    // We need to collect all constructors first
+    // Collect all constructors first (needed for total_ctors count)
     var all_ctor_names: [128]*anyopaque = undefined;
     var all_ctor_types: [128]*anyopaque = undefined;
     var all_ctor_count: usize = 0;
@@ -952,6 +1045,39 @@ fn buildRecursorType(
             curr_c = lean_ctor_get(curr_c, 1) orelse @panic("ctor list missing tail");
         }
     }
+
+    // Build I applied to params (for the major premise type)
+    // Use the param_fvars passed from the caller — they'll be abstracted at the end.
+    // ind_const is Const(I, levels). For nparams > 0, apply params to it.
+    // The caller inc'd ind_const so we have one ref to consume via with_major.
+    // For nparams > 0, we need to build I(params) which creates a new app chain
+    // that consumes ind_const. mk_app consumes its fn arg, so the chain works.
+    var major_type: *anyopaque = ind_const;
+    if (nparams > 0) {
+        // I(params) = App...(Const(I, levels), param_1, ..., param_n)
+        // mk_app(major_type, param) consumes major_type and creates new app
+        var pi: u64 = 0;
+        while (pi < nparams) : (pi += 1) {
+            lean_inc(param_fvars[pi]);
+            major_type = lean_expr_mk_app(major_type, param_fvars[pi]);
+        }
+    }
+
+    // Create a unique fvar for the motive — this allows lean_expr_abstract
+    // to correctly convert it to bvar(0) at the end, handling all scope depths.
+    // We inc it multiple times because each lean_expr_mk_app/forall consumes its args.
+    const motive_fvar = lean_expr_mk_fvar(mkName("motive_placeholder"));
+    // inc for rec_body usage
+    lean_inc(motive_fvar);
+    const rec_body = lean_expr_mk_app(motive_fvar, bvar(0)); // motive t
+
+    // Wrap with major: forall("t", I(params), rec_body, default)
+    const with_major = lean_expr_mk_forall(mkName("t"), major_type, rec_body, 0);
+
+    // Build minor types (inside out, from last to first)
+    // We need to build each minor type, accounting for the binders above it
+    var result = with_major;
+    var minor_binder_count: u64 = 0; // how many minor binders are above us
 
     // Build minors from last to first
     var idx: usize = all_ctor_count;
@@ -1035,9 +1161,17 @@ fn buildRecursorType(
         // Hmm, this is getting very complex. Let me simplify by handling only nparams = 0 for now.
         // For nparams > 0, fall back to C++ (already handled by the caller).
 
-        if (nparams > 0) {
-            @panic("buildRecursorType: nparams > 0 not yet supported");
-        }
+        // For nparams > 0: the recursor type is:
+        //   Pi(params, Pi(motives, Pi(minors, Pi(major, motive(major)))))
+        // params are the FIRST binders, before the motive.
+        // In the minor body, the constructor application includes params:
+        //   c_app = App...(Const(c, levels), param_1, ..., param_n, field_1, ..., field_m)
+        // Under the field binders:
+        //   fields = bvar(0) to bvar(num_fields-1)
+        //   IHs = bvar(num_fields) to bvar(num_fields + num_rec_fields - 1)
+        //   minors (previous) = bvar(num_fields + num_rec_fields) to ...
+        //   motive = bvar(num_fields + num_rec_fields + minor_binder_count)
+        //   params = bvar(num_fields + num_rec_fields + minor_binder_count + 1) to bvar(... + nparams)
 
         // Determine which fields are recursive (field type head is the inductive type)
         var rec_field_indices: [128]u64 = undefined; // indices of recursive fields (0..num_fields-1)
@@ -1053,12 +1187,20 @@ fn buildRecursorType(
             }
         }
 
-        // Build c applied to fields
-        // In minor_body: IHs are at bvar(0)..bvar(num_rec_fields-1) (innermost),
-        // fields are at bvar(num_rec_fields)..bvar(num_rec_fields+num_fields-1)
+        // Build c applied to params and fields
+        // Using param_fvars for params (will be abstracted to correct bvars later).
+        // fields are bvars (IHs at bvar(0)..bvar(num_rec_fields-1), fields at bvar(num_rec_fields)..
+        // c_app = App...(Const(c, levels), param_1, ..., param_n, field_1, ..., field_m)
         var c_app: *anyopaque = undefined;
         {
             c_app = constOf(cname, lean_box(0));
+            // Add params using fvars
+            var pi: u64 = 0;
+            while (pi < nparams) : (pi += 1) {
+                lean_inc(param_fvars[pi]);
+                c_app = lean_expr_mk_app(c_app, param_fvars[pi]);
+            }
+            // Add fields: field_1 (first, 0-indexed: i=0) is at highest field index
             var fi: u64 = 0;
             while (fi < num_fields) : (fi += 1) {
                 const field_idx = num_rec_fields + (num_fields - 1 - fi);
@@ -1086,8 +1228,10 @@ fn buildRecursorType(
         //   fields = bvar(0) to bvar(num_fields-1)
         //   IHs = bvar(num_fields) to bvar(num_fields + num_rec_fields - 1)
 
-        const motive_idx_with_ihs = num_fields + num_rec_fields;
-        const minor_body = lean_expr_mk_app(bvar(motive_idx_with_ihs), c_app);
+        const motive_idx_with_ihs = num_rec_fields + num_fields + @as(u64, @intCast(minor_binder_count));
+        _ = motive_idx_with_ihs; // Not used — we use motive_fvar instead
+        lean_inc(motive_fvar);
+        const minor_body = lean_expr_mk_app(motive_fvar, c_app);
 
         // Wrap with IH binders (from last to first)
         // IH forall domains are OUTSIDE the forall, so they don't count
@@ -1096,12 +1240,12 @@ fn buildRecursorType(
         var ih_binder_count: u64 = 0;
         while (ih_binder_count < num_rec_fields) : (ih_binder_count += 1) {
             const rec_fi = rec_field_indices[num_rec_fields - 1 - ih_binder_count];
-            // IH domain is at 0 IHs (outer) + num_fields fields (below)
-            //   field_i = bvar(num_fields - 1 - rec_fi)
-            //   motive = bvar(num_fields)
-            const motive_bv = bvar(num_fields);
+            // IH domain: motive(field_i)
+            // motive is represented by motive_fvar (will be abstracted to correct bvar later)
+            // field_i = bvar(num_fields - 1 - rec_fi) (relative to IH domain scope: 0 IHs below)
             const field_bv = bvar(num_fields - 1 - rec_fi);
-            const ih_type = lean_expr_mk_app(motive_bv, field_bv);
+            lean_inc(motive_fvar);
+            const ih_type = lean_expr_mk_app(motive_fvar, field_bv);
             minor_type = lean_expr_mk_forall(mkName("_"), ih_type, minor_type, 0);
         }
 
@@ -1127,11 +1271,86 @@ fn buildRecursorType(
         minor_binder_count += 1;
     }
 
-    // Wrap with motive (no lift needed — motive forall's binder IS the loose bvar we've been tracking)
-    result = lean_expr_mk_forall(mkName("motive"), motive_type, result, 1);
+    // Wrap with motive and params using lean_expr_abstract.
+    // Both motive_fvar and param_fvars are fvars that need to be abstracted to bvars.
+    // lean_expr_abstract replaces array[i] with bvar(n-1-i), where n is array size.
+    // We want: motive at bvar(0), param_n at bvar(1), ..., param_1 at bvar(nparams).
+    // So: array[nparams] = motive → bvar(0), array[nparams-1] = param_n → bvar(1), ..., array[0] = param_1 → bvar(nparams).
+    // Array order: [param_1, param_2, ..., param_n, motive_fvar]
+    // List order (for lean_array_mk): cons(param_1, cons(param_2, ..., cons(param_n, cons(motive_fvar, nil))))
 
-    // For nparams > 0, we'd need to wrap with param binders
-    // But we only handle nparams = 0 for now
+    var fvar_list = listNil();
+    // Add motive_fvar at the end (innermost = bvar(0))
+    lean_inc(motive_fvar);
+    fvar_list = lean_list_cons(motive_fvar, fvar_list);
+    // Add params in reverse so param_1 is first in list (= highest bvar)
+    {
+        var pi: u64 = nparams;
+        while (pi > 0) : (pi -= 1) {
+            lean_inc(param_fvars[pi - 1]);
+            fvar_list = lean_list_cons(param_fvars[pi - 1], fvar_list);
+        }
+    }
+
+    const subst_arr = lean_array_mk(fvar_list);
+    const abstracted = lean_expr_abstract(result, subst_arr);
+    lean_dec(result); // abstract retains result, we release our ref
+    lean_dec(subst_arr); // abstract retains subst, we release our ref
+    lean_dec(motive_fvar); // release original motive_fvar ref
+    // Release original param_fvar refs
+    for (0..nparams) |pi| {
+        lean_dec(param_fvars[pi]);
+    }
+    result = abstracted;
+
+    // Also abstract motive_type — it contains param_fvars that need to be converted to bvars.
+    // In motive_type (domain of motive forall), only params are visible (motive is NOT bound
+    // since we're in its domain, and minors are below). So params are:
+    //   param_n = bvar(0), param_1 = bvar(nparams-1)
+    // Build subst array: [param_1, ..., param_n] (param_1 first → bvar(nparams-1), param_n last → bvar(0))
+    var motive_type_abstracted = motive_type;
+    if (nparams > 0) {
+        var mt_fvar_list = listNil();
+        // Add params in reverse so param_1 is first in list
+        {
+            var pi: u64 = nparams;
+            while (pi > 0) : (pi -= 1) {
+                lean_inc(param_fvars[pi - 1]);
+                mt_fvar_list = lean_list_cons(param_fvars[pi - 1], mt_fvar_list);
+            }
+        }
+        const mt_subst_arr = lean_array_mk(mt_fvar_list);
+        motive_type_abstracted = lean_expr_abstract(motive_type, mt_subst_arr);
+        lean_dec(motive_type); // abstract retains, release our ref
+        lean_dec(mt_subst_arr); // abstract retains, release our ref
+    }
+
+    // Wrap with motive forall (binder for motive_fvar, which is now bvar(0) after abstract)
+    result = lean_expr_mk_forall(mkName("motive"), motive_type_abstracted, result, 1);
+
+    // Wrap with param binders (from the inductive type's forall prefix)
+    // Extract param types from the first constructor's type
+    if (nparams > 0 and all_ctor_count > 0) {
+        const first_ctype = all_ctor_types[0];
+        var pi: u64 = nparams;
+        while (pi > 0) : (pi -= 1) {
+            const param_domain = piDomain(first_ctype, pi - 1);
+            lean_inc(param_domain);
+            // Get param name from the ctor type
+            var curr = first_ctype;
+            var j: u64 = 0;
+            while (j < pi - 1) : (j += 1) {
+                curr = forallBody(curr);
+            }
+            const param_name = forallName(curr);
+            lean_inc(param_name);
+            result = lean_expr_mk_forall(param_name, param_domain, result, 0);
+        }
+    }
+
+    // Apply infer_implicit to mark params as implicit where needed
+    result = inferImplicit(result, nparams, true);
+
     return result;
 }
 
@@ -1149,8 +1368,10 @@ fn buildRecursorRuleRHS(
     ind_names: []const *anyopaque,
     rec_name: *anyopaque,
     rec_lparams: *anyopaque,
+    param_fvars: []const *anyopaque,
 ) *anyopaque {
     _ = cname;
+    _ = param_fvars; // Not used in RHS (direct bvar indices work for lambda binding)
 
     // Determine which fields are recursive
     var rec_field_indices: [128]u64 = undefined;
@@ -1166,15 +1387,15 @@ fn buildRecursorRuleRHS(
         }
     }
 
-    // Under num_types (motives) + total_ctors (minors) + num_fields (fields) binders:
-    //   fields = bvar(0) to bvar(num_fields-1)
-    //   minors = bvar(num_fields) to bvar(num_fields + total_ctors - 1)
-    //   motives = bvar(num_fields + total_ctors) to ...
+    // Build RHS with direct bvar indices (no fvars needed for lambdas).
+    // Lambda binders go from inner to outer: fields, minors, motives, params.
+    // In the body (innermost), de Bruijn indices are:
+    //   fields: bvar(0) to bvar(num_fields-1)
+    //   minors: bvar(num_fields) to bvar(num_fields+total_ctors-1)
+    //   motives: bvar(num_fields+total_ctors) to bvar(num_fields+total_ctors+num_types-1)
+    //   params: bvar(num_fields+total_ctors+num_types) to bvar(num_fields+total_ctors+num_types+nparams-1)
 
-    // minor_c = bvar(num_fields + (total_ctors - 1 - ctor_global_idx))
     const minor_idx = num_fields + (total_ctors - 1 - ctor_global_idx);
-
-    // Build: minor_c applied to fields, then IHs
     var rhs: *anyopaque = bvar(minor_idx);
 
     // Apply fields in order: field_1 (highest index) to field_n (bvar(0))
@@ -1186,16 +1407,21 @@ fn buildRecursorRuleRHS(
         }
     }
 
-    // Apply IHs: for each recursive field, build rec(motives, minors, field_i)
-    // These are applied after the fields, matching C++ mk_app(minors[minor_idx], b_u, v)
+    // Apply IHs: for each recursive field, build rec(params, motives, minors, field_i)
     {
         var ii: u64 = 0;
         while (ii < num_rec_fields) : (ii += 1) {
             const rec_fi = rec_field_indices[ii];
-            // Build rec(motives, minors, field_i)
             lean_inc(rec_name);
             lean_inc(rec_lparams);
             var rec_app: *anyopaque = constOf(rec_name, lparamsToLevels(rec_lparams));
+
+            // Apply params (reversed: param_1 highest, param_n lowest)
+            var pi2: u64 = 0;
+            while (pi2 < nparams) : (pi2 += 1) {
+                const param_bv = num_fields + total_ctors + num_types + (nparams - 1 - pi2);
+                rec_app = lean_expr_mk_app(rec_app, bvar(param_bv));
+            }
 
             // Apply motives (num_types, reversed)
             var mi2: u64 = 0;
@@ -1245,8 +1471,21 @@ fn buildRecursorRuleRHS(
         }
     }
 
+    // Wrap with lambdas for params (from last to first, using ctor type's param domains)
     if (nparams > 0) {
-        @panic("buildRecursorRuleRHS: nparams > 0 not yet supported");
+        var pi: u64 = nparams;
+        while (pi > 0) : (pi -= 1) {
+            const param_domain = piDomain(ctype, pi - 1);
+            lean_inc(param_domain);
+            var curr = ctype;
+            var j: u64 = 0;
+            while (j < pi - 1) : (j += 1) {
+                curr = forallBody(curr);
+            }
+            const param_name = forallName(curr);
+            lean_inc(param_name);
+            rhs = lean_expr_mk_lambda(param_name, param_domain, rhs, 0);
+        }
     }
 
     return rhs;
