@@ -153,10 +153,14 @@ fn sleepThunk(unit: ?*anyopaque) callconv(.c) ?*anyopaque {
 }
 
 extern fn lean_apply_1(f: *anyopaque, a: *anyopaque) callconv(.c) ?*anyopaque;
+extern fn lean_io_eprintln(s: *anyopaque) callconv(.c) *anyopaque;
 
 export fn lean_dbg_trace(s: *anyopaque, fn_obj: *anyopaque) callconv(.c) ?*anyopaque {
-    writeTrace("", s);
-    rc.lean_dec(s);
+    // Route through lean_io_eprintln (Lean IO system) instead of writing
+    // directly to stderr. This ensures server-mode message formatting
+    // (e.g. "info:" prefix) is applied, matching C++ behavior.
+    const result = lean_io_eprintln(s);
+    rc.lean_dec(result);
     return lean_apply_1(fn_obj, box(0));
 }
 
