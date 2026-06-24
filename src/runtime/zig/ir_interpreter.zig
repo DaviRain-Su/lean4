@@ -635,13 +635,6 @@ const Interpreter = struct {
     }
 
     fn deinit(self: *Interpreter) void {
-        // Clean up constant cache
-        var it = self.constant_cache.valueIterator();
-        while (it.next()) |e| {
-            if (!e.is_scalar) {
-                if (e.val.obj) |o| rc.lean_dec(o);
-            }
-        }
         self.arg_stack.deinit(self.allocator);
         self.jp_stack.deinit(self.allocator);
         self.call_stack.deinit(self.allocator);
@@ -1504,10 +1497,6 @@ fn leanEvalMainZigImpl(env: *anyopaque, opts: *anyopaque, args: *anyopaque, decl
 }
 
 fn leanEvalConst(env: *anyopaque, opts: *anyopaque, c: *anyopaque) callconv(.c) *anyopaque {
-    const debug_stem = lean_get_symbol_stem(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
-    std.debug.print("zig eval_const {s}\n", .{lean_string_cstr(debug_stem)});
-    rc.lean_dec(debug_stem);
-
     const sorry_dep = lean_decl_get_sorry_dep(Interpreter.ownedArg(env), Interpreter.ownedArg(c));
     defer rc.lean_dec(sorry_dep);
     if (!object.lean_is_scalar(sorry_dep)) {
