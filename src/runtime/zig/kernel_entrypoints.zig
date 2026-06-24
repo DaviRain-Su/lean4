@@ -76,7 +76,22 @@ fn lean_mk_definition_decl(v: *anyopaque) callconv(.c) *anyopaque {
     return result;
 }
 
+// ── lean_add_decl (helperless fallback) ─────────────────────────────────────
+//
+// In the normal build, lean_add_decl is provided by kernel.zig (ZCU) with
+// strong linkage. This weak fallback is only used in the helperless build
+// where the ZCU's lean_add_decl is absent.
+
+extern fn lean_cpp_environment_add_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
+
+fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
+    _ = max_heartbeat;
+    _ = opt_cancel_tk;
+    return lean_cpp_environment_add_without_checking(env, decl);
+}
+
 comptime {
     @export(&lean_mk_definition_val, .{ .name = "lean_mk_definition_val", .linkage = .weak });
     @export(&lean_mk_definition_decl, .{ .name = "lean_mk_definition_decl", .linkage = .weak });
+    @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .weak });
 }

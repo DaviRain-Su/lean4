@@ -932,13 +932,9 @@ fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c
 fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
     _ = max_heartbeat;
     _ = opt_cancel_tk;
-    // Delegate to C++ helper for all declaration kinds. The C++ helper is
-    // an opaque extern fn that the ZCU optimizer cannot see through. If we
-    // call lean_environment_add (or lean_add_decl_without_checking) directly
-    // from here, the ZCU optimizer can see through the entire call chain
-    // (elabAddDeclCore → lean_add_decl → lean_add_decl_without_checking →
-    // lean_environment_add) and incorrectly eliminates rc.lean_inc(env) in
-    // elabAddDeclCore, causing memory corruption.
+    // Delegate to C++ helper (opaque extern fn) to prevent the ZCU optimizer
+    // from seeing through the call chain and eliminating reference counting
+    // in callers (e.g. elabAddDeclCore).
     return lean_cpp_environment_add_without_checking(env, decl);
 }
 
