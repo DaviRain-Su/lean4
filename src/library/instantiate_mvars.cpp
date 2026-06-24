@@ -747,10 +747,4 @@ extern "C" LEAN_EXPORT object * lean_instantiate_level_mvars(object * m, object 
 extern "C" LEAN_EXPORT object * lean_instantiate_expr_mvars(object * m, object * e) {
     return run_instantiate_all(m, e);
 }
-
-/* C++ helper for Zig kernel: full instantiate_expr_mvars implementation.
-   Called by Zig lean_instantiate_expr_mvars until the Zig port achieves parity. */
-extern "C" LEAN_EXPORT object * lean_cpp_instantiate_expr_mvars(object * m, object * e) {
-    return run_instantiate_all(m, e);
-}
 }

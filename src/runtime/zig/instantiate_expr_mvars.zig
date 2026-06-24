@@ -33,6 +33,27 @@ extern fn lean_assign_mvar(mctx: *anyopaque, mvar_id: *anyopaque, val: *anyopaqu
 extern fn lean_get_delayed_mvar_assignment(mctx: *anyopaque, mvar_id: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_delayed_mvar_assignment_fvars(d: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_delayed_mvar_assignment_mvar_id_pending(d: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_name_hash(n: *anyopaque) callconv(.c) u64;
+
+// ── Name-value-based hashmap context ────────────────────────────────────────
+// C++ uses name_hash_map/name_set which compare by Name value, not pointer.
+// We must do the same to correctly match fvar/mvar ids across different Name objects.
+
+const NameMapContext = struct {
+    pub fn hash(self: @This(), key: *anyopaque) u64 {
+        _ = self;
+        return lean_name_hash(key);
+    }
+    pub fn eql(self: @This(), a: *anyopaque, b: *anyopaque) bool {
+        _ = self;
+        return lean_name_eq(a, b) != 0;
+    }
+};
+
+const NameSet = std.HashMap(*anyopaque, void, NameMapContext, std.hash_map.default_max_load_percentage);
+const NameU8Map = std.HashMap(*anyopaque, u8, NameMapContext, std.hash_map.default_max_load_percentage);
+const NameFvarSubstMap = std.HashMap(*anyopaque, FvarSubstEntry, NameMapContext, std.hash_map.default_max_load_percentage);
 
 // ── Expr constructors (Lean-exported) ───────────────────────────────────────
 
@@ -203,7 +224,7 @@ const DirectVisitor = struct {
     mctx: *anyopaque,
     level_cache: instantiate_mvars.SharingCache,
     cache: SimpleCache,
-    already_normalized: std.AutoHashMap(*anyopaque, void),
+    already_normalized: NameSet,
     saved: std.ArrayListUnmanaged(*anyopaque) = .empty,
     has_updateable_delayed: bool = false,
     allocator: std.mem.Allocator,
@@ -213,7 +234,7 @@ const DirectVisitor = struct {
             .mctx = mctx,
             .level_cache = instantiate_mvars.SharingCache.init(a),
             .cache = SimpleCache.init(a),
-            .already_normalized = std.AutoHashMap(*anyopaque, void).init(a),
+            .already_normalized = NameSet.init(a),
             .allocator = a,
         };
     }
@@ -466,13 +487,13 @@ const ScopeCache = struct {
 
 const DelayedVisitor = struct {
     mctx: *anyopaque,
-    fvar_subst: std.AutoHashMap(*anyopaque, FvarSubstEntry),
+    fvar_subst: NameFvarSubstMap,
     depth: u32 = 0,
     cache: ScopeCache,
     result_scope: u32 = 0,
-    already_normalized: std.AutoHashMap(*anyopaque, void),
+    already_normalized: NameSet,
     resolvable_expr_cache: std.AutoHashMap(*anyopaque, bool),
-    resolvable_pending_cache: std.AutoHashMap(*anyopaque, u8), // 0=in-progress, 1=yes, 2=no
+    resolvable_pending_cache: NameU8Map, // 0=in-progress, 1=yes, 2=no
     saved: std.ArrayListUnmanaged(*anyopaque) = .empty,
     allocator: std.mem.Allocator,
 
@@ -480,11 +501,11 @@ const DelayedVisitor = struct {
         rc.lean_inc(mctx);
         return .{
             .mctx = mctx,
-            .fvar_subst = std.AutoHashMap(*anyopaque, FvarSubstEntry).init(a),
+            .fvar_subst = NameFvarSubstMap.init(a),
             .cache = ScopeCache.init(a),
-            .already_normalized = std.AutoHashMap(*anyopaque, void).init(a),
+            .already_normalized = NameSet.init(a),
             .resolvable_expr_cache = std.AutoHashMap(*anyopaque, bool).init(a),
-            .resolvable_pending_cache = std.AutoHashMap(*anyopaque, u8).init(a),
+            .resolvable_pending_cache = NameU8Map.init(a),
             .allocator = a,
         };
     }
@@ -492,11 +513,11 @@ const DelayedVisitor = struct {
     fn initOwned(mctx: *anyopaque, a: std.mem.Allocator) DelayedVisitor {
         return .{
             .mctx = mctx,
-            .fvar_subst = std.AutoHashMap(*anyopaque, FvarSubstEntry).init(a),
+            .fvar_subst = NameFvarSubstMap.init(a),
             .cache = ScopeCache.init(a),
-            .already_normalized = std.AutoHashMap(*anyopaque, void).init(a),
+            .already_normalized = NameSet.init(a),
             .resolvable_expr_cache = std.AutoHashMap(*anyopaque, bool).init(a),
-            .resolvable_pending_cache = std.AutoHashMap(*anyopaque, u8).init(a),
+            .resolvable_pending_cache = NameU8Map.init(a),
             .allocator = a,
         };
     }
@@ -780,16 +801,11 @@ const DelayedVisitor = struct {
                 // No fvars/mvars (caught by early exit), but keep for safety
                 return retain(e);
             },
-            .MVar => blk: {
-                const mid = ea.mvarName(e);
-                rc.lean_inc(self.mctx);
-                const opt = lean_get_mvar_assignment(self.mctx, mid);
-                if (isNone(opt)) {
-                    rc.lean_dec(opt);
-                    break :blk retain(e);
-                }
-                rc.lean_dec(opt);
-                break :blk retain(e);
+            .MVar => {
+                // In outer mode, unassigned direct mvars are left alone.
+                // (C++ asserts !get_mvar_assignment; we just return e since
+                // pass 1 already resolved all direct assignments.)
+                return retain(e);
             },
             .MData => blk: {
                 const new_inner = self.visit(ea.mdataExpr(e));
@@ -846,13 +862,8 @@ fn runInstantiateAll(m: *anyopaque, e: *anyopaque) *anyopaque {
     return result;
 }
 
-extern fn lean_cpp_instantiate_expr_mvars(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
-
 fn lean_instantiate_expr_mvars(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    // Delegate to C++ implementation until Zig port achieves parity.
-    // The Zig implementation (runInstantiateAll) has bugs in metavariable
-    // instantiation logic causing massive test failures.
-    return lean_cpp_instantiate_expr_mvars(m, e);
+    return runInstantiateAll(m, e);
 }
 
 comptime {
