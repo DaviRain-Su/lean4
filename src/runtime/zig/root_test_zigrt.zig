@@ -6,6 +6,7 @@
 // not needed by emitted zigrt executables.
 
 const runtime_options = @import("runtime_options");
+pub const kernel = @import("kernel.zig");
 pub const alloc = @import("alloc.zig");
 pub const allocprof = @import("allocprof.zig");
 pub const allocator = @import("lean_allocator");
@@ -72,6 +73,7 @@ pub const uv_udp = @import("uv_udp.zig");
 pub const inline_exports = @import("inline_exports.zig");
 
 comptime {
+    _ = kernel;
     _ = alloc;
     _ = allocator;
     _ = apply;

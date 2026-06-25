@@ -1259,3 +1259,73 @@ comptime {
         @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
     }
 }
+
+fn mkTestApp(depth: usize) *anyopaque {
+    if (depth == 0) {
+        return testSortExpr(0); // const-like leaf
+    }
+    const child = mkTestApp(depth - 1);
+    return lean_expr_mk_app(rc.lean_inc_ret(child), rc.lean_inc_ret(child));
+}
+
+test "lift on deep app tree produces no bvars" {
+    // Create app(app(app(app(leaf, leaf), leaf), leaf), leaf) — 5 levels deep
+    const tree = mkTestApp(5);
+    defer rc.lean_dec(tree);
+    
+    // Verify no bvars initially
+    try std.testing.expectEqual(@as(u32, 0), looseBVarRange(tree));
+    
+    // Lift with various offsets
+    for ([_]usize{ 0, 1, 2, 3, 5 }) |off| {
+        const lifted = lean_expr_lift_loose_bvars(
+            rc.lean_inc_ret(tree),
+            object.lean_box(@as(usize, 0)).?,
+            object.lean_box(off).?
+        );
+        defer rc.lean_dec(lifted);
+        // After lifting, should still have no bvars
+        try std.testing.expectEqual(@as(u32, 0), looseBVarRange(lifted));
+        // Should be structurally equal
+        try std.testing.expect(lean_expr_equal(lifted, tree) != 0);
+    }
+}
+
+test "lift on expression with fvar (simulating inferType call)" {
+    // Simulate what inferType does: liftLooseBVars(arg, 0, offset)
+    // where arg is a substitution value and offset is the binder depth
+    
+    // Create an fvar expression (like a free variable in a substitution)
+    const fvar = lean_expr_mk_fvar(object.lean_box(@as(usize, 0)).?);
+    defer rc.lean_dec(fvar);
+    
+    // Create an app with the fvar: app(fvar, const)
+    const leaf = testSortExpr(0);
+    const app = lean_expr_mk_app(rc.lean_inc_ret(fvar), rc.lean_inc_ret(leaf));
+    defer rc.lean_dec(app);
+    
+    // Lift with offset=3 (simulating binder depth)
+    const lifted = lean_expr_lift_loose_bvars(
+        rc.lean_inc_ret(app),
+        object.lean_box(@as(usize, 0)).?,
+        object.lean_box(@as(usize, 3)).?
+    );
+    defer rc.lean_dec(lifted);
+    
+    // Verify no new bvars created
+    try std.testing.expectEqual(@as(u32, 0), looseBVarRange(lifted));
+}
+
+test "lift on bvar with nonzero offset" {
+    // lift(bvar(1), s=0, d=2) -> bvar(3)
+    const bv = testBVarExpr(1);
+    const lifted = lean_expr_lift_loose_bvars(
+        bv,
+        object.lean_box(@as(usize, 0)).?,
+        object.lean_box(@as(usize, 2)).?
+    );
+    defer rc.lean_dec(lifted);
+    const expected = testBVarExpr(3);
+    defer rc.lean_dec(expected);
+    try std.testing.expect(lean_expr_equal(lifted, expected) != 0);
+}
