@@ -428,16 +428,95 @@ inline fn retain(e: *anyopaque) *anyopaque {
     return e;
 }
 
-// ── Expression constructor externs (Lean-exported) ───────────────────────────
+// ── Expression constructors ─────────────────────────────────────────────────
+//
+// Expr tags (matching Lean.Expr inductive definition order):
+//   0 bvar    1 fvar    2 mvar    3 sort    4 const    5 app
+//   6 lam     7 forallE 8 letE    9 mdata  10 proj   11 lit
+//
+// Field layouts match the constructor parameter order. Scalar fields
+// (BinderInfo u8, Bool u8) follow object fields in the ctor layout.
 
-extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
-extern fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque;
+pub fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(0, 1, 0);
+    ctor.lean_ctor_set(o, 0, idx);
+    return o;
+}
+
+pub fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(o, 0, n);
+    return o;
+}
+
+pub fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(3, 1, 0);
+    ctor.lean_ctor_set(o, 0, l);
+    return o;
+}
+
+pub fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(4, 2, 0);
+    ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set(o, 1, ls);
+    return o;
+}
+
+pub fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(5, 2, 0);
+    ctor.lean_ctor_set(o, 0, f);
+    ctor.lean_ctor_set(o, 1, a);
+    return o;
+}
+
+pub fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(6, 3, 1);
+    ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set(o, 1, d);
+    ctor.lean_ctor_set(o, 2, b);
+    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize), bi);
+    return o;
+}
+
+pub fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(7, 3, 1);
+    ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set(o, 1, d);
+    ctor.lean_ctor_set(o, 2, b);
+    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize), bi);
+    return o;
+}
+
+pub fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(8, 4, 1);
+    ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set(o, 1, t);
+    ctor.lean_ctor_set(o, 2, v);
+    ctor.lean_ctor_set(o, 3, b);
+    ctor.lean_ctor_set_uint8(o, 4 * @sizeOf(usize), nd);
+    return o;
+}
+
+pub fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(9, 2, 0);
+    ctor.lean_ctor_set(o, 0, m);
+    ctor.lean_ctor_set(o, 1, e);
+    return o;
+}
+
+pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(10, 3, 0);
+    ctor.lean_ctor_set(o, 0, s);
+    ctor.lean_ctor_set(o, 1, i);
+    ctor.lean_ctor_set(o, 2, e);
+    return o;
+}
+
+pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(11, 1, 0);
+    ctor.lean_ctor_set(o, 0, l);
+    return o;
+}
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_cpp_environment_add_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;

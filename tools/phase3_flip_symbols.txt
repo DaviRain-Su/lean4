@@ -1087,3 +1087,15 @@ lean_elab_add_decl
 lean_mk_cases_on
 lean_instantiate_expr_mvars
 lean_add_decl
+# Wave 3a: expression constructors — pure Zig implementations in kernel.zig
+lean_expr_mk_bvar
+lean_expr_mk_fvar
+lean_expr_mk_sort
+lean_expr_mk_const
+lean_expr_mk_app
+lean_expr_mk_lambda
+lean_expr_mk_forall
+lean_expr_mk_let
+lean_expr_mk_mdata
+lean_expr_mk_proj
+lean_expr_mk_lit
