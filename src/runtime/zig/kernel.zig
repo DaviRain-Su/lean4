@@ -453,83 +453,94 @@ inline fn retain(e: *anyopaque) *anyopaque {
 // (BinderInfo u8, Bool u8) follow object fields in the ctor layout.
 
 pub fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(0, 1, 0);
+    const o = alloc.lean_alloc_ctor(0, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, idx);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 
 pub fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(1, 1, 0);
+    const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 
 pub fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(3, 1, 0);
+    const o = alloc.lean_alloc_ctor(3, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 
 pub fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(4, 2, 0);
+    const o = alloc.lean_alloc_ctor(4, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, ls);
+    ctor.lean_ctor_set_usize(o, 2, 0);
     return o;
 }
 
 pub fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(5, 2, 0);
+    const o = alloc.lean_alloc_ctor(5, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, f);
     ctor.lean_ctor_set(o, 1, a);
+    ctor.lean_ctor_set_usize(o, 2, 0);
     return o;
 }
 
 pub fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(6, 3, 1);
+    const o = alloc.lean_alloc_ctor(6, 3, @sizeOf(usize) + 1);
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, d);
     ctor.lean_ctor_set(o, 2, b);
-    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize), bi);
+    ctor.lean_ctor_set_usize(o, 3, 0);
+    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
 }
 
 pub fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(7, 3, 1);
+    const o = alloc.lean_alloc_ctor(7, 3, @sizeOf(usize) + 1);
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, d);
     ctor.lean_ctor_set(o, 2, b);
-    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize), bi);
+    ctor.lean_ctor_set_usize(o, 3, 0);
+    ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
 }
 
 pub fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaque, nd: u8) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(8, 4, 1);
+    const o = alloc.lean_alloc_ctor(8, 4, @sizeOf(usize) + 1);
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, t);
     ctor.lean_ctor_set(o, 2, v);
     ctor.lean_ctor_set(o, 3, b);
-    ctor.lean_ctor_set_uint8(o, 4 * @sizeOf(usize), nd);
+    ctor.lean_ctor_set_usize(o, 4, 0);
+    ctor.lean_ctor_set_uint8(o, 4 * @sizeOf(usize) + @sizeOf(usize), nd);
     return o;
 }
 
 pub fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(10, 2, 0);
+    const o = alloc.lean_alloc_ctor(10, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, m);
     ctor.lean_ctor_set(o, 1, e);
+    ctor.lean_ctor_set_usize(o, 2, 0);
     return o;
 }
 
 pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(11, 3, 0);
+    const o = alloc.lean_alloc_ctor(11, 3, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, s);
     ctor.lean_ctor_set(o, 1, i);
     ctor.lean_ctor_set(o, 2, e);
+    ctor.lean_ctor_set_usize(o, 3, 0);
     return o;
 }
 
 pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(9, 1, 0);
+    const o = alloc.lean_alloc_ctor(9, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 
@@ -538,32 +549,38 @@ pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
 //   0 zero    1 succ    2 max    3 imax    4 param    5 mvar
 
 pub fn lean_level_mk_zero(_: *anyopaque) callconv(.c) *anyopaque {
-    return alloc.lean_alloc_ctor(0, 0, 0);
+    const o = alloc.lean_alloc_ctor(0, 0, @sizeOf(usize));
+    ctor.lean_ctor_set_usize(o, 0, 0);
+    return o;
 }
 
 pub fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(1, 1, 0);
+    const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 
 pub fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(2, 2, 0);
+    const o = alloc.lean_alloc_ctor(2, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
+    ctor.lean_ctor_set_usize(o, 2, 0);
     return o;
 }
 
 pub fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(3, 2, 0);
+    const o = alloc.lean_alloc_ctor(3, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
+    ctor.lean_ctor_set_usize(o, 2, 0);
     return o;
 }
 
 pub fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(4, 1, 0);
+    const o = alloc.lean_alloc_ctor(4, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
+    ctor.lean_ctor_set_usize(o, 1, 0);
     return o;
 }
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
