@@ -61,10 +61,22 @@ def module_to_zig_file(module: str) -> str:
     return module + ".zig"
 
 
-def host_lean_env() -> dict[str, str]:
+def host_lean_env(lean: pathlib.Path | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("LEAN_MAIN_USE_THREAD", "0")
     env.setdefault("LEAN_NUM_THREADS", "0")
+    # Ensure `lean` can find prebuilt `.olean` files from the current stage.
+    # Without this, re-elaborating stdlib source files fails with
+    # `incorrect number of universe levels` because the elaborator cannot
+    # resolve constructor level params from already-built modules.
+    # Mirrors lean.mk.in:53-54 which prepends $(dir $(LEAN))../lib/lean
+    # to LEAN_PATH.  A leading separator means "also search the builtin
+    # default paths".
+    if lean is not None:
+        lib_lean = lean.resolve().parent.parent / "lib" / "lean"
+        if lib_lean.is_dir():
+            existing = env.get("LEAN_PATH", "")
+            env["LEAN_PATH"] = f":{lib_lean}" + (f":{existing}" if existing else "")
     return env
 
 
@@ -121,7 +133,7 @@ def is_signal_abort(exc: subprocess.CalledProcessError) -> bool:
 
 def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    run([str(lean), "-z", str(out), str(src)], cwd=cwd, env=host_lean_env())
+    run([str(lean), "-z", str(out), str(src)], cwd=cwd, env=host_lean_env(lean))
 
 
 def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path) -> None:
@@ -811,7 +823,7 @@ def lean_fingerprint(lean: pathlib.Path) -> dict:
         capture_output=True,
         text=True,
         check=False,
-        env=host_lean_env(),
+        env=host_lean_env(lean),
     )
     resolved = lean.resolve()
     return {
@@ -1011,7 +1023,7 @@ def append_reachable_modules(
             cwd=src_root,
             capture_output=True,
             text=True,
-            env=host_lean_env(),
+            env=host_lean_env(lean),
         )
         for line in out.stdout.strip().splitlines():
             dep_path = pathlib.Path(line).resolve()
