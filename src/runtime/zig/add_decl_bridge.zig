@@ -869,6 +869,13 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         }
     }
 
+    // Build recursor names for all types (needed for cross-type IH in mutual).
+    var all_rec_names: [128]*anyopaque = undefined;
+    for (0..num_types) |ri| {
+        lean_inc(type_names[ri]);
+        all_rec_names[ri] = lean_name_mk_string(type_names[ri], lean_mk_string("rec"));
+    }
+
     for (0..num_types) |ti| {
         const tname = type_names[ti];
         const texpr = type_exprs[ti];
@@ -1002,6 +1009,7 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
                     all_names[0..num_types], // for isRec field detection
                     rec_name, rec_lparams,    // for IH construction
                     param_fvars[0..@intCast(nparams)],
+                    all_rec_names[0..num_types],
                 );
 
                 lean_inc(cname); // mkRecursorRule consumes ctor
@@ -1707,8 +1715,10 @@ fn buildRecursorRuleRHS(
     rec_name: *anyopaque,
     rec_lparams: *anyopaque,
     param_fvars: []const *anyopaque,
+    all_rec_names: []const *anyopaque,
 ) *anyopaque {
     _ = cname;
+    _ = rec_name; // Not used directly; all_rec_names[field_type_idx] is used instead
 
     // Instantiate the constructor type's param binders with our param_fvars.
     // This replaces the ctor type's param bvars with our fvars so field
@@ -1756,9 +1766,14 @@ fn buildRecursorRuleRHS(
         var ii: u64 = 0;
         while (ii < num_rec_fields) : (ii += 1) {
             const rec_fi = rec_field_indices[ii];
-            lean_inc(rec_name);
+            // Find the correct recursor name for this recursive field's type.
+            // For single type, this is rec_name. For mutual, use all_rec_names[field_type_idx].
+            const field_domain = piDomain(inst_ctype, rec_fi);
+            const field_type_idx = findTypeIdx(field_domain, ind_names) orelse 0;
+            const field_rec_name = all_rec_names[field_type_idx];
+            lean_inc(field_rec_name);
             lean_inc(rec_lparams);
-            var rec_app: *anyopaque = constOf(rec_name, lparamsToLevels(rec_lparams));
+            var rec_app: *anyopaque = constOf(field_rec_name, lparamsToLevels(rec_lparams));
 
             // Apply params (reversed: param_1 highest, param_n lowest)
             var pi2: u64 = 0;
