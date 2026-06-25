@@ -53,6 +53,7 @@ extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_local_ctx_mk_pi(lctx: *anyopaque, fvars: *anyopaque, e: *anyopaque, remove_dead_let: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
 
 // ── instantiate_lparams bridge ──────────────────────────────────────────────
@@ -702,6 +703,93 @@ const TypeChecker = struct {
         return result;
     }
 
+    // ── infer_let ──────────────────────────────────────────────────────────────
+    fn inferLet(self: *TypeChecker, e0: *anyopaque, infer_only: bool) *anyopaque {
+        // Port of C++ type_checker::infer_let (type_checker.cpp:198-227).
+        const saved_lctx = self.lctx;
+        defer self.lctx = saved_lctx;
+
+        var fvars_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+        defer {
+            for (fvars_buf.items) |fv| rc.lean_dec(fv);
+            fvars_buf.deinit(self.allocator);
+        }
+
+        var e = e0;
+        while (ea.isLet(e)) {
+            // Instantiate type and value with existing fvars
+            const lt = if (fvars_buf.items.len > 0)
+                blk: {
+                    const subst = array.mkArrayFromSlice(fvars_buf.items);
+                    const r = lean_expr_instantiate_rev(ea.letType(e), subst);
+                    rc.lean_dec(subst);
+                    break :blk r;
+                }
+            else
+                rc.lean_inc_ret(ea.letType(e));
+
+            const lv = if (fvars_buf.items.len > 0)
+                blk: {
+                    const subst = array.mkArrayFromSlice(fvars_buf.items);
+                    const r = lean_expr_instantiate_rev(ea.letValue(e), subst);
+                    rc.lean_dec(subst);
+                    break :blk r;
+                }
+            else
+                rc.lean_inc_ret(ea.letValue(e));
+
+            const let_name = ea.letName(e);
+            const fvar_name = util_name.mkInternalUniqueName();
+            self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), rc.lean_inc_ret(let_name), lt, 0);
+            rc.lean_dec(lt);
+
+            const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
+            fvars_buf.append(self.allocator, fvar) catch @panic("inferLet: OOM");
+
+            if (!infer_only) {
+                const type_type = self.inferTypeCore(lt, infer_only);
+                _ = self.ensureSortCore(type_type);
+                rc.lean_dec(type_type);
+                const val_type = self.inferTypeCore(lv, infer_only);
+                const ok = self.isDefEq(val_type, lt);
+                rc.lean_dec(val_type);
+                if (!ok) {
+                    rc.lean_dec(lv);
+                    @panic("let-declaration type mismatch");
+                }
+            }
+            rc.lean_dec(lv);
+            e = ea.letBody(e);
+        }
+
+        // Instantiate body with fvars, infer type, then wrap in Pi
+        const body = if (fvars_buf.items.len > 0)
+            blk: {
+                const subst = array.mkArrayFromSlice(fvars_buf.items);
+                const r = lean_expr_instantiate_rev(e, subst);
+                rc.lean_dec(subst);
+                break :blk r;
+            }
+        else
+            rc.lean_inc_ret(e);
+
+        var r = self.inferTypeCore(body, infer_only);
+        rc.lean_dec(body);
+
+        // cheap_beta_reduce to reduce dependencies
+        r = kernel.lean_kernel_cheap_beta_reduce(r);
+
+        // Wrap in Pi using local_ctx::mk_pi
+        if (fvars_buf.items.len > 0) {
+            const fvars_arr = array.mkArrayFromSlice(fvars_buf.items);
+            const wrapped = lean_local_ctx_mk_pi(saved_lctx, fvars_arr, r, 1);
+            rc.lean_dec(fvars_arr);
+            rc.lean_dec(r);
+            r = wrapped;
+        }
+        return r;
+    }
+
     // ── infer_type_core ──────────────────────────────────────────────────────
 
     fn inferTypeCore(self: *TypeChecker, e: *anyopaque, infer_only: bool) *anyopaque {
@@ -728,10 +816,7 @@ const TypeChecker = struct {
             .Lambda => self.inferLambda(e),
             .Pi => self.inferPi(e),
             .App => self.inferApp(e),
-            .Let => blk: {
-                // Simplified: infer let body type
-                break :blk self.inferTypeCore(ea.letBody(e), infer_only);
-            },
+            .Let => self.inferLet(e, infer_only),
         };
         rc.lean_inc(r);
         cache.put(e, r) catch {};

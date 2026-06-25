@@ -22,22 +22,50 @@ extern fn lean_dec(o: *anyopaque) callconv(.c) void;
 // lean_box — declared extern to box a small integer.
 extern fn lean_box(n: u64) callconv(.c) *anyopaque;
 
+// Constructor allocation — used to build the `Except Kernel.Exception T`
+// object the Lean caller (`Kernel.isDefEq`/`Kernel.whnf`/`Kernel.check`) is
+// declared to return. The wrapper MUST hand back an `Except` ctor, not a
+// bare boxed scalar, or callers that pattern-match `if let .ok r := ...`
+// will dereference a scalar as a ctor and segfault (caught by
+// elab/isDefEqProjIssue.lean regression slice). ctor tag 1 == `Except.ok`
+// with a single object field holding the result; tag 0 == `Except.error`
+// holding a `Kernel.Exception` ctor.
+// `lean_alloc_ctor`/`lean_ctor_set` externs are declared in the
+// helperless-fallback section below and reused here.
+
+// Build `Except.ok a` (ctor tag 1, 1 object field). Steals (consumes) the
+// retained reference `a` into the ctor slot.
+fn mkExceptOk(a: *anyopaque) *anyopaque {
+    const r = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(r, 0, a);
+    return r;
+}
+
 pub export fn lean_kernel_whnf(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
     const kenv = lean_elab_environment_to_kernel_env(obj_env);
     defer lean_dec(kenv);
-    return lean_kernel_whnf_impl(kenv, lctx, a);
+    // `whnf` returns `Except Kernel.Exception Expr`; on success wrap the
+    // resulting expr in `Except.ok`. The `_impl` panics on failure today,
+    // so there is no live error value to wrap into `Except.error` here —
+    // proper typed-error fidelity is the Phase B `catchKernelExceptions`
+    // task.
+    return mkExceptOk(lean_kernel_whnf_impl(kenv, lctx, a));
 }
 
 pub export fn lean_kernel_is_def_eq(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
     const kenv = lean_elab_environment_to_kernel_env(obj_env);
     defer lean_dec(kenv);
-    return lean_box(@as(u64, lean_kernel_is_def_eq_impl(kenv, lctx, a, b)));
+    // `isDefEq` returns `Except Kernel.Exception Bool`; box the Bool and
+    // wrap it in `Except.ok`. (See note in `lean_kernel_whnf` re: errors.)
+    return mkExceptOk(lean_box(@as(u64, lean_kernel_is_def_eq_impl(kenv, lctx, a, b))));
 }
 
 pub export fn lean_kernel_check(obj_env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
     const kenv = lean_elab_environment_to_kernel_env(obj_env);
     defer lean_dec(kenv);
-    return lean_kernel_check_impl(kenv, lctx, a);
+    // `check` returns `Except Kernel.Exception Unit`; the Unit result is
+    // `lean_box(0)` (the unit value), wrapped in `Except.ok`.
+    return mkExceptOk(lean_kernel_check_impl(kenv, lctx, a));
 }
 
 // ── Lean @[export] fallbacks for helperless build ───────────────────────────

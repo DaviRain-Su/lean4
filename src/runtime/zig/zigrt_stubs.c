@@ -40,6 +40,21 @@ lean_object lean_cpp_environment_add_without_checking(lean_object env, lean_obje
     return (lean_object)0;
 }
 
+lean_object lean_cpp_environment_add_with_checking(lean_object env, lean_object decl) {
+    (void)env; (void)decl;
+    return (lean_object)0;
+}
+
+lean_object lean_local_ctx_mk_local_decl(lean_object lctx, lean_object name, lean_object user_name, lean_object type, uint8_t bi) {
+    (void)lctx; (void)name; (void)user_name; (void)type; (void)bi;
+    return (lean_object)0;
+}
+
+lean_object lean_local_ctx_mk_pi(lean_object lctx, lean_object fvars, lean_object e, uint8_t remove_dead_let) {
+    (void)lctx; (void)fvars; (void)e; (void)remove_dead_let;
+    return (lean_object)0;
+}
+
 lean_object lean_elab_add_decl(lean_object env, size_t mh, lean_object decl, lean_object ax, lean_object tl, lean_object opts) {
     (void)env; (void)mh; (void)decl; (void)ax; (void)tl; (void)opts;
     return (lean_object)0;

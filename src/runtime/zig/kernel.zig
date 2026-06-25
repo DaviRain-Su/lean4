@@ -647,7 +647,7 @@ fn mkAppTrailingArgs(f: *anyopaque, rev_args: []const *anyopaque, skip: usize) *
     return r;
 }
 
-fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque {
+pub fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque {
     if (eTag(e) != 5) return retain(e);
 
     var fn_expr = e;

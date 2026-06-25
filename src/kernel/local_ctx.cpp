@@ -8,6 +8,7 @@ Author: Leonardo de Moura
 #include "runtime/sstream.h"
 #include "kernel/local_ctx.h"
 #include "kernel/abstract.h"
+#include "kernel/kernel_exception.h"
 
 namespace lean {
 static expr *       g_dummy_type;
@@ -122,6 +123,18 @@ expr local_ctx::mk_lambda(unsigned num, expr const * fvars, expr const & e, bool
 
 expr local_ctx::mk_pi(unsigned num, expr const * fvars, expr const & e, bool remove_dead_let) const {
     return mk_binding<false>(num, fvars, e, remove_dead_let);
+}
+
+/* C++ helper for Zig type checker: wrap expression in Pi binders using
+   the local context's fvar-to-bvar abstraction. */
+extern "C" LEAN_EXPORT object * lean_local_ctx_mk_pi(object * lctx, object * fvars, object * e, uint8 remove_dead_let) {
+    return catch_kernel_exceptions<expr>([&]() {
+        unsigned num = lean_array_size(fvars);
+        buffer<expr> fvar_buf;
+        fvar_buf.resize(num);
+        for (unsigned i = 0; i < num; i++) fvar_buf[i] = expr(lean_array_uget(fvars, i), true);
+        return local_ctx(lctx).mk_pi(num, fvar_buf.data(), expr(e, true), remove_dead_let != 0);
+    });
 }
 
 void initialize_local_ctx() {

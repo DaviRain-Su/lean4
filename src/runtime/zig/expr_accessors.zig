@@ -149,6 +149,9 @@ pub inline fn bindingInfo(e: *anyopaque) u8 {
 
 // Let: field 0 = name, field 1 = type, field 2 = value, field 3 = body,
 // field 4 = nondep.
+pub inline fn letName(e: *anyopaque) *anyopaque {
+    return ctor.lean_ctor_get(e, 0) orelse @panic("let_name on malformed expr");
+}
 pub inline fn letType(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(e, 1) orelse @panic("let_type on malformed expr");
 }
