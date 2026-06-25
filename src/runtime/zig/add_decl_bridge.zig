@@ -646,10 +646,10 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
     }
 
     // Check if we can handle this inductive in pure Zig:
-    // - No mutual (single type)
-    // Indices and params are now supported.
-    // If mutual, fall back to C++ (TODO).
-    const can_handle = num_types == 1;
+    // All cases are now supported (params, indices, mutual).
+    // No more C++ fallback for inductives.
+    // (Previously blocked mutual — now handled in pure Zig.)
+    const can_handle = true;
     if (!can_handle) {
         const except = lean_cpp_environment_add_without_checking(env, decl);
         if (lean_ptr_tag(except) == 1) {
@@ -772,6 +772,103 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
     const elim_level = levelParam("u");
     const sort_u = sortOf(elim_level);
 
+    // Create all motive fvars (one per type).
+    // For single type: "motive_placeholder"
+    // For mutual: "motive1", "motive2", etc.
+    const motive_names: [16][*:0]const u8 = .{
+        "motive1", "motive2", "motive3", "motive4",
+        "motive5", "motive6", "motive7", "motive8",
+        "motive9", "motiveA", "motiveB", "motiveC",
+        "motiveD", "motiveE", "motiveF", "motiveG",
+    };
+    var all_motive_fvars: [128]*anyopaque = undefined;
+    for (0..num_types) |ti| {
+        if (num_types == 1) {
+            all_motive_fvars[ti] = lean_expr_mk_fvar(mkName("motive_placeholder"));
+        } else {
+            all_motive_fvars[ti] = lean_expr_mk_fvar(mkName(motive_names[ti]));
+        }
+    }
+
+    // Collect all constructor names and types across all types (in order).
+    // all_ctor_names[0..total_ctors] and all_ctor_types[0..total_ctors]
+    // Also track which type each constructor belongs to (ctor_type_idx).
+    var all_ctor_names: [128]*anyopaque = undefined;
+    var all_ctor_types: [128]*anyopaque = undefined;
+    var all_ctor_type_idx: [128]u64 = undefined; // which inductive type each ctor belongs to
+    var all_ctor_count: usize = 0;
+    {
+        for (0..num_types) |ti| {
+            var curr = type_ctor_lists[ti];
+            while (!lean_is_scalar(curr)) {
+                const cnstr = lean_ctor_get(curr, 0) orelse @panic("constructor missing");
+                all_ctor_names[all_ctor_count] = lean_ctor_get(cnstr, 0) orelse @panic("constructor missing name");
+                all_ctor_types[all_ctor_count] = lean_ctor_get(cnstr, 1) orelse @panic("constructor missing type");
+                all_ctor_type_idx[all_ctor_count] = @intCast(ti);
+                all_ctor_count += 1;
+                if (all_ctor_count >= 128) @panic("too many constructors");
+                curr = lean_ctor_get(curr, 1) orelse @panic("ctor list missing tail");
+            }
+        }
+    }
+
+    // Build motive types for all types (needed for mutual inductives).
+    // Each motive type is: Pi(indices_i, I_i(params, indices_i) → Sort u)
+    // using param_fvars for params and bvars for indices.
+    var all_motive_types: [128]*anyopaque = undefined;
+    {
+        const param_names: [8][*:0]const u8 = .{ "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7" };
+        var param_fvars_mt: [128]*anyopaque = undefined;
+        for (0..@min(nparams, 8)) |pi| {
+            param_fvars_mt[pi] = lean_expr_mk_fvar(mkName(param_names[pi]));
+        }
+
+        for (0..num_types) |mti| {
+            const mt_tname = type_names[mti];
+            const mt_texpr = type_exprs[mti];
+            const mt_num_indices: u64 = blk: {
+                const tb = countPiBinders(mt_texpr);
+                break :blk if (tb > nparams) tb - nparams else 0;
+            };
+            lean_inc(mt_tname);
+            var i_app = constOf(mt_tname, lparamsToLevels(lparams));
+            var pi: u64 = 0;
+            while (pi < nparams) : (pi += 1) {
+                lean_inc(param_fvars_mt[pi]);
+                i_app = lean_expr_mk_app(i_app, param_fvars_mt[pi]);
+            }
+            var ii: u64 = 0;
+            while (ii < mt_num_indices) : (ii += 1) {
+                i_app = lean_expr_mk_app(i_app, bvar(mt_num_indices - 1 - ii));
+            }
+            var mt = mkArrow(i_app, sort_u);
+            ii = mt_num_indices;
+            while (ii > 0) : (ii -= 1) {
+                lean_inc(mt_texpr);
+                const inst_type = instantiateParams(mt_texpr, nparams, param_fvars_mt[0..@intCast(nparams)]);
+                const inst_idx_domain = piDomain(inst_type, ii - 1);
+                lean_inc(inst_idx_domain);
+                lean_dec(inst_type);
+                mt = lean_expr_mk_forall(mkName("_"), inst_idx_domain, mt, 0);
+            }
+            if (nparams > 0) {
+                var mt_list = listNil();
+                var pi2: u64 = nparams;
+                while (pi2 > 0) : (pi2 -= 1) {
+                    lean_inc(param_fvars_mt[pi2 - 1]);
+                    mt_list = lean_list_cons(param_fvars_mt[pi2 - 1], mt_list);
+                }
+                const mt_arr = lean_array_mk(mt_list);
+                mt = lean_expr_abstract(mt, mt_arr);
+                lean_dec(mt_arr);
+            }
+            all_motive_types[mti] = mt;
+        }
+        for (0..@min(nparams, 8)) |pi| {
+            lean_dec(param_fvars_mt[pi]);
+        }
+    }
+
     for (0..num_types) |ti| {
         const tname = type_names[ti];
         const texpr = type_exprs[ti];
@@ -871,9 +968,6 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
             break :blk mt;
         };
 
-        // Under 1 binder (motive), motive_ref = bvar(0)
-        const motive_ref = bvar(0);
-
         // Build minor types: for each constructor c with type Pi(fields, I params),
         // minor type = Pi(fields, motive (c params fields))
         // Under 1 binder (motive), we need to account for the motive when building minors
@@ -931,15 +1025,18 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         //   major : I
         //   body = motive major
         const rec_type = buildRecursorType(
-            ind_const, motive_type, motive_ref,
+            ind_const, motive_type,
             type_ctor_lists[0..num_types],
             texpr,
             nparams,
             num_indices,
-            num_types, lparams,
+            num_types, @intCast(ti),
+            lparams,
             all_names[0..num_types], rec_name, rec_lparams,
             param_fvars[0..@intCast(nparams)],
             index_fvars[0..@intCast(num_indices)],
+            all_motive_fvars[0..num_types],
+            all_motive_types[0..num_types],
         );
 
         const k_target: u8 = 0;
@@ -1029,6 +1126,22 @@ fn exprHeadIsConst(e: *anyopaque, names: []const *anyopaque) bool {
     return false;
 }
 
+/// Find the index of the inductive type that a field domain's head constant matches.
+/// Returns the index in `names`, or null if not found.
+fn findTypeIdx(e: *anyopaque, names: []const *anyopaque) ?usize {
+    if (lean_is_scalar(e)) return null;
+    var curr = e;
+    while (lean_ptr_tag(curr) == ExprTag.app) {
+        curr = appFn(curr);
+    }
+    if (lean_ptr_tag(curr) != ExprTag.const_) return null;
+    const cn = constName(curr);
+    for (names, 0..) |n, i| {
+        if (lean_name_eq(cn, n) != 0) return i;
+    }
+    return null;
+}
+
 /// Extract the constructor return type (the body after stripping all Pi binders).
 /// For `Pi(p1, ..., Pi(pn, Pi(f1, ..., Pi(fn, I(params, indices))))`,
 /// returns `I(params, indices)`.
@@ -1050,20 +1163,21 @@ fn getCtorReturnType(ctype: *anyopaque, nbinders: u64) *anyopaque {
 fn buildRecursorType(
     ind_const: *anyopaque,
     motive_type: *anyopaque,
-    _motive_ref: *anyopaque,
     type_ctor_lists: []const *anyopaque,
     type_expr: *anyopaque,
     nparams: u64,
     num_indices: u64,
     num_types: usize,
+    type_idx: usize,
     _lparams: *anyopaque,
     ind_names: []const *anyopaque,
     _rec_name: *anyopaque,
     _rec_lparams: *anyopaque,
     param_fvars: []const *anyopaque,
     index_fvars: []const *anyopaque,
+    all_motive_fvars: []const *anyopaque,
+    all_motive_types: []const *anyopaque,
 ) *anyopaque {
-    _ = _motive_ref;
     _ = _lparams;
     _ = _rec_name;
     _ = _rec_lparams;
@@ -1118,8 +1232,8 @@ fn buildRecursorType(
         }
     }
 
-    // Create a unique fvar for the motive
-    const motive_fvar = lean_expr_mk_fvar(mkName("motive_placeholder"));
+    // Use the current type's motive fvar from all_motive_fvars.
+    const motive_fvar = all_motive_fvars[type_idx];
     // inc for rec_body usage
     lean_inc(motive_fvar);
 
@@ -1358,8 +1472,13 @@ fn buildRecursorType(
             // In the minor body scope, fields are at bvar(num_rec_fields) to bvar(num_rec_fields + num_fields - 1).
             // So ctor bvar(v) (v < num_fields) → bvar(num_rec_fields + v) in minor body scope.
             // Params are already instantiated as fvars, so they appear as fvars (not bvars).
-            lean_inc(motive_fvar);
-            minor_body = motive_fvar;
+            // Use the motive for the type that the constructor belongs to.
+            // For single type, this is the same as motive_fvar.
+            // For mutual, find which type the constructor's return type belongs to.
+            const ctor_type_idx = findTypeIdx(ret_type, ind_names) orelse type_idx;
+            const ctor_motive_fvar = all_motive_fvars[ctor_type_idx];
+            lean_inc(ctor_motive_fvar);
+            minor_body = ctor_motive_fvar;
             {
                 var ii: u64 = 0;
                 while (ii < num_indices) : (ii += 1) {
@@ -1382,8 +1501,13 @@ fn buildRecursorType(
             // Apply c_app
             minor_body = lean_expr_mk_app(minor_body, c_app);
         } else {
-            lean_inc(motive_fvar);
-            minor_body = lean_expr_mk_app(motive_fvar, c_app);
+            // Non-indexed: find the constructor's return type to determine the motive
+            const ctor_total_pi2 = countPiBinders(ctype);
+            const ret_type2 = getCtorReturnType(inst_ctype, ctor_total_pi2 - nparams);
+            const ctor_type_idx2 = findTypeIdx(ret_type2, ind_names) orelse type_idx;
+            const ctor_motive_fvar2 = all_motive_fvars[ctor_type_idx2];
+            lean_inc(ctor_motive_fvar2);
+            minor_body = lean_expr_mk_app(ctor_motive_fvar2, c_app);
         }
 
         // Wrap with IH binders (from last to first)
@@ -1393,17 +1517,18 @@ fn buildRecursorType(
         var ih_binder_count: u64 = 0;
         while (ih_binder_count < num_rec_fields) : (ih_binder_count += 1) {
             const rec_fi = rec_field_indices[num_rec_fields - 1 - ih_binder_count];
-            // IH domain: motive(indices, field_i) for indexed inductives
-            //            motive(field_i) for non-indexed inductives
-            // The indices come from the recursive field's domain: I(params, indices)
-            // In the IH domain scope (below all IH binders, above all field binders):
-            //   field_i = bvar(num_fields - 1 - rec_fi)
-            //   params are fvars (will be abstracted later)
-            lean_inc(motive_fvar);
-            var ih_type: *anyopaque = motive_fvar;
+            // IH domain: motive_j(indices_j, field_i) where motive_j is the motive
+            // for the type that the recursive field belongs to.
+            // For single type, motive_j = motive_fvar (current type's motive).
+            // For mutual, need to find which type the recursive field belongs to.
+            const field_domain = piDomain(inst_ctype, rec_fi);
+            const field_type_idx = findTypeIdx(field_domain, ind_names) orelse type_idx;
+            const ih_motive_fvar = all_motive_fvars[field_type_idx];
+            lean_inc(ih_motive_fvar);
+            var ih_type: *anyopaque = ih_motive_fvar;
             if (num_indices > 0) {
                 // Extract index args from the recursive field's domain
-                const field_domain = piDomain(inst_ctype, rec_fi);
+                // field_domain was already obtained above for findTypeIdx
                 // field_domain = App...(Const(I, levels), param_1, ..., param_n, index_1, ..., index_m)
                 var idx_args: [128]*anyopaque = undefined;
                 var idx_arg_count: usize = 0;
@@ -1498,17 +1623,28 @@ fn buildRecursorType(
         lean_dec(mt_arr);
     }
 
-    // Wrap with motive forall: abstract motive_fvar to bvar(0) in result, then Pi wrap.
-    // lean_expr_abstract converts fvar to bvar(0) and lifts loose bvars by 1 (array size).
-    // This makes room for the motive binder at bvar(0), which the Pi binds.
+    // Wrap with motive foralls: wrap ALL type motives (not just current).
+    // C++ structure: Pi(params, Pi(motive_0, Pi(motive_1, ..., Pi(minors, ...))))
+    // C++ mk_pi abstracts from last to first: Cs[n-1] → bvar(0), ..., Cs[0] → bvar(n-1)
+    // So motive_0 is at bvar(n-1) (outermost), motive_n-1 is at bvar(0) (innermost).
+    // The current type's motive (type_idx) is at bvar(n-1-type_idx).
+    // We abstract from last type to first type (matching C++ mk_pi order).
     {
-        lean_inc(motive_fvar);
-        const motive_arr = lean_array_mk(list1(motive_fvar));
-        const abstracted = lean_expr_abstract(result, motive_arr);
-        lean_dec(motive_arr);
-        lean_dec(result);
-        result = abstracted;
-        result = lean_expr_mk_forall(mkName("motive"), motive_type_final, result, 1);
+        var mi2: usize = num_types;
+        while (mi2 > 0) : (mi2 -= 1) {
+            const motive_idx = mi2 - 1;
+            lean_inc(all_motive_fvars[motive_idx]);
+            const arr = lean_array_mk(list1(all_motive_fvars[motive_idx]));
+            const abs = lean_expr_abstract(result, arr);
+            lean_dec(arr);
+            lean_dec(result);
+            result = abs;
+            if (motive_idx == type_idx) {
+                result = lean_expr_mk_forall(mkName("motive"), motive_type_final, result, 1);
+            } else {
+                result = lean_expr_mk_forall(mkName("motive"), all_motive_types[motive_idx], result, 1);
+            }
+        }
     }
 
     // Wrap with param foralls (from last to first, so param_0 is outermost)
