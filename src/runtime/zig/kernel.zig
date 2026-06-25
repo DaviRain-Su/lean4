@@ -517,6 +517,40 @@ pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
     ctor.lean_ctor_set(o, 0, l);
     return o;
 }
+
+// ── Level constructors ──────────────────────────────────────────────────────
+// Level tags (matching Lean.Level inductive definition order):
+//   0 zero    1 succ    2 max    3 imax    4 param    5 mvar
+
+pub fn lean_level_mk_zero(_: *anyopaque) callconv(.c) *anyopaque {
+    return alloc.lean_alloc_ctor(0, 0, 0);
+}
+
+pub fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(1, 1, 0);
+    ctor.lean_ctor_set(o, 0, l);
+    return o;
+}
+
+pub fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(2, 2, 0);
+    ctor.lean_ctor_set(o, 0, a);
+    ctor.lean_ctor_set(o, 1, b);
+    return o;
+}
+
+pub fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(3, 2, 0);
+    ctor.lean_ctor_set(o, 0, a);
+    ctor.lean_ctor_set(o, 1, b);
+    return o;
+}
+
+pub fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque {
+    const o = alloc.lean_alloc_ctor(4, 1, 0);
+    ctor.lean_ctor_set(o, 0, n);
+    return o;
+}
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_cpp_environment_add_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;

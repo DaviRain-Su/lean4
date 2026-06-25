@@ -1099,3 +1099,8 @@ lean_expr_mk_let
 lean_expr_mk_mdata
 lean_expr_mk_proj
 lean_expr_mk_lit
+lean_level_mk_zero
+lean_level_mk_succ
+lean_level_mk_max
+lean_level_mk_imax
+lean_level_mk_param
