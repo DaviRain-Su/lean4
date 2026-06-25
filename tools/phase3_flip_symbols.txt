@@ -1104,3 +1104,4 @@ lean_level_mk_succ
 lean_level_mk_max
 lean_level_mk_imax
 lean_level_mk_param
+lean_data_value_beq

@@ -20,9 +20,24 @@ const array = @import("array.zig");
 const interrupt = @import("interrupt.zig");
 const runtime_options = @import("runtime_options");
 
-extern fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+pub fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
+    // DataValue is a u64 bitfield stored as either a scalar immediate (lean_box)
+    // or a heap-allocated object. Scalar comparison via pointer equality covers
+    // the scalar case; for heap objects, compare the first 8 payload bytes.
+    if (a == b) return 1;
+    if (!object.lean_is_scalar(a) and !object.lean_is_scalar(b)) {
+        const ah = @intFromPtr(a);
+        const bh = @intFromPtr(b);
+        const va = @as(*align(8) const u64, @ptrFromInt(ah + @sizeOf(usize))).*;
+        const vb = @as(*align(8) const u64, @ptrFromInt(bh + @sizeOf(usize))).*;
+        return @intFromBool(va == vb);
+    }
+    return 0;
+}
+
 extern fn lean_nat_big_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
 extern fn lean_string_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
+extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
 
 inline fn dataValueEq(a: *anyopaque, b: *anyopaque) bool {
@@ -551,7 +566,6 @@ pub fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque {
     ctor.lean_ctor_set(o, 0, n);
     return o;
 }
-extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_cpp_environment_add_without_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_elab_add_decl(env: *anyopaque, mh: usize, decl: *anyopaque, ax: *anyopaque, tl: *anyopaque, opts: *anyopaque) callconv(.c) *anyopaque;
