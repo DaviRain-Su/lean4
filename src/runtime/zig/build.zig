@@ -312,7 +312,7 @@ pub fn build(b: *std.Build) void {
     });
     zigrt_test_mod.addImport("mpz_zig", mpz_mod);
     zigrt_test_mod.addImport("lean_allocator", allocator_mod);
-    zigrt_test_mod.addImport("runtime_options", zigrt_opts_mod);
+    zigrt_test_mod.addImport("runtime_options", opts_mod);
     if (use_gmp) {
         zigrt_test_mod.linkSystemLibrary("gmp", .{});
     }
