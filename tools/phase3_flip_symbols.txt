@@ -1103,3 +1103,6 @@ lean_expr_mk_forall
 lean_expr_mk_let
 lean_expr_mk_mdata
 lean_expr_mk_proj
+lean_add_decl_bridge
+lean_kernel_instantiate_type_lparams
+lean_kernel_instantiate_value_lparams
