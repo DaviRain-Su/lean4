@@ -618,13 +618,8 @@ fn abstractImpl(e: *anyopaque, n: usize, subst: *anyopaque) *anyopaque {
 fn abstractRec(e: *anyopaque, off: u32, n: usize, subst: *anyopaque) *anyopaque {
     if (!hasFVar(e) and !hasMVar(e)) return retain(e);
     const tag = eTag(e);
-    if (tag == 0) { // bvar — lift loose bvars by n (matching C++ abstract behavior)
-        const idx = object.lean_unbox(ctor.lean_ctor_get(e, 0) orelse return retain(e));
-        if (idx >= off) {
-            // Loose bvar: lift by n to make room for abstracted fvars
-            return lean_expr_mk_bvar(object.lean_box(idx + @as(u64, n)) orelse return retain(e));
-        }
-        return retain(e); // Bound bvar: keep as-is
+    if (tag == 0) { // bvar — keep as-is (C++ abstract does NOT lift loose bvars)
+        return retain(e);
     }
     if (tag == 1 or tag == 2) { // fvar or mvar
         const name = ctor.lean_ctor_get(e, 0) orelse return retain(e);

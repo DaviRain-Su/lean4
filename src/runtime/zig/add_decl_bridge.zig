@@ -812,17 +812,21 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         }
     }
 
+    // Create shared param fvars — used for both all_motive_types and loop motive_type.
+    // Using the same fvar objects ensures lean_expr_abstract (which matches by name)
+    // correctly handles all occurrences when abstracting params in the recursor type.
+    const param_names: [8][*:0]const u8 = .{ "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7" };
+    var param_fvars: [128]*anyopaque = undefined;
+    for (0..@min(nparams, 8)) |pi| {
+        param_fvars[pi] = lean_expr_mk_fvar(mkName(param_names[pi]));
+    }
+
     // Build motive types for all types (needed for mutual inductives).
     // Each motive type is: Pi(indices_i, I_i(params, indices_i) → Sort u)
     // using param_fvars for params and bvars for indices.
     var all_motive_types: [128]*anyopaque = undefined;
+    _ = &all_motive_types; // suppress unused warning if num_types==1
     {
-        const param_names: [8][*:0]const u8 = .{ "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7" };
-        var param_fvars_mt: [128]*anyopaque = undefined;
-        for (0..@min(nparams, 8)) |pi| {
-            param_fvars_mt[pi] = lean_expr_mk_fvar(mkName(param_names[pi]));
-        }
-
         for (0..num_types) |mti| {
             const mt_tname = type_names[mti];
             const mt_texpr = type_exprs[mti];
@@ -834,8 +838,8 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
             var i_app = constOf(mt_tname, lparamsToLevels(lparams));
             var pi: u64 = 0;
             while (pi < nparams) : (pi += 1) {
-                lean_inc(param_fvars_mt[pi]);
-                i_app = lean_expr_mk_app(i_app, param_fvars_mt[pi]);
+                lean_inc(param_fvars[pi]);
+                i_app = lean_expr_mk_app(i_app, param_fvars[pi]);
             }
             var ii: u64 = 0;
             while (ii < mt_num_indices) : (ii += 1) {
@@ -845,27 +849,16 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
             ii = mt_num_indices;
             while (ii > 0) : (ii -= 1) {
                 lean_inc(mt_texpr);
-                const inst_type = instantiateParams(mt_texpr, nparams, param_fvars_mt[0..@intCast(nparams)]);
+                const inst_type = instantiateParams(mt_texpr, nparams, param_fvars[0..@intCast(nparams)]);
                 const inst_idx_domain = piDomain(inst_type, ii - 1);
                 lean_inc(inst_idx_domain);
                 lean_dec(inst_type);
                 mt = lean_expr_mk_forall(mkName("_"), inst_idx_domain, mt, 0);
             }
-            if (nparams > 0) {
-                var mt_list = listNil();
-                var pi2: u64 = nparams;
-                while (pi2 > 0) : (pi2 -= 1) {
-                    lean_inc(param_fvars_mt[pi2 - 1]);
-                    mt_list = lean_list_cons(param_fvars_mt[pi2 - 1], mt_list);
-                }
-                const mt_arr = lean_array_mk(mt_list);
-                mt = lean_expr_abstract(mt, mt_arr);
-                lean_dec(mt_arr);
-            }
+            // Don't abstract params here — they stay as fvars and will be
+            // abstracted by the final param forall wrapping (matching C++ which
+            // abstracts m_params at the very end via mk_pi(m_params, rec_ty)).
             all_motive_types[mti] = mt;
-        }
-        for (0..@min(nparams, 8)) |pi| {
-            lean_dec(param_fvars_mt[pi]);
         }
     }
 
@@ -919,12 +912,7 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         lean_inc(tname);
         const ind_const = constOf(tname, lparamsToLevels(lparams));
 
-        // Create param fvars for parameterized inductives.
-        const param_names: [8][*:0]const u8 = .{ "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7" };
-        var param_fvars: [128]*anyopaque = undefined;
-        for (0..@min(nparams, 8)) |pi| {
-            param_fvars[pi] = lean_expr_mk_fvar(mkName(param_names[pi]));
-        }
+        // param_fvars were already created before the loop (shared with all_motive_types).
 
         // Create index fvars for indexed inductives.
         const index_names: [8][*:0]const u8 = .{ "i0", "i1", "i2", "i3", "i4", "i5", "i6", "i7" };
@@ -1062,6 +1050,11 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
         );
         const rec_ci = mkRecursorInfo(rec_val);
         new_env = lean_environment_add(new_env, rec_ci);
+    }
+
+    // Release shared param fvars (created before the loop, used by all types)
+    for (0..@min(nparams, 8)) |pi| {
+        lean_dec(param_fvars[pi]);
     }
 
     return new_env;
@@ -1613,81 +1606,89 @@ fn buildRecursorType(
     // Structure (C++ matches): Pi(params, Pi(motives, Pi(minors, Pi(indices, Pi(major, body)))))
     // The index Pi binders were already added before the minor loop (between major and minors).
 
-    // First, abstract motive_type (only param_fvars, indices are already bvars).
-    // The abstraction array has params, with param_1 at bvar(0).
+    // Don't abstract params from motive_type_final — keep fvars and let the final
+    // param forall wrapping handle it (matching C++ which abstracts m_params last).
     var motive_type_final = motive_type;
-    if (nparams > 0) {
-        var mt_list = listNil();
+
+    // Wrap with motive foralls: wrap ALL type motives (not just current).
+    // C++ structure: Pi(params, Pi(motive_0, Pi(motive_1, ..., Pi(minors, ...))))
+    // C++ mk_pi abstracts all motives at once: Cs[n-1] → bvar(0), ..., Cs[0] → bvar(n-1)
+    // So motive_0 is at bvar(n-1) (outermost), motive_n-1 is at bvar(0) (innermost).
+    // We abstract ALL motives in a single lean_expr_abstract call (matching C++).
+    {
+        // Build the motive fvar list: [motive_0, motive_1, ..., motive_{n-1}]
+        // C++ abstracts with buffer [Cs[0], Cs[1], ...], where Cs[0] → bvar(n-1), Cs[n-1] → bvar(0).
+        // lean_list_cons prepends, so iterate in reverse to get [motive_0, ..., motive_{n-1}].
+        var motive_list = listNil();
+        {
+            var mi: usize = num_types;
+            while (mi > 0) : (mi -= 1) {
+                lean_inc(all_motive_fvars[mi - 1]);
+                motive_list = lean_list_cons(all_motive_fvars[mi - 1], motive_list);
+            }
+        }
+        const motive_arr = lean_array_mk(motive_list);
+        const abstracted = lean_expr_abstract(result, motive_arr);
+        lean_dec(motive_arr);
+        lean_dec(result);
+        result = abstracted;
+        // Now wrap with Pi foralls: motive_0 is outermost (first Pi), motive_{n-1} is innermost.
+        // The abstracted result has motive_0 at bvar(n-1), motive_{n-1} at bvar(0).
+        // We need to add Pi binders from innermost (motive_{n-1}) to outermost (motive_0).
+        {
+            var mi2: usize = num_types;
+            while (mi2 > 0) : (mi2 -= 1) {
+                const motive_idx = mi2 - 1;
+                if (motive_idx == type_idx) {
+                    result = lean_expr_mk_forall(mkName("motive"), motive_type_final, result, 1);
+                } else {
+                    result = lean_expr_mk_forall(mkName("motive"), all_motive_types[motive_idx], result, 1);
+                }
+            }
+        }
+    }
+    _ = &motive_type_final;
+
+    // Wrap with param foralls: abstract ALL params in a single lean_expr_abstract call
+    // (matching C++ mk_pi(m_params, rec_ty) which abstracts all at once).
+    if (nparams > 0 and all_ctor_count > 0) {
+        const first_ctype = all_ctor_types[0];
+        // Build param fvar list: [p0, p1, ..., p_{n-1}]
+        // C++ abstracts with buffer [m_params[0], m_params[1], ...], where [0] → bvar(n-1), [n-1] → bvar(0).
+        var param_list = listNil();
         {
             var pi: u64 = nparams;
             while (pi > 0) : (pi -= 1) {
                 lean_inc(param_fvars[pi - 1]);
-                mt_list = lean_list_cons(param_fvars[pi - 1], mt_list);
+                param_list = lean_list_cons(param_fvars[pi - 1], param_list);
             }
         }
-        const mt_arr = lean_array_mk(mt_list);
-        motive_type_final = lean_expr_abstract(motive_type, mt_arr);
-        lean_dec(motive_type);
-        lean_dec(mt_arr);
-    }
-
-    // Wrap with motive foralls: wrap ALL type motives (not just current).
-    // C++ structure: Pi(params, Pi(motive_0, Pi(motive_1, ..., Pi(minors, ...))))
-    // C++ mk_pi abstracts from last to first: Cs[n-1] → bvar(0), ..., Cs[0] → bvar(n-1)
-    // So motive_0 is at bvar(n-1) (outermost), motive_n-1 is at bvar(0) (innermost).
-    // The current type's motive (type_idx) is at bvar(n-1-type_idx).
-    // We abstract from last type to first type (matching C++ mk_pi order).
-    {
-        var mi2: usize = num_types;
-        while (mi2 > 0) : (mi2 -= 1) {
-            const motive_idx = mi2 - 1;
-            lean_inc(all_motive_fvars[motive_idx]);
-            const arr = lean_array_mk(list1(all_motive_fvars[motive_idx]));
-            const abs = lean_expr_abstract(result, arr);
-            lean_dec(arr);
-            lean_dec(result);
-            result = abs;
-            if (motive_idx == type_idx) {
-                result = lean_expr_mk_forall(mkName("motive"), motive_type_final, result, 1);
-            } else {
-                result = lean_expr_mk_forall(mkName("motive"), all_motive_types[motive_idx], result, 1);
+        const param_arr = lean_array_mk(param_list);
+        const param_abstracted = lean_expr_abstract(result, param_arr);
+        lean_dec(param_arr);
+        lean_dec(result);
+        result = param_abstracted;
+        // Now wrap with Pi foralls from innermost (param_{n-1}) to outermost (param_0)
+        {
+            var pi: u64 = nparams;
+            while (pi > 0) : (pi -= 1) {
+                const param_domain = piDomain(first_ctype, pi - 1);
+                lean_inc(param_domain);
+                var curr = first_ctype;
+                var j: u64 = 0;
+                while (j < pi - 1) : (j += 1) {
+                    curr = forallBody(curr);
+                }
+                const param_name = forallName(curr);
+                lean_inc(param_name);
+                result = lean_expr_mk_forall(param_name, param_domain, result, 0);
             }
-        }
-    }
-
-    // Wrap with param foralls (from last to first, so param_0 is outermost)
-    // For each param, abstract param_fvars[i-1] to bvar(0) in result, then Pi wrap
-    if (nparams > 0 and all_ctor_count > 0) {
-        const first_ctype = all_ctor_types[0];
-        var pi: u64 = nparams;
-        while (pi > 0) : (pi -= 1) {
-            const param_domain = piDomain(first_ctype, pi - 1);
-            lean_inc(param_domain);
-            var curr = first_ctype;
-            var j: u64 = 0;
-            while (j < pi - 1) : (j += 1) {
-                curr = forallBody(curr);
-            }
-            const param_name = forallName(curr);
-            lean_inc(param_name);
-
-            // Abstract this param's fvar to bvar(0)
-            lean_inc(param_fvars[pi - 1]);
-            const parr = lean_array_mk(list1(param_fvars[pi - 1]));
-            const abstracted = lean_expr_abstract(result, parr);
-            lean_dec(result);
-            lean_dec(parr);
-            result = abstracted;
-
-            result = lean_expr_mk_forall(param_name, param_domain, result, 0);
         }
     }
 
     // Release fvar originals (they've been abstracted and consumed)
     lean_dec(motive_fvar);
-    for (0..nparams) |pi| {
-        lean_dec(param_fvars[pi]);
-    }
+    // Note: param_fvars cleanup is done by the caller (shared across types)
     for (0..num_indices) |ii| {
         lean_dec(index_fvars[ii]);
     }
