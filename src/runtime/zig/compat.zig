@@ -453,11 +453,11 @@ fn exprDbgPrint(w: *std.Io.Writer, e: *anyopaque, ctx: *BinderCtx, prec: u32) an
             const body = ct.lean_ctor_get(e, 2) orelse return;
             const bi = exprBinderInfo(e);
             try w.writeAll("fun ");
-            if (bi == 1) try w.writeByte('{'); else try w.writeByte('(');
+            if (bi == 1) { try w.writeByte('{'); } else { try w.writeByte('('); }
             try printNameDbg(w, name);
             try w.writeAll(" : ");
             try exprDbgPrint(w, domain, ctx, 0);
-            if (bi == 1) try w.writeByte('}') else try w.writeByte(')');
+            if (bi == 1) { try w.writeByte('}'); } else { try w.writeByte(')'); }
             try w.writeAll(" => ");
             ctx.push(name, bi);
             try exprDbgPrint(w, body, ctx, 0);
@@ -526,7 +526,7 @@ fn exprBinderInfo(e: *anyopaque) u8 {
     return @import("ctor.zig").lean_ctor_get_uint8(e, @intCast(num_objs * @sizeOf(usize) + @sizeOf(usize)));
 }
 
-fn bvarHasRef(e: *anyopaque, target: u32, ctx: *const BinderCtx) bool {
+fn bvarHasRef(e: *anyopaque, target: u32, _: *const BinderCtx) bool {
     if (object.lean_is_scalar(e)) return false;
     const tag = object.lean_ptr_tag(e);
     if (tag == 0) {

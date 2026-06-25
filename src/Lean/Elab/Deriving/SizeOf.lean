@@ -24,7 +24,9 @@ open Command
 def mkSizeOfHandler (declNames : Array Name) : CommandElabM Bool := do
   if (← declNames.allM isInductive) then
     for declName in declNames do
-      withoutExposeFromCtors declName <| liftTermElabM <| Meta.mkSizeOfInstances declName
+      let instName := declName ++ `_sizeOf_inst
+      unless (← getEnv).contains instName do
+        withoutExposeFromCtors declName <| liftTermElabM <| Meta.mkSizeOfInstances declName
     return true
   else
     return false
