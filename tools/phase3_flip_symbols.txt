@@ -137,7 +137,6 @@ lean_event_loop_is_alive
 lean_event_loop_lock
 lean_event_loop_loop
 lean_event_loop_unlock
-lean_expr_data
 lean_expr_equal
 lean_expr_eqv
 lean_expr_lt
@@ -1087,3 +1086,4 @@ lean_elab_add_decl
 lean_mk_cases_on
 lean_instantiate_expr_mvars
 lean_add_decl
+lean_expr_data
