@@ -161,6 +161,7 @@ if(ZIG)
         "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libLean.a"
       COMMAND python3 ${LEAN_TOOLS_DIR}/flip_to_zig.py
         "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}"
         "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}"
@@ -169,8 +170,9 @@ if(ZIG)
         "${CMAKE_BINARY_DIR}/lib/lean/libleancpp.a"
         "${CMAKE_BINARY_DIR}/lib/temp/libleancpp_1.a"
         "${CMAKE_BINARY_DIR}/lib/lean/libInit.a"
+        "${CMAKE_BINARY_DIR}/lib/lean/libLean.a"
       COMMAND "${CMAKE_COMMAND}" -E touch_nocreate "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}.weakened"
-      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}" leanrt_initial-exec leancpp leancpp_1 "${LEAN_ZIG_FLIP_FILE}"
+      DEPENDS "${LEAN_ZIG_RUNTIME_HELPERLESS_LIB}" "${LEAN_ZIG_RUNTIME_KERNEL_ENTRYPOINTS_LIB}" leanrt_initial-exec leancpp leancpp_1 make_stdlib "${LEAN_ZIG_FLIP_FILE}"
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       COMMENT "Weakening Zig duplicates + flipping Phase 3 symbols to Zig"
       VERBATIM
