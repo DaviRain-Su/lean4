@@ -56,6 +56,7 @@ extern fn lean_environment_mark_quot_init(env: *anyopaque) callconv(.c) *anyopaq
 // Lean string and name builders
 extern fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque;
 extern fn lean_name_mk_string(parent: *anyopaque, s: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_name_append_index_after(n: *anyopaque, i: *anyopaque) callconv(.c) *anyopaque;
 
 // List cons (provided by Zig runtime_helpers.zig)
 extern fn lean_list_cons(head: *anyopaque, tail: *anyopaque) callconv(.c) *anyopaque;
@@ -68,6 +69,16 @@ fn mkName(str: [*:0]const u8) *anyopaque {
 
 fn mkName2(parent: [*:0]const u8, child: [*:0]const u8) *anyopaque {
     return lean_name_mk_string(mkName(parent), lean_mk_string(child));
+}
+
+fn nameInList(name: *anyopaque, list: *anyopaque) bool {
+    var curr = list;
+    while (!lean_is_scalar(curr)) {
+        const head = lean_ctor_get(curr, 0) orelse break;
+        if (lean_name_eq(name, head) != 0) return true;
+        curr = lean_ctor_get(curr, 1) orelse break;
+    }
+    return false;
 }
 
 fn mkArrow(domain: *anyopaque, codomain: *anyopaque) *anyopaque {
@@ -768,7 +779,19 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
     //   rhs = λ(params) λ(motives) λ(minors) λ(b_1..b_n) minor_c b_1..b_n (IHs)
     //   where IHs are induction hypotheses for recursive fields
 
-    const elim_level = levelParam("u");
+    // Generate a fresh elim level param name that doesn't conflict with the
+    // inductive's existing level params. C++ does this in init_elim_level():
+    // it tries "u", then "u_1", "u_2", etc. until it finds an unused name.
+    var elim_name = mkName("u");
+    {
+        var i: u64 = 1;
+        while (nameInList(elim_name, lparams)) {
+            elim_name = lean_name_append_index_after(mkName("u"), lean_box(i));
+            i += 1;
+            if (i > 100) break; // safety limit
+        }
+    }
+    const elim_level = lean_level_mk_param(elim_name);
     const sort_u = sortOf(elim_level);
 
     // Create all motive fvars (one per type).
@@ -882,7 +905,7 @@ fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
 
         // Recursor level params: lparams + "u" (elim level)
         lean_inc(lparams);
-        const rec_lparams = lean_list_cons(mkName("u"), lparams);
+        const rec_lparams = lean_list_cons(elim_name, lparams);
 
         // Build recursor type:
         // For the simplest case (no indices, no mutual, no recursive fields):
