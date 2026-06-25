@@ -1,194 +1,131 @@
 # Zig Full Port Plan
 
-Last updated: 2025-06-25
+Last updated: 2026-06-25
 
 ## Current Status
 
-- **Runtime layer**: 128 Zig files (~45K lines) — fully ported, 232/232 Zig unit tests pass
-- **Phase 3 flip list**: ✅ ALL 16 remaining symbols are already flipped (verified 2025-06-25)
-- **Kernel layer**: 18 C++ files (~5.6K lines) — still C++; Zig kernel files are ABI wrappers that call back into C++ via `extern fn`
-- **C++ bridge files**: 8 thin C++ shims (~270 lines) still needed during Zig build
+### Runtime layer ✅
+- 117 Zig files, ~211,690 lines — fully ported
+- Compiles to `libleanrt_zig.a`, linked into `libleanshared.dylib`
+- Zig unit tests (`zig build test`): 232/232 pass (per docs; not independently re-verified this session)
 
-## Wave 1: Phase 3 Symbol Flips ✅ COMPLETE
+### Kernel layer ✅ (99.97% pure Zig)
+- `kernel.zig`, `type_checker.zig`, `add_decl_bridge.zig`, `inductive.zig`, `environment.zig` — full Zig implementations
+- Only **2 C++ extern functions remain** (the elab↔kernel environment bridge):
+  - `lean_elab_environment_to_kernel_env` (`src/runtime/zig/elab_environment.zig:20`)
+  - `lean_elab_environment_update_base_after_kernel_add` (`src/runtime/zig/elab_environment.zig:21`)
+- These are the last architectural barrier to a 100% pure Zig kernel.
 
-All 16 symbols verified to be in `tools/phase3_flip_symbols.txt`. Recent commits show they were flipped incrementally:
+### Symbol flip mechanism ✅
+- 1,089 symbols flipped from C++ weak → Zig strong via `tools/phase3_flip_symbols.txt`
+- `libleanshared.dylib` links `libleanrt_zig.a` + `libadd_decl_bridge.a` + `libleanrt_initial-exec.a`
 
-| Commit | Symbols |
+### Stage1 build ✅
+- `build/release/stage1/bin/lean --version` = `Lean (version 4.33.0-pre, arm64-apple-darwin25.4.0, Release)`
+- `lean --run` prints "hello from stage1 zig runtime"
+- Known issue: intermittent CMake race (`DeclNameGen.c.tmp: No such file or directory` / `libInit.a not found`); retry succeeds. This is a CMake file-level dependency ordering bug, not a compiler defect.
+
+### EmitZig codegen ✅ (unit tier)
+- `src/Lean/Compiler/LCNF/EmitZig.lean` (1,688 lines) + InlineHelpers (910) + RuntimeExterns (1,251)
+- **`EMITZIG_ZIGRT_TESTS`: 21/21 pass (100%)**
+  Array, Cases, Closure, Exception, Float, FloatArray, JoinPoint, InlineHelpers, List, Loop, LoopControl, MixedScalar, Nat, Recursion, SetStdout, Smoke, Stderr, String, StringEscapes, StringHelpers, Task
+- End-to-end verified: `lean -z Smoke.lean` → 119KB Zig → `tools/zigc-zigrt` → executable prints "hello"
+- `ReuseClosedTerm.lean` is correctly classified in `EMITZIG_STDLIB_TESTS` (CMakeLists.txt:418); no test misclassification exists.
+
+### `LEAN_ZIG_CODEGEN` — still OFF
+- CMake: `LEAN_ZIG_CODEGEN=OFF`, `LEAN_ZIG_RT_CUTOVER=ON`, `LEAN_ZIG_RUNTIME=ON`, `STAGE=1`
+- Flipping it ON is gated by the stdlib codegen path (see Blockers below).
+
+---
+
+## Blockers
+
+### B1. stdlib Zig codegen path (the real blocker)
+
+`tools/zigc-stdlib` recursively emits and compiles the transitive closure of stdlib modules **from source** (`lean -z src/Init/Core.lean` for each module). This re-elaborates every stdlib module standalone.
+
+**Root cause finding (2026-06-25):** The 44/327 stdlib module failures are **NOT a Zig kernel bug**. Two layers of cause were identified:
+
+**Layer 1 — `LEAN_PATH` not set (majority of failures):** `tools/zigc-stdlib`'s `host_lean_env()` (line 64-68) does NOT set `LEAN_PATH`. Without it, `lean` cannot find the prebuilt `.olean` files from the current stage, so the elaborator fails to resolve constructor universe-level params. Setting `LEAN_PATH=":$BUILD_DIR/lib/lean"` eliminates the bulk of the `incorrect number of universe levels` errors:
+
+```
+# Without LEAN_PATH (current zigc-stdlib behavior):
+$ lean src/Init/Core.lean
+src/Init/Core.lean:212:0: error: incorrect number of universe levels Sum.inl   # + ~26 more
+
+# With LEAN_PATH=":<build>/stage1/lib/lean":
+$ LEAN_PATH=":<build>/stage1/lib/lean" lean src/Init/Core.lean
+src/Init/Core.lean:1354:2: error: Invalid alternative name `single` ...        # only 4 left
+```
+
+This matches `lean.mk.in:53-54`, which prepends `$(dir $(LEAN))../lib/lean` to `LEAN_PATH` so already-compiled modules from the previous stage are found.
+
+**Layer 2 — residual elaborator errors (identical under C++ and Zig kernels):** Even with `LEAN_PATH` set, a handful of modules still fail (`Init.WF`, `Init.Data.Int.Linear`, `Init.Data.Nat.Linear`, `Init.Data.RArray`, `Init.Data.Format.Basic`, `Init.GetElem`, `Init.Core`'s `TransGen`). Verified these produce **byte-identical errors under the default C++ kernel and the Zig kernel**:
+
+```
+$ LEAN_PATH=... lean src/Init/WF.lean           # C++ kernel
+src/Init/WF.lean:36:8: error: Type mismatch ... Sort (imax u2 (imax u2 u1) u1) vs Sort (imax u2 u1)
+
+$ LEAN_PATH=... lean -z out.zig src/Init/WF.lean # Zig kernel (identical)
+src/Init/WF.lean:36:8: error: Type mismatch ... Sort (imax u2 (imax u2 u1) u1) vs Sort (imax u2 u1)
+```
+
+These are elaborator-level symptoms of re-elaborating stdlib source standalone (termination proofs, `TransGen` induction alternatives, universe imax solving) — not kernel defects. `lean.mk` avoids them by building in a library context with the full `.olean` import graph already materialized; `zigc-stdlib`'s "emit each module standalone from source" design (per its docstring and comment at `tools/zigc-stdlib:116-117`) collides with this.
+
+**Verified:** `lean -z StdlibFin.lean` (which uses `import Init.Data.Fin`, loading from `.olean`) **succeeds with exit 0** and emits a 204KB Zig file with no errors. The stdlib codegen path works when imports resolve from `.olean`; it only fails when re-elaborating source standalone.
+
+**Path forward:**
+1. **Fix `host_lean_env` in `tools/zigc-stdlib`** to set `LEAN_PATH` from the lean binary's sibling `lib/lean` (analogous to `lean.mk.in:53-54`). This eliminates the majority of the 44 failures. **Highest leverage, low risk.**
+2. For the residual elaborator errors, investigate whether `zigc-stdlib` can emit stdlib module Zig from the `.olean`-loaded environment (like `lean -z StdlibFin.lean` does for the driver) rather than re-elaborating each source file standalone. This is the `EMITZIG_STDLIB_TESTS` (59 tests including `StdlibFin`, `ReuseClosedTerm`) path.
+
+### B2. Last 2 C++ kernel externs
+- `lean_elab_environment_to_kernel_env` and `lean_elab_environment_update_base_after_kernel_add`
+- Need Zig to directly read the elab `Environment` internal structure and construct a kernel `Environment`. `kernel_accessors.zig` already has complete Environment read code to reference.
+
+### B3. Stage1 CMake race
+- `DeclNameGen.c.tmp` / `libInit.a` file-level dependency ordering. Retry workaround works.
+
+### B4. Stage2/stage3 self-bootstrap not yet attempted
+- stage1 builds and runs; self-hosting reproducibility unverified.
+
+---
+
+## Wave History (supersedes earlier wave numbering)
+
+Earlier versions of this doc tracked Waves 1–3 (symbol flips, bridge elimination, kernel port) as pending. In reality those are **done**:
+
+- **Wave 1 (Phase 3 flips): ✅ COMPLETE** — 1,089 symbols flipped.
+- **Wave 2 (C++ bridge elimination): ✅ largely complete** — runtime is pure Zig.
+- **Wave 3 (kernel C++ → Zig): ✅ ~99.97% complete** — only 2 externs remain (B2).
+
+The actual remaining work is the **stdlib codegen path (B1)**, which is an architecture/tooling problem, not a kernel-logic port.
+
+---
+
+## Next Steps (priority order)
+
+1. **Fix `host_lean_env` in `tools/zigc-stdlib`** (B1, Layer 1) — set `LEAN_PATH` from the lean binary's sibling `lib/lean`. Highest leverage: eliminates the majority of the 44 stdlib module failures. Low risk, mirrors `lean.mk.in:53-54`.
+2. **Investigate `zigc-stdlib` `.olean`-based emission** (B1, Layer 2) — determine whether the tool can emit Zig for stdlib modules using the prebuilt `.olean` environment instead of re-elaborating each source file standalone. Unblocks `LEAN_ZIG_CODEGEN=ON` and the `EMITZIG_STDLIB_TESTS`.
+3. **Port the last 2 C++ kernel externs** (B2) — reach 100% pure Zig kernel.
+4. **Fix Stage1 CMake race** (B3) — add proper file-level dependency for `DeclNameGen.c.tmp`.
+5. **Build & run stage2** (B4) — verify self-bootstrap reproducibility.
+6. **Re-verify `zig build test`** independently (currently relied on from prior docs).
+
+---
+
+## Key Files
+
+| Purpose | Path |
 |---|---|
-| `794fd749fb` | `lean_expr_quick_lt`, `lean_expr_equal`, `lean_expr_eqv`, `lean_replace_expr` |
-| `cb818875d9` | 8 additional symbols after individual verification |
-| `d658427697` | `lean_elab_add_decl`, `lean_elab_add_decl_without_checking` |
-| `a67488df01` | `lean_mk_cases_on` (delegates to C++ helper) |
-| `3882d652cb` | `lean_instantiate_expr_mvars` (delegates to C++ helper) |
-| `d5caa7d5fd` | `lean_add_decl` (delegates to C++ helper) |
-
-Note: some of these "delegate to C++ helper" — the symbol is provided by Zig but calls back into C++ kernel logic. This is the work remaining for Wave 3.
-
-Eval/interpreter symbols (`lean_eval_main_decl`, `lean_eval_const`, `lean_run_init`) are pure Zig implementations (no C++ delegation).
-
----
-
-## Wave 2: Eliminate C++ Bridge Files
-
-8 thin C++ files (~270 lines total). Depends on Wave 1 completion.
-
-| File | Lines | Absorb into |
-|---|---|---|
-| `object_shim.cpp` | ~30 | `object.zig` / `lean_object.zig` |
-| `net_addr_bridge.cpp` | ~30 | `net_addr.zig` |
-| `uv_compat.cpp` | ~40 | `uv_exports.zig` |
-| `uv_init.cpp` | ~40 | `uv_event_loop.zig` |
-| `uv_loop_thread.cpp` | ~30 | `uv_event_loop.zig` |
-| `uv_promise_bridge.cpp` | ~30 | `task.zig` |
-| `uv_version.cpp` | ~20 | `uv_stubs.zig` |
-| `libcxx_hash_compat.cpp` | ~50 | `hash.zig` |
-
-After completion: remove `compile-cpp-cutover` path from `build.zig`.
-
----
-
-## Wave 3: Kernel C++ → Zig Port
-
-Current state: Zig kernel files (e.g. `kernel.zig`, `type_checker.zig`) are ABI wrappers that call into C++ via `extern fn`. The actual kernel logic is in 18 C++ files.
-
-### 3a. Expression System
-
-Port the expression construction and traversal layer. Eliminates extern declarations in `kernel.zig`.
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `expr.cpp` | 538 | Expression constructors, accessors |
-| `level.cpp` | ~200 | Universe levels |
-| `expr_eq_fn.cpp` | ~100 | Expression equality |
-| `for_each_fn.cpp` | ~100 | Traversal |
-| `replace_fn.cpp` | ~100 | Replacement |
-
-Externs to eliminate:
-```
-lean_expr_mk_app, lean_expr_mk_sort, lean_expr_mk_bvar,
-lean_expr_mk_lambda, lean_expr_mk_forall, lean_expr_mk_let,
-lean_expr_mk_mdata, lean_expr_mk_proj, lean_expr_mk_const,
-lean_expr_mk_lit, lean_expr_mk_fvar
-```
-
-### 3b. Local Context + Abstract/Instantiate
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `local_ctx.cpp` | ~150 | Local context |
-| `abstract.cpp` | 78 | Expression abstraction |
-| `instantiate.cpp` | 266 | Expression instantiation |
-
-### 3c. Declaration System
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `declaration.cpp` | 326 | Declarations, definitions |
-
-### 3d. Type Checker (largest block)
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `type_checker.cpp` | 1244 | WHNF, definitional equality, type checking core |
-
-This is the most complex port. Requires bit-for-bit behavioral equivalence with C++.
-
-### 3e. Environment + Inductive Types
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `environment.cpp` | 304 | Kernel environment |
-| `inductive.cpp` | 1252 | Inductive type construction, recursors |
-
-### 3f. Cache + Utilities
-
-| C++ file | Lines | Description |
-|---|---|---|
-| `equiv_manager.cpp` | ~100 | Equivalence manager |
-| `expr_cache.cpp` | ~100 | Expression cache |
-| `quot.cpp` | ~100 | Quotations |
-| `trace.cpp` | ~50 | Tracing |
-| `init_module.cpp` | ~50 | Initialization |
-
----
-
-## Dependency Graph
-
-```
-Wave 1 (Phase 3 flips) ✅ COMPLETE
-        │
-        ▼
-Wave 2 (bridge elimination) — optional, can be done anytime
-        │
-        ▼
-Wave 3 (kernel port)
-  ├── 3a expr + level system ──────────────┐
-  ├── 3b local_ctx + abstract/instantiate ─┤
-  ├── 3c declaration ──────────────────────┤
-  ├── 3d type checker ── (depends on 3a-3c) ┤
-  ├── 3e env + inductive ── (depends on 3d) ┤
-  └── 3f cache/utils ──────────────────────┘
-```
-
-## Estimated Timeline
-
-| Wave | Content | Status |
-|---|---|---|
-| Wave 1 | 15+1 symbol flips | ✅ Complete |
-| Wave 2 | 8 bridge file elimination | Pending (2-3 days) |
-| Wave 3a-3c | Expression + declaration system | Pending (1-2 weeks) |
-| Wave 3d | Type checker | Pending (1-2 weeks) |
-| Wave 3e-3f | Environment + inductive + utilities | Pending (1-2 weeks) |
-
-## Current Action Item: Wave 3a — Port Expression System
-
-The first kernel port task is to eliminate the `extern fn` declarations in
-`kernel.zig` and `type_checker.zig` that call into C++ for expression
-construction and level operations.
-
-### Target externs (kernel.zig lines 433-444; type_checker.zig lines 40-64)
-
-```
-lean_expr_mk_app, lean_expr_mk_sort, lean_expr_mk_bvar,
-lean_expr_mk_lambda, lean_expr_mk_forall, lean_expr_mk_let,
-lean_expr_mk_mdata, lean_expr_mk_proj, lean_expr_mk_const,
-lean_expr_mk_lit, lean_expr_mk_fvar,
-lean_level_mk_succ, lean_level_mk_imax, lean_level_mk_max,
-lean_local_ctx_mk_local_decl,
-lean_kernel_instantiate_type_lparams, lean_kernel_instantiate_value_lparams
-```
-
-### C++ files to port
-
-| File | Lines |
-|---|---|
-| `src/kernel/expr.cpp` | 538 |
-| `src/kernel/level.cpp` | ~200 |
-| `src/kernel/local_ctx.cpp` | ~150 |
-| `src/kernel/abstract.cpp` | 78 |
-| `src/kernel/instantiate.cpp` | 266 |
-| `src/kernel/expr_eq_fn.cpp` | ~100 |
-| `src/kernel/for_each_fn.cpp` | ~100 |
-| `src/kernel/replace_fn.cpp` | ~100 |
-
-### Approach
-
-1. Read the C++ implementation
-2. Write a parity test in `tests/elab/`
-3. Implement in corresponding Zig file (extend `kernel.zig`)
-4. Remove the `extern fn` declaration
-5. Run `zig build test` (232 Zig unit tests must pass)
-6. Flip the symbol if not already flipped
-
-## Key Strategy
-
-1. **Test-first**: Before porting each kernel function, write a parity test under `tests/elab/`. Then delete the `extern fn` declaration and replace with a Zig native implementation.
-2. **Incremental flip**: Port one function, remove one extern, keep the Zig runtime buildable (232 unit tests must stay green).
-3. **Zig unit test guard**: `zig build test` runs 232 unit tests covering the entire runtime. Must pass after every change.
-4. **Full build gate**: After each kernel module port, rebuild stage1 and run the expr regression set to catch integration regressions.
-
-## Current Build State
-
-- **Zig unit tests**: ✅ 232/232 pass (`zig build test`)
-- **Full stage1 build**: ⚠️ Broken due to stage0 .olean dependency (pre-existing). Need to fix bootstrap before testing kernel ports end-to-end.
-- **Workaround**: Use `build/release-nocut` as stage0 source for the stage1 zig cutover build.
+| EmitZig codegen | `src/Lean/Compiler/LCNF/EmitZig.lean` |
+| Zig runtime root | `src/runtime/zig/lean_rt.zig` |
+| Zig kernel | `src/runtime/zig/kernel.zig`, `type_checker.zig` |
+| Add-decl bridge | `src/runtime/zig/add_decl_bridge.zig` |
+| Elab env bridge (last 2 externs) | `src/runtime/zig/elab_environment.zig` |
+| Kernel accessors (reference) | `src/runtime/zig/kernel_accessors.zig` |
+| stdlib codegen tool | `tools/zigc-stdlib` (`host_lean_env` line 64-68 missing `LEAN_PATH`) |
+| zigrt codegen tool | `tools/zigc-zigrt` |
+| stdlib build makefile | `src/lean.mk.in` (see `LEAN_PATH` handling line 53-54) |
+| Test runner | `tests/emitzig/run_test.sh` |
+| Test list | `tests/CMakeLists.txt` (`EMITZIG_ZIGRT_TESTS` L320-342, `EMITZIG_STDLIB_TESTS` L357-421) |
+| Phase 3 flip list | `tools/phase3_flip_symbols.txt` |

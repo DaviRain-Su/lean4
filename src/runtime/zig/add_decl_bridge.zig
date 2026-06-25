@@ -33,6 +33,7 @@ extern fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_abstract(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_array_mk(arr: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_array_push(arr: *anyopaque, elem: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_expr_instantiate(e: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate1(e: *anyopaque, v: *anyopaque) callconv(.c) *anyopaque;
 
 // Lean @[export] expression builders
@@ -1192,7 +1193,7 @@ fn buildRecursorType(
     num_indices: u64,
     num_types: usize,
     type_idx: usize,
-    _lparams: *anyopaque,
+    lparams: *anyopaque,
     ind_names: []const *anyopaque,
     _rec_name: *anyopaque,
     _rec_lparams: *anyopaque,
@@ -1201,7 +1202,6 @@ fn buildRecursorType(
     all_motive_fvars: []const *anyopaque,
     all_motive_types: []const *anyopaque,
 ) *anyopaque {
-    _ = _lparams;
     _ = _rec_name;
     _ = _rec_lparams;
     // Under 1 binder (motive):
@@ -1259,6 +1259,10 @@ fn buildRecursorType(
     const motive_fvar = all_motive_fvars[type_idx];
     // inc for rec_body usage
     lean_inc(motive_fvar);
+
+    // Field fvars: created per-constructor inside the minor loop.
+    const field_names: [16][*:0]const u8 = .{ "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "fA", "fB", "fC", "fD", "fE", "fF" };
+    var field_fvars: [16]*anyopaque = undefined;
 
     // rec_body = App(App(motive, indices), major)
     // For num_indices == 0: App(motive, bvar(0)) — same as before
@@ -1324,6 +1328,26 @@ fn buildRecursorType(
 
         const total_pi = countPiBinders(ctype);
         const num_fields = if (total_pi > nparams) total_pi - nparams else 0;
+
+        // Create field fvars for this constructor.
+        for (0..@min(num_fields, 16)) |fi| {
+            field_fvars[fi] = lean_expr_mk_fvar(mkName(field_names[fi]));
+        }
+
+        // Build substitution array for field bvars.
+        // lean_expr_instantiate uses reverse indexing: bvar(i) → subst[n-1-i].
+        // Since bvar(i) in the ctor type is the i-th innermost field (= field_fvars[n-1-i]),
+        // we need subst[j] = field_fvars[j].
+        var field_subst_arr: ?*anyopaque = null;
+        if (num_fields > 0) {
+            var field_subst_list = listNil();
+            var vi: u64 = 0;
+            while (vi < num_fields) : (vi += 1) {
+                lean_inc(field_fvars[vi]);
+                field_subst_list = lean_list_cons(field_fvars[vi], field_subst_list);
+            }
+            field_subst_arr = lean_array_mk(field_subst_list);
+        }
 
         // Instantiate the constructor type's param binders with our param_fvars.
         // This replaces the ctor type's param bvars with our fvars, so field
@@ -1430,18 +1454,18 @@ fn buildRecursorType(
         // c_app = App...(Const(c, levels), param_1, ..., param_n, field_1, ..., field_m)
         var c_app: *anyopaque = undefined;
         {
-            c_app = constOf(cname, lean_box(0));
+            c_app = constOf(cname, lparamsToLevels(lparams));
             // Add params using fvars
             var pi: u64 = 0;
             while (pi < nparams) : (pi += 1) {
                 lean_inc(param_fvars[pi]);
                 c_app = lean_expr_mk_app(c_app, param_fvars[pi]);
             }
-            // Add fields: field_1 (first, 0-indexed: i=0) is at highest field index
+            // Add fields using fvars (will be abstracted to correct bvars later).
             var fi: u64 = 0;
             while (fi < num_fields) : (fi += 1) {
-                const field_idx = num_rec_fields + (num_fields - 1 - fi);
-                c_app = lean_expr_mk_app(c_app, bvar(field_idx));
+                lean_inc(field_fvars[fi]);
+                c_app = lean_expr_mk_app(c_app, field_fvars[fi]);
             }
         }
 
@@ -1507,18 +1531,15 @@ fn buildRecursorType(
                 while (ii < num_indices) : (ii += 1) {
                     // index_{ii+1} = ctor_idx_args[arg_count - nparams - 1 - ii]
                     const idx_expr = ctor_idx_args[arg_count - @as(usize, @intCast(nparams)) - 1 - ii];
-                    // Check if idx_expr is a bvar (field reference) or something else (fvar, complex expr)
-                    if (!lean_is_scalar(idx_expr) and lean_ptr_tag(idx_expr) == ExprTag.bvar) {
-                        const bvar_nat = lean_ctor_get(idx_expr, 0) orelse @panic("bvar missing index");
-                        const v = lean_unbox(bvar_nat);
-                        // v < num_fields → field v → bvar(num_rec_fields + v) in minor body scope
-                        minor_body = lean_expr_mk_app(minor_body, bvar(num_rec_fields + v));
+                    // Replace field bvars in idx_expr with field fvars.
+                    var inst_idx: *anyopaque = undefined;
+                    if (field_subst_arr) |fsa| {
+                        inst_idx = lean_expr_instantiate(idx_expr, fsa);
                     } else {
-                        // fvar (param) or complex expression — need to lift bvars by num_rec_fields
-                        // to account for IH binders between fields and minor body.
-                        const lifted = lean_expr_lift_loose_bvars(idx_expr, lean_box(0), lean_box(num_rec_fields));
-                        minor_body = lean_expr_mk_app(minor_body, lifted);
+                        lean_inc(idx_expr);
+                        inst_idx = idx_expr;
                     }
+                    minor_body = lean_expr_mk_app(minor_body, inst_idx);
                 }
             }
             // Apply c_app
@@ -1570,45 +1591,52 @@ fn buildRecursorType(
                 var ji: u64 = 0;
                 while (ji < num_indices) : (ji += 1) {
                     const idx_expr = idx_args[idx_arg_count - @as(usize, @intCast(nparams)) - 1 - ji];
-                    // idx_expr may be a bvar (field reference) or fvar (param reference)
-                    // or a complex expression (e.g., m+1)
-                    // We need to remap bvars from ctor depth to IH domain scope.
-                    // At ctor depth rec_fi, bvar(v) where v < rec_fi is field v.
-                    // In IH domain scope, field v = bvar(num_fields - 1 - v).
-                    if (!lean_is_scalar(idx_expr) and lean_ptr_tag(idx_expr) == ExprTag.bvar) {
-                        const bvar_nat = lean_ctor_get(idx_expr, 0) orelse @panic("bvar missing index");
-                        const v = lean_unbox(bvar_nat);
-                        // v < rec_fi → field v → bvar(num_fields - 1 - v)
-                        // v >= rec_fi → param (already instantiated as fvar, should not happen here)
-                        if (v < rec_fi) {
-                            ih_type = lean_expr_mk_app(ih_type, bvar(num_fields - 1 - v));
-                        } else {
-                            // This is a param bvar that should have been instantiated
-                            // Use as-is (shouldn't happen if instantiateParams worked)
-                            lean_inc(idx_expr);
-                            ih_type = lean_expr_mk_app(ih_type, idx_expr);
-                        }
+                    // Replace field bvars in idx_expr with field fvars.
+                    var inst_idx: *anyopaque = undefined;
+                    if (field_subst_arr) |fsa| {
+                        inst_idx = lean_expr_instantiate(idx_expr, fsa);
                     } else {
-                        // Complex expression or fvar — use as-is
                         lean_inc(idx_expr);
-                        ih_type = lean_expr_mk_app(ih_type, idx_expr);
+                        inst_idx = idx_expr;
                     }
+                    ih_type = lean_expr_mk_app(ih_type, inst_idx);
                 }
             }
             // Apply field_i
-            const field_bv = bvar(num_fields - 1 - rec_fi);
-            ih_type = lean_expr_mk_app(ih_type, field_bv);
+            lean_inc(field_fvars[rec_fi]);
+            ih_type = lean_expr_mk_app(ih_type, field_fvars[rec_fi]);
             minor_type = lean_expr_mk_forall(mkName("_"), ih_type, minor_type, 0);
         }
 
-        // Wrap with field binders (from last field to first, so field_0 is outermost)
-        // No lift needed.
-        {
-            var fi: u64 = num_fields;
-            while (fi > 0) : (fi -= 1) {
-                const field_domain = piDomain(inst_ctype, fi - 1);
-                lean_inc(field_domain);
-                minor_type = lean_expr_mk_forall(mkName("_"), field_domain, minor_type, 0);
+        // Abstract all field fvars from minor_type and wrap with field Pi binders.
+        if (num_fields > 0) {
+            var field_list = listNil();
+            {
+                var fi2: u64 = num_fields;
+                while (fi2 > 0) : (fi2 -= 1) {
+                    lean_inc(field_fvars[fi2 - 1]);
+                    field_list = lean_list_cons(field_fvars[fi2 - 1], field_list);
+                }
+            }
+            const field_arr = lean_array_mk(field_list);
+            const field_abstracted = lean_expr_abstract(minor_type, field_arr);
+            lean_dec(field_arr);
+            lean_dec(minor_type);
+            minor_type = field_abstracted;
+
+            // Wrap with field Pi foralls from innermost (last field) to outermost (first field).
+            {
+                var fi3: u64 = num_fields;
+                while (fi3 > 0) : (fi3 -= 1) {
+                    const field_domain = piDomain(inst_ctype, fi3 - 1);
+                    lean_inc(field_domain);
+                    minor_type = lean_expr_mk_forall(mkName("_"), field_domain, minor_type, 0);
+                }
+            }
+
+            // Release field fvars.
+            for (0..@min(num_fields, 16)) |fi| {
+                lean_dec(field_fvars[fi]);
             }
         }
 
@@ -1621,6 +1649,9 @@ fn buildRecursorType(
         result = lifted;
         result = lean_expr_mk_forall(mkName("_"), minor_type, result, 0);
         minor_binder_count += 1;
+        if (field_subst_arr) |fsa| {
+            lean_dec(fsa);
+        }
         lean_dec(inst_ctype); // release instantiated ctor type
     }
 
