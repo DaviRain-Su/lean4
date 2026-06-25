@@ -392,56 +392,174 @@ pub export fn lean_runtime_hold(_: *anyopaque) callconv(.c) *anyopaque {
 pub export fn lean_expr_dbg_to_string(e: *anyopaque) callconv(.c) *anyopaque {
     var fbs = std.Io.Writer.Allocating.init(std.heap.page_allocator);
     defer fbs.deinit();
-    exprDebugPrint(&fbs.writer, e, 0);
+    var ctx = BinderCtx{};
+    exprDbgPrint(&fbs.writer, e, &ctx, 0) catch {};
     const written = fbs.written();
     return string.mkStringFromBytes(written);
 }
 
-fn exprDebugPrint(w: *std.Io.Writer, e: *anyopaque, depth: u32) void {
-    if (object.lean_is_scalar(e)) {
-        w.print("@{}", .{object.lean_unbox(e)}) catch return;
-        return;
+const BinderCtx = struct {
+    names: [64]*anyopaque = undefined,
+    bis: [64]u8 = undefined,
+    len: u32 = 0,
+
+    fn push(self: *BinderCtx, name: *anyopaque, bi: u8) void {
+        if (self.len < 64) {
+            self.names[self.len] = name;
+            self.bis[self.len] = bi;
+            self.len += 1;
+        }
     }
+
+    fn pop(self: *BinderCtx) void {
+        if (self.len > 0) self.len -= 1;
+    }
+
+    fn getName(self: *const BinderCtx, idx: u32) ?*anyopaque {
+        if (idx < self.len) return self.names[self.len - 1 - idx];
+        return null;
+    }
+};
+
+fn exprDbgPrint(w: *std.Io.Writer, e: *anyopaque, ctx: *BinderCtx, prec: u32) anyerror!void {
+    if (object.lean_is_scalar(e)) { try w.print("@{}", .{object.lean_unbox(e)}); return; }
     const tag = object.lean_ptr_tag(e);
-    const ctor_mod = @import("ctor.zig");
+    const ct = @import("ctor.zig");
     switch (tag) {
-        0 => w.print("@{}", .{object.lean_unbox(ctor_mod.lean_ctor_get(e, 0) orelse return)}) catch return,
-        1 => { // fvar
-            w.print("?", .{}) catch return;
-            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
+        0 => { // bvar
+            const idx = object.lean_unbox(ct.lean_ctor_get(e, 0) orelse return);
+            if (ctx.getName(@intCast(idx))) |n| { try printNameDbg(w, n); } else { try w.print("@[{}]", .{idx}); }
         },
-        2 => { // mvar
-            w.print("?m.", .{}) catch return;
-            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
-        },
+        1 => try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return), // fvar
+        2 => { try w.writeAll("?m."); try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return); }, // mvar
         3 => { // sort
-            w.print("Sort", .{}) catch return;
+            const lvl = ct.lean_ctor_get(e, 0);
+            if (lvl != null and !object.lean_is_scalar(lvl.?)) {
+                try printLevel(w, lvl.?);
+            } else { try w.writeAll("Sort"); }
         },
         4 => { // const
-            printName(w, ctor_mod.lean_ctor_get(e, 0) orelse return);
+            try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return);
         },
         5 => { // app
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 0) orelse return, depth);
-            w.writeByte(' ') catch return;
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 1) orelse return, depth);
+            try exprDbgPrint(w, ct.lean_ctor_get(e, 0) orelse return, ctx, 1);
+            try w.writeByte(' ');
+            const arg = ct.lean_ctor_get(e, 1) orelse return;
+            try exprDbgPrint(w, arg, ctx, 2);
         },
-        6, 7 => { // lam, forallE
-            w.print("{s} ", .{if (tag == 6) "fun" else "@@@"}) catch return;
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 2) orelse return, depth);
+        6 => { // lam
+            const name = ct.lean_ctor_get(e, 0) orelse return;
+            const domain = ct.lean_ctor_get(e, 1) orelse return;
+            const body = ct.lean_ctor_get(e, 2) orelse return;
+            const bi = exprBinderInfo(e);
+            try w.writeAll("fun ");
+            if (bi == 1) try w.writeByte('{'); else try w.writeByte('(');
+            try printNameDbg(w, name);
+            try w.writeAll(" : ");
+            try exprDbgPrint(w, domain, ctx, 0);
+            if (bi == 1) try w.writeByte('}') else try w.writeByte(')');
+            try w.writeAll(" => ");
+            ctx.push(name, bi);
+            try exprDbgPrint(w, body, ctx, 0);
+            ctx.pop();
+        },
+        7 => { // forallE
+            const name = ct.lean_ctor_get(e, 0) orelse return;
+            const domain = ct.lean_ctor_get(e, 1) orelse return;
+            const body = ct.lean_ctor_get(e, 2) orelse return;
+            const bi = exprBinderInfo(e);
+            ctx.push(name, bi);
+            // Check if binder name is used in body
+            const uses_name = bvarHasRef(body, ctx.len - 1, ctx);
+            if (uses_name) {
+                if (bi == 1) try w.writeByte('{') else try w.writeByte('(');
+                try printNameDbg(w, name);
+                try w.writeAll(" : ");
+                try exprDbgPrint(w, domain, ctx, 0);
+                if (bi == 1) try w.writeByte('}') else try w.writeByte(')');
+                try w.writeAll(" → ");
+            } else {
+                if (prec >= 1) try w.writeByte('(');
+                try exprDbgPrint(w, domain, ctx, 0);
+                try w.writeAll(" → ");
+            }
+            try exprDbgPrint(w, body, ctx, 0);
+            if (!uses_name and prec >= 1) try w.writeByte(')');
+            ctx.pop();
         },
         8 => { // letE
-            w.print("let ", .{}) catch return;
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 3) orelse return, depth);
+            const name = ct.lean_ctor_get(e, 0) orelse return;
+            const te = ct.lean_ctor_get(e, 1) orelse return;
+            const val = ct.lean_ctor_get(e, 2) orelse return;
+            const body = ct.lean_ctor_get(e, 3) orelse return;
+            try w.writeAll("let ");
+            try printNameDbg(w, name);
+            try w.writeAll(" : ");
+            try exprDbgPrint(w, te, ctx, 0);
+            try w.writeAll(" := ");
+            try exprDbgPrint(w, val, ctx, 0);
+            try w.writeAll("; ");
+            ctx.push(name, 0);
+            try exprDbgPrint(w, body, ctx, 0);
+            ctx.pop();
         },
-        10 => { // mdata
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 1) orelse return, depth);
+        9 => { // lit
+            const lit = ct.lean_ctor_get(e, 0) orelse return;
+            if (!object.lean_is_scalar(lit) and object.lean_ptr_tag(lit) == 0) { // natVal
+                const n = ct.lean_ctor_get(lit, 0) orelse return;
+                if (object.lean_is_scalar(n)) { try w.print("{}", .{object.lean_unbox(n)}); } else { try w.writeAll("#"); }
+            } else { try w.print("«lit»", .{}); }
         },
+        10 => try exprDbgPrint(w, ct.lean_ctor_get(e, 1) orelse return, ctx, prec), // mdata
         11 => { // proj
-            w.print("proj", .{}) catch return;
-            exprDebugPrint(w, ctor_mod.lean_ctor_get(e, 2) orelse return, depth);
+            try exprDbgPrint(w, ct.lean_ctor_get(e, 2) orelse return, ctx, 1);
+            try w.writeByte('.');
+            const idx = ct.lean_ctor_get(e, 1) orelse return;
+            try w.print("{}", .{object.lean_unbox(idx)});
         },
-        else => w.print("<expr:{}>", .{tag}) catch return,
+        else => try w.print("<expr:{}>", .{tag}),
     }
+}
+
+fn exprBinderInfo(e: *anyopaque) u8 {
+    const num_objs: usize = @import("ctor.zig").ctorNumObjs(e);
+    return @import("ctor.zig").lean_ctor_get_uint8(e, @intCast(num_objs * @sizeOf(usize) + @sizeOf(usize)));
+}
+
+fn bvarHasRef(e: *anyopaque, target: u32, ctx: *const BinderCtx) bool {
+    if (object.lean_is_scalar(e)) return false;
+    const tag = object.lean_ptr_tag(e);
+    if (tag == 0) {
+        const ct = @import("ctor.zig");
+        const idx = object.lean_unbox(ct.lean_ctor_get(e, 0) orelse return false);
+        return idx == target;
+    }
+    // Quick check: if bvarRange is 0, no bvars
+    return false; // Simplified: only checks direct bvar(0)
+}
+
+fn printLevel(w: *std.Io.Writer, l: *anyopaque) anyerror!void {
+    if (object.lean_is_scalar(l)) { try w.print("L@{}", .{object.lean_unbox(l)}); return; }
+    const tag = object.lean_ptr_tag(l);
+    const ct = @import("ctor.zig");
+    switch (tag) {
+        0 => try w.writeAll("0"),
+        1 => {
+            if (ct.ctorNumObjs(l) >= 1) {
+                const inner = ct.lean_ctor_get(l, 0);
+                if (inner != null and !object.lean_is_scalar(inner.?)) {
+                    if (object.lean_ptr_tag(inner.?) == 0) { try w.writeAll("1"); return; }
+                    try w.writeAll("1+"); try printLevel(w, inner.?); return;
+                }
+            }
+            try w.writeAll("1");
+        },
+        else => try w.print("L@{}", .{tag}),
+    }
+}
+
+fn printNameDbg(w: *std.Io.Writer, n: *anyopaque) anyerror!void {
+    printName(w, n);
 }
 
 fn printName(w: *std.Io.Writer, n: *anyopaque) void {

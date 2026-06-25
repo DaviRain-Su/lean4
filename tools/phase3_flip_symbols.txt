@@ -1105,3 +1105,4 @@ lean_add_decl_bridge
 lean_kernel_instantiate_type_lparams
 lean_kernel_instantiate_value_lparams
 lean_expr_lift_loose_bvars
+lean_expr_dbg_to_string
