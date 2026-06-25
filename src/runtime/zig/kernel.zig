@@ -1073,11 +1073,22 @@ fn cancelTokenFromOption(opt_cancel_tk: *anyopaque) ?*anyopaque {
 // Tag 6 (inductive) still delegates to lean_cpp_environment_add_without_checking.
 
 extern fn lean_add_decl_bridge(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_cpp_environment_add_with_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 
 fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_cancel_tk: *anyopaque) callconv(.c) *anyopaque {
     _ = max_heartbeat;
     _ = opt_cancel_tk;
-    return lean_add_decl_bridge(env, decl);
+    // For checked declarations (definitions, theorems), delegate to C++
+    // which calls environment::add(d, check=true) with full type checking.
+    // For inductives and mutuals (tags 5-6), lean_add_decl_bridge handles them
+    // in Zig (unchecked, matching C++ which also doesn't check inductives).
+    const tag = object.lean_ptr_tag(decl);
+    if (tag == 5 or tag == 6) {
+        // Inductive or mutual: add without checking (C++ also skips check for inductives)
+        return lean_add_decl_bridge(env, decl);
+    }
+    // Definitions, theorems, axioms, opaque: add with type checking via C++
+    return lean_cpp_environment_add_with_checking(env, decl);
 }
 
 // lean_expr_eqv is implemented above alongside lean_expr_equal (exprEqRec with compare_bi=false).

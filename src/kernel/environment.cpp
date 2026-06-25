@@ -289,6 +289,14 @@ extern "C" LEAN_EXPORT object * lean_cpp_environment_add_without_checking(object
         });
 }
 
+/* C++ helper for Zig kernel: checked environment::add. Performs type checking
+   before adding the declaration. Called by Zig lean_add_decl (with check=true). */
+extern "C" LEAN_EXPORT object * lean_cpp_environment_add_with_checking(object * env, object * decl) {
+    return catch_kernel_exceptions<environment>([&]() {
+            return environment(env).add(declaration(decl, true), true);
+        });
+}
+
 void environment::for_each_constant(std::function<void(constant_info const & d)> const & f) const {
     smap_foreach(cnstr_get(raw(), 1), [&](object *, object * v) {
             constant_info cinfo(v, true);
