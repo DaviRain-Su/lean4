@@ -447,7 +447,7 @@ inline fn retain(e: *anyopaque) *anyopaque {
 //
 // Expr tags (matching Lean.Expr inductive definition order):
 //   0 bvar    1 fvar    2 mvar    3 sort    4 const    5 app
-//   6 lam     7 forallE 8 letE    9 mdata  10 proj   11 lit
+//   6 lam     7 forallE 8 letE    9 lit   10 mdata  11 proj
 //
 // Field layouts match the constructor parameter order. Scalar fields
 // (BinderInfo u8, Bool u8) follow object fields in the ctor layout.
@@ -513,14 +513,14 @@ pub fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaq
 }
 
 pub fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(9, 2, 0);
+    const o = alloc.lean_alloc_ctor(10, 2, 0);
     ctor.lean_ctor_set(o, 0, m);
     ctor.lean_ctor_set(o, 1, e);
     return o;
 }
 
 pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(10, 3, 0);
+    const o = alloc.lean_alloc_ctor(11, 3, 0);
     ctor.lean_ctor_set(o, 0, s);
     ctor.lean_ctor_set(o, 1, i);
     ctor.lean_ctor_set(o, 2, e);
@@ -528,7 +528,7 @@ pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.
 }
 
 pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
-    const o = alloc.lean_alloc_ctor(11, 1, 0);
+    const o = alloc.lean_alloc_ctor(9, 1, 0);
     ctor.lean_ctor_set(o, 0, l);
     return o;
 }
