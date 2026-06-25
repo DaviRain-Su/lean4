@@ -6,6 +6,9 @@ stage0-prefix/
 stage1-prefix/
 stage2-prefix/
 stage3-prefix/
+/stage1/
+/stage2/
+/stage3/
 cadical/
 leantar.tar.gz
 leantar/
