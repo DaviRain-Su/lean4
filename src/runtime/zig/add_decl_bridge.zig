@@ -420,7 +420,6 @@ fn inferImplicit(t: *anyopaque, num_params: u64, strict: bool) *anyopaque {
     if (!isForall(t)) {
         return t;
     }
-    dbgTrace("ZIG: inferImplicit iter");
     // Recursively process the body
     const body = forallBody(t);
     lean_inc(body); // lean_expr_mk_forall consumes body
@@ -1606,7 +1605,6 @@ fn buildRecursorType(
     // Structure (C++ matches): Pi(params, Pi(motives, Pi(minors, Pi(indices, Pi(major, body)))))
     // The index Pi binders were already added before the minor loop (between major and minors).
 
-    dbgTrace("ZIG: after minor loop");
     // Don't abstract params from motive_type_final — keep fvars and let the final
     // param forall wrapping handle it (matching C++ which abstracts m_params last).
     var motive_type_final = motive_type;
@@ -1696,9 +1694,7 @@ fn buildRecursorType(
 
     // Apply infer_implicit to mark binders as implicit where needed.
     // C++ calls infer_implicit(rec_ty, strict=true) which processes ALL binders.
-    dbgTrace("ZIG: before inferImplicit");
     result = inferImplicit(result, 9999, true);
-    dbgTrace("ZIG: after inferImplicit");
 
     return result;
 }
@@ -1970,5 +1966,6 @@ pub export fn lean_add_decl_without_checking(env: *anyopaque, decl: *anyopaque) 
 }
 
 pub export fn lean_add_decl_bridge(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque {
-    return lean_add_decl_without_checking(env, decl);
+    const result = lean_add_decl_without_checking(env, decl);
+    return result;
 }
