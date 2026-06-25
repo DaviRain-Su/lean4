@@ -1065,7 +1065,6 @@ lean_eval_main_decl
 lean_level_eq
 lean_level_eqv
 lean_expr_has_loose_bvar
-lean_expr_lift_loose_bvars
 lean_expr_lower_loose_bvars
 lean_expr_dbg_to_string
 lean_expr_instantiate
