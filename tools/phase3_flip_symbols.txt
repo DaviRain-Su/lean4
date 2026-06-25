@@ -639,7 +639,6 @@ lean_promise_resolve
 lean_ptr_addr
 lean_ptr_tag
 lean_register_external_class
-lean_replace_expr
 lean_run_main
 lean_run_mod_init_core
 lean_runtime_forget
@@ -1068,8 +1067,6 @@ lean_level_eqv
 lean_expr_has_loose_bvar
 lean_expr_lift_loose_bvars
 lean_expr_lower_loose_bvars
-lean_expr_abstract
-lean_expr_abstract_range
 lean_expr_dbg_to_string
 lean_expr_instantiate
 lean_expr_instantiate1
@@ -1087,3 +1084,4 @@ lean_mk_cases_on
 lean_instantiate_expr_mvars
 lean_add_decl
 lean_expr_data
+lean_replace_expr
