@@ -420,6 +420,7 @@ fn inferImplicit(t: *anyopaque, num_params: u64, strict: bool) *anyopaque {
     if (!isForall(t)) {
         return t;
     }
+    dbgTrace("ZIG: inferImplicit iter");
     // Recursively process the body
     const body = forallBody(t);
     lean_inc(body); // lean_expr_mk_forall consumes body
@@ -593,8 +594,7 @@ fn mkList(elems: []const *anyopaque) *anyopaque {
 
 fn addInductive(env: *anyopaque, decl: *anyopaque) *anyopaque {
     // Parse Declaration.inductiveDecl (tag 6)
-    // Zig inductive declaration path. Handles simple inductives (single type,
-    // no indices, no params). Falls back to C++ for complex cases.
+    // Zig inductive declaration path. Handles all inductive types.
 
     const lparams = lean_ctor_get(decl, 0) orelse @panic("inductive decl missing lparams");
     const nparams_boxed = lean_ctor_get(decl, 1) orelse lean_box(0);
@@ -1606,6 +1606,7 @@ fn buildRecursorType(
     // Structure (C++ matches): Pi(params, Pi(motives, Pi(minors, Pi(indices, Pi(major, body)))))
     // The index Pi binders were already added before the minor loop (between major and minors).
 
+    dbgTrace("ZIG: after minor loop");
     // Don't abstract params from motive_type_final — keep fvars and let the final
     // param forall wrapping handle it (matching C++ which abstracts m_params last).
     var motive_type_final = motive_type;
@@ -1695,7 +1696,9 @@ fn buildRecursorType(
 
     // Apply infer_implicit to mark binders as implicit where needed.
     // C++ calls infer_implicit(rec_ty, strict=true) which processes ALL binders.
+    dbgTrace("ZIG: before inferImplicit");
     result = inferImplicit(result, 9999, true);
+    dbgTrace("ZIG: after inferImplicit");
 
     return result;
 }
@@ -1720,7 +1723,6 @@ fn buildRecursorRuleRHS(
 ) *anyopaque {
     _ = cname;
     _ = rec_name; // Not used directly; all_rec_names[field_type_idx] is used instead
-
     // Instantiate the constructor type's param binders with our param_fvars.
     // This replaces the ctor type's param bvars with our fvars so field
     // domains reference our fvars.
