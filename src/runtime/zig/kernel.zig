@@ -469,7 +469,8 @@ inline fn extractFlags(data: u64) u64 {
 pub fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(0, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, idx);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(1).?, 0, 0, 0, 0, 0)));
+    const bvar_range: usize = if (object.lean_is_scalar(idx)) object.lean_unbox(idx) + 1 else 1;
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(bvar_range).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
