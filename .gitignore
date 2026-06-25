@@ -21,14 +21,32 @@ lake-manifest.json
 src/lake-manifest.json
 src/lakefile.toml
 
-# Test scratch files
-test_*.lean
-test_*.o
-test_noinline.o
+# Test output files
+*.out.produced
+*.lean.c
+*.lean.tmp
+*.lean.lock
+*.lean.dir/
+*.stdout*.txt
 
-# Lake build artifacts
-tests/**/lake-manifest.json
-tests/**/.lake/
+# Lake test artifacts
+tests/**/produced.out
+tests/**/produced.expected
+tests/**/out/
+tests/lake/tests/clone/**
+tests/lake/tests/**/work/
+tests/lake/tests/depTree/*/
+tests/lake/tests/*/hello/
+tests/lake/tests/*/inputs/
+tests/lake/tests/*/files/
+tests/lake/tests/*/toolchain
+tests/lake/tests/translateConfig/lakefile.toml
+tests/lake/tests/shake/Lib/
+tests/lake/tests/shake/Main.lean
+tests/lake/tests/shake/lakefile.toml
+tests/lake/tests/shake/lean-toolchain
+tests/lake/tests/rebuild/Foo/
+tests/lake/tests/kinds/files/
 
 # EmitZig test binaries
 tests/emitzig/Array*
