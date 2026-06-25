@@ -477,11 +477,11 @@ fn exprDbgPrint(w: *std.Io.Writer, e: *anyopaque, ctx: *BinderCtx, prec: u32) an
                 try w.writeAll(" : ");
                 try exprDbgPrint(w, domain, ctx, 0);
                 if (bi == 1) try w.writeByte('}') else try w.writeByte(')');
-                try w.writeAll(" → ");
+                try w.writeAll(" -> ");
             } else {
                 if (prec >= 1) try w.writeByte('(');
                 try exprDbgPrint(w, domain, ctx, 0);
-                try w.writeAll(" → ");
+                try w.writeAll(" -> ");
             }
             try exprDbgPrint(w, body, ctx, 0);
             if (!uses_name and prec >= 1) try w.writeByte(')');
@@ -543,16 +543,16 @@ fn printLevel(w: *std.Io.Writer, l: *anyopaque) anyerror!void {
     const tag = object.lean_ptr_tag(l);
     const ct = @import("ctor.zig");
     switch (tag) {
-        0 => try w.writeAll("0"),
+        0 => try w.writeAll("Prop"),
         1 => {
             if (ct.ctorNumObjs(l) >= 1) {
                 const inner = ct.lean_ctor_get(l, 0);
                 if (inner != null and !object.lean_is_scalar(inner.?)) {
-                    if (object.lean_ptr_tag(inner.?) == 0) { try w.writeAll("1"); return; }
-                    try w.writeAll("1+"); try printLevel(w, inner.?); return;
+                    if (object.lean_ptr_tag(inner.?) == 0) { try w.writeAll("Type"); return; }
+                    try w.writeAll("Type "); try printLevel(w, inner.?); return;
                 }
             }
-            try w.writeAll("1");
+            try w.writeAll("Type");
         },
         else => try w.print("L@{}", .{tag}),
     }
