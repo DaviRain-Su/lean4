@@ -443,6 +443,20 @@ inline fn retain(e: *anyopaque) *anyopaque {
     return e;
 }
 
+// ── Data field helpers ────────────────────────────────────────────────────────
+
+inline fn extractBvarRange(data: u64) u64 {
+    return data >> 44;
+}
+
+inline fn extractDepth(data: u64) u64 {
+    return (data >> 32) & 255;
+}
+
+inline fn extractFlags(data: u64) u64 {
+    return data & (@as(u64, 0xF) << 40);
+}
+
 // ── Expression constructors ─────────────────────────────────────────────────
 //
 // Expr tags (matching Lean.Expr inductive definition order):
@@ -455,21 +469,21 @@ inline fn retain(e: *anyopaque) *anyopaque {
 pub fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(0, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, idx);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(1).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
 pub fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 1, 0, 0, 0)));
     return o;
 }
 
 pub fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(3, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
@@ -477,7 +491,7 @@ pub fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque
     const o = alloc.lean_alloc_ctor(4, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, ls);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
@@ -485,7 +499,10 @@ pub fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(5, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, f);
     ctor.lean_ctor_set(o, 1, a);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(@as(u64, (1048575 << 44))));
+    const f_data = eData(f);
+    const a_data = eData(a);
+    const data = lean_expr_mk_app_data(f_data, a_data);
+    ctor.lean_ctor_set_usize(o, 2, @intCast(data));
     return o;
 }
 
@@ -494,7 +511,14 @@ pub fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) 
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, d);
     ctor.lean_ctor_set(o, 2, b);
-    ctor.lean_ctor_set_usize(o, 3, @intCast(@as(u64, (1048575 << 44))));
+    const d_range = extractBvarRange(eData(d));
+    const b_range = extractBvarRange(eData(b));
+    const body_adj: u64 = if (b_range > 0) b_range - 1 else 0;
+    const bvar_range: u64 = @max(d_range, body_adj);
+    const flags = extractFlags(eData(d)) | extractFlags(eData(b));
+    const depth = @max(extractDepth(eData(d)), extractDepth(eData(b))) + 1;
+    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
 }
@@ -504,7 +528,14 @@ pub fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) 
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, d);
     ctor.lean_ctor_set(o, 2, b);
-    ctor.lean_ctor_set_usize(o, 3, @intCast(@as(u64, (1048575 << 44))));
+    const d_range = extractBvarRange(eData(d));
+    const b_range = extractBvarRange(eData(b));
+    const body_adj: u64 = if (b_range > 0) b_range - 1 else 0;
+    const bvar_range: u64 = @max(d_range, body_adj);
+    const flags = extractFlags(eData(d)) | extractFlags(eData(b));
+    const depth = @max(extractDepth(eData(d)), extractDepth(eData(b))) + 1;
+    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
 }
@@ -515,7 +546,16 @@ pub fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaq
     ctor.lean_ctor_set(o, 1, t);
     ctor.lean_ctor_set(o, 2, v);
     ctor.lean_ctor_set(o, 3, b);
-    ctor.lean_ctor_set_usize(o, 4, @intCast(@as(u64, (1048575 << 44))));
+    const t_range = extractBvarRange(eData(t));
+    const v_range = extractBvarRange(eData(v));
+    const b_range = extractBvarRange(eData(b));
+    const body_adj: u64 = if (b_range > 0) b_range - 1 else 0;
+    const max_tv: u64 = @max(t_range, v_range);
+    const bvar_range: u64 = @max(max_tv, body_adj);
+    const flags = extractFlags(eData(t)) | extractFlags(eData(v)) | extractFlags(eData(b));
+    const depth = @max(@max(extractDepth(eData(t)), extractDepth(eData(v))), extractDepth(eData(b))) + 1;
+    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    ctor.lean_ctor_set_usize(o, 4, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 4 * @sizeOf(usize) + @sizeOf(usize), nd);
     return o;
 }
@@ -524,7 +564,12 @@ pub fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque 
     const o = alloc.lean_alloc_ctor(10, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, m);
     ctor.lean_ctor_set(o, 1, e);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(@as(u64, (1048575 << 44))));
+    const e_data = eData(e);
+    const bvar_range = extractBvarRange(e_data);
+    const flags = extractFlags(e_data);
+    const depth = extractDepth(e_data);
+    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    ctor.lean_ctor_set_usize(o, 2, @intCast(data));
     return o;
 }
 
@@ -533,14 +578,19 @@ pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.
     ctor.lean_ctor_set(o, 0, s);
     ctor.lean_ctor_set(o, 1, i);
     ctor.lean_ctor_set(o, 2, e);
-    ctor.lean_ctor_set_usize(o, 3, @intCast(@as(u64, (1048575 << 44))));
+    const e_data = eData(e);
+    const bvar_range = extractBvarRange(e_data);
+    const flags = extractFlags(e_data);
+    const depth = extractDepth(e_data);
+    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     return o;
 }
 
 pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(9, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
@@ -550,14 +600,14 @@ pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
 
 pub fn lean_level_mk_zero(_: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(0, 0, @sizeOf(usize));
-    ctor.lean_ctor_set_usize(o, 0, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 0, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
     return o;
 }
 
 pub fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
     return o;
 }
 
@@ -565,7 +615,7 @@ pub fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(2, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
     return o;
 }
 
@@ -573,14 +623,14 @@ pub fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque 
     const o = alloc.lean_alloc_ctor(3, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
     return o;
 }
 
 pub fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(4, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(@as(u64, (1048575 << 44))));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
     return o;
 }
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
