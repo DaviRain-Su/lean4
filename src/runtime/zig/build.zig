@@ -203,6 +203,22 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
     });
     b.installArtifact(add_decl_bridge_lib);
+    // checked_add_bridge.zig — separate module for the future checked
+    // declaration-add cutover path. Keep it outside the runtime ZCU so it can
+    // depend only on exported C-ABI entrypoints without duplicating runtime
+    // symbols in the main archive.
+    const checked_add_bridge_mod = b.createModule(.{
+        .root_source_file = b.path("checked_add_bridge.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const checked_add_bridge_lib = b.addLibrary(.{
+        .name = "checked_add_bridge",
+        .root_module = checked_add_bridge_mod,
+        .linkage = .static,
+    });
+    b.installArtifact(checked_add_bridge_lib);
 
     root_mod.linkSystemLibrary("uv", .{});
 
