@@ -504,11 +504,6 @@ const TypeChecker = struct {
             for (fvars_buf.items) |fv| rc.lean_dec(fv);
             fvars_buf.deinit(self.allocator);
         }
-        // Store (name, domain, bi) for Pi wrapping
-        var binders_buf = std.ArrayListUnmanaged(struct { name: *anyopaque, domain: *anyopaque, bi: u8 }).empty;
-        defer {
-            binders_buf.deinit(self.allocator);
-        }
 
         var e = e0;
         while (ea.isLambda(e)) {
@@ -523,12 +518,8 @@ const TypeChecker = struct {
             else
                 rc.lean_inc_ret(ea.bindingDomain(e));
 
-            // Save binder info for Pi wrapping
             const binding_name = ea.bindingName(e);
-            rc.lean_inc(binding_name);
-            rc.lean_inc(d);
             const bi_val = ea.bindingInfo(e);
-            binders_buf.append(self.allocator, .{ .name = binding_name, .domain = d, .bi = bi_val }) catch @panic("inferLambda: OOM");
 
             // Create unique fvar name and add to local context
             const fvar_name = util_name.mkInternalUniqueName();
@@ -558,18 +549,18 @@ const TypeChecker = struct {
         else
             rc.lean_inc_ret(e);
 
-        const r = self.inferTypeCore(body, infer_only);
+        var r = self.inferTypeCore(body, infer_only);
         rc.lean_dec(body);
+        r = kernel.lean_kernel_cheap_beta_reduce(r);
 
-        // Wrap result in Pi for each binder (reverse order)
-        var result = r;
-        var i = binders_buf.items.len;
-        while (i > 0) {
-            i -= 1;
-            const b = binders_buf.items[i];
-            result = lean_expr_mk_forall(b.name, b.domain, result, b.bi);
+        if (fvars_buf.items.len > 0) {
+            const fvars_arr = array.mkArrayFromSlice(fvars_buf.items);
+            const wrapped = lean_local_ctx_mk_pi(saved_lctx, fvars_arr, r, 0);
+            rc.lean_dec(fvars_arr);
+            rc.lean_dec(r);
+            r = wrapped;
         }
-        return result;
+        return r;
     }
 
     // ── infer_pi ─────────────────────────────────────────────────────────────
