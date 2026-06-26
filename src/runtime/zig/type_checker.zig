@@ -40,6 +40,7 @@ const util_name = @import("util_name.zig");
 extern fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_level_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_mk_app(f: *anyopaque, a: *anyopaque) callconv(.c) *anyopaque;
@@ -55,6 +56,8 @@ extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_mk_pi(lctx: *anyopaque, fvars: *anyopaque, e: *anyopaque, remove_dead_let: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
+extern fn lean_axiom_val_is_unsafe(v: *anyopaque) callconv(.c) u8;
+extern fn lean_opaque_val_is_unsafe(v: *anyopaque) callconv(.c) u8;
 
 // ── instantiate_lparams bridge ──────────────────────────────────────────────
 // Used by inferConstant and unfoldDefinition to substitute level params.
@@ -176,6 +179,27 @@ fn mkConstName(parts: []const [*:0]const u8) *anyopaque {
         n = lean_name_mk_str(n, p);
     }
     return n;
+}
+
+fn nameInList(names: *anyopaque, target: *anyopaque) bool {
+    var it = names;
+    while (!ka.isListNil(it)) {
+        if (lean_name_eq(ka.listHead(it), target) != 0) return true;
+        it = ka.listTail(it);
+    }
+    return false;
+}
+
+fn levelHasUndefinedParam(lvl: *anyopaque, allowed_params: *anyopaque) bool {
+    if (object.lean_is_scalar(lvl)) return false;
+    return switch (object.lean_ptr_tag(lvl)) {
+        1 => levelHasUndefinedParam(ctor.lean_ctor_get(lvl, 0) orelse return false, allowed_params),
+        2, 3 => levelHasUndefinedParam(ctor.lean_ctor_get(lvl, 0) orelse return false, allowed_params) or
+            levelHasUndefinedParam(ctor.lean_ctor_get(lvl, 1) orelse return false, allowed_params),
+        4 => !nameInList(allowed_params, ctor.lean_ctor_get(lvl, 0) orelse return false),
+        5 => false,
+        else => false,
+    };
 }
 
 fn getNatZero() *anyopaque {
@@ -363,6 +387,8 @@ fn isDefEqCallback(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaq
 const TypeChecker = struct {
     st: *State,
     lctx: *anyopaque,
+    lparams: ?*anyopaque = null,
+    definition_safety: ka.DefinitionSafety = .safe,
     eager_reduce: bool = false,
     allocator: std.mem.Allocator,
 
@@ -376,6 +402,28 @@ const TypeChecker = struct {
 
     inline fn env(self: *TypeChecker) *anyopaque {
         return self.st.env;
+    }
+
+    fn ciIsUnsafe(self: *TypeChecker, ci: *anyopaque) bool {
+        _ = self;
+        return switch (ka.ciKind(ci)) {
+            .axiom => lean_axiom_val_is_unsafe(ka.ciVal(ci)) != 0,
+            .defn => ka.defnValSafety(ci) == .unsafe_def,
+            .thm => false,
+            .opaque_ci => lean_opaque_val_is_unsafe(ka.ciVal(ci)) != 0,
+            .quot => false,
+            .induct => ka.inductValIsUnsafe(ci),
+            .ctor => ka.ctorValIsUnsafe(ci),
+            .rec => ka.recValIsUnsafe(ci),
+        };
+    }
+
+    fn checkLevel(self: *TypeChecker, lvl: *anyopaque) void {
+        if (self.lparams) |allowed| {
+            if (levelHasUndefinedParam(lvl, allowed)) {
+                @panic("invalid reference to undefined universe level parameter");
+            }
+        }
     }
 
     // ── ensure_sort / ensure_pi ───────────────────────────────────────────
@@ -398,12 +446,25 @@ const TypeChecker = struct {
 
     // ── infer_constant ────────────────────────────────────────────────────
 
-    fn inferConstant(self: *TypeChecker, e: *anyopaque) *anyopaque {
+    fn inferConstant(self: *TypeChecker, e: *anyopaque, infer_only: bool) *anyopaque {
         const info = ka.envGet(self.env(), ea.constName(e));
         const ps = ka.ciLevelParams(info);
         const ls = ea.constLevels(e);
         if (ka.listLength(ps) != ka.listLength(ls)) {
             @panic("incorrect number of universe levels");
+        }
+        if (!infer_only) {
+            if (self.ciIsUnsafe(info) and self.definition_safety != .unsafe_def) {
+                @panic("invalid declaration, it uses unsafe declaration");
+            }
+            if (ka.ciIsDefinition(info) and ka.defnValSafety(info) == .partial and self.definition_safety == .safe) {
+                @panic("invalid declaration, safe declaration must not contain partial declaration");
+            }
+            var it = ls;
+            while (!ka.isListNil(it)) {
+                self.checkLevel(ka.listHead(it));
+                it = ka.listTail(it);
+            }
         }
         return lean_kernel_instantiate_type_lparams(self.env(), info, ls);
     }
@@ -809,10 +870,11 @@ const TypeChecker = struct {
             .MVar => @panic("kernel type checker does not support meta variables"),
             .BVar => @panic("type checker does not support loose bound variables"),
             .Sort => blk: {
+                if (!infer_only) self.checkLevel(ea.sortLevel(e));
                 const level_succ = lean_level_mk_succ(rc.lean_inc_ret(ea.sortLevel(e)));
                 break :blk lean_expr_mk_sort(level_succ);
             },
-            .Const => self.inferConstant(e),
+            .Const => self.inferConstant(e, infer_only),
             .Lambda => self.inferLambda(e),
             .Pi => self.inferPi(e),
             .App => self.inferApp(e),
@@ -1542,6 +1604,30 @@ const TypeChecker = struct {
     fn check(self: *TypeChecker, e: *anyopaque) *anyopaque {
         return self.inferTypeCore(e, false);
     }
+
+    fn checkWithParams(self: *TypeChecker, e: *anyopaque, lparams: *anyopaque, definition_safety: ka.DefinitionSafety) *anyopaque {
+        const saved_lparams = self.lparams;
+        const saved_definition_safety = self.definition_safety;
+        defer {
+            self.lparams = saved_lparams;
+            self.definition_safety = saved_definition_safety;
+        }
+        self.lparams = lparams;
+        self.definition_safety = definition_safety;
+        return self.inferTypeCore(e, false);
+    }
+
+    fn isDefEqWithParams(self: *TypeChecker, t: *anyopaque, s: *anyopaque, lparams: *anyopaque, definition_safety: ka.DefinitionSafety) bool {
+        const saved_lparams = self.lparams;
+        const saved_definition_safety = self.definition_safety;
+        defer {
+            self.lparams = saved_lparams;
+            self.definition_safety = saved_definition_safety;
+        }
+        self.lparams = lparams;
+        self.definition_safety = definition_safety;
+        return self.isDefEqCore(t, s);
+    }
 };
 
 // ── Entry points ────────────────────────────────────────────────────────────
@@ -1627,10 +1713,91 @@ fn leanKernelCheck(env: *anyopaque, lctx: *anyopaque, a: *anyopaque) callconv(.c
     return tc.check(a);
 }
 
+fn leanKernelCheckWithParams(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, lparams: *anyopaque, definition_safety: u8) callconv(.c) *anyopaque {
+    const page_alloc = std.heap.page_allocator;
+    var st = State{
+        .env = env,
+        .whnf_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .whnf_core_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .infer_type_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .infer_type_only_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .unfold_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .equiv = equiv_manager.EquivManager.init(page_alloc),
+        .allocator = page_alloc,
+    };
+    defer {
+        st.whnf_cache.deinit();
+        st.whnf_core_cache.deinit();
+        st.infer_type_cache.deinit();
+        st.infer_type_only_cache.deinit();
+        st.unfold_cache.deinit();
+        st.equiv.deinit();
+    }
+    var tc = TypeChecker.init(env, lctx, page_alloc);
+    tc.st = &st;
+    g_current_tc = &tc;
+    defer g_current_tc = null;
+    return tc.checkWithParams(a, lparams, @enumFromInt(definition_safety));
+}
+
+fn leanKernelIsDefEqWithParams(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque, lparams: *anyopaque, definition_safety: u8) callconv(.c) u8 {
+    const page_alloc = std.heap.page_allocator;
+    var st = State{
+        .env = env,
+        .whnf_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .whnf_core_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .infer_type_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .infer_type_only_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .unfold_cache = std.AutoHashMap(*anyopaque, *anyopaque).init(page_alloc),
+        .equiv = equiv_manager.EquivManager.init(page_alloc),
+        .allocator = page_alloc,
+    };
+    defer {
+        st.whnf_cache.deinit();
+        st.whnf_core_cache.deinit();
+        st.infer_type_cache.deinit();
+        st.infer_type_only_cache.deinit();
+        st.unfold_cache.deinit();
+        st.equiv.deinit();
+    }
+    var tc = TypeChecker.init(env, lctx, page_alloc);
+    tc.st = &st;
+    g_current_tc = &tc;
+    defer g_current_tc = null;
+    return if (tc.isDefEqWithParams(a, b, lparams, @enumFromInt(definition_safety))) 1 else 0;
+}
+
+test "levelHasUndefinedParam accepts declared params" {
+    const u = runtime_helpers.lean_name_mk_str(object.lean_box(0).?, "u");
+    defer rc.lean_dec(u);
+    const allowed = ka.mkList1(rc.lean_inc_ret(u));
+    defer rc.lean_dec(allowed);
+    const level_u = lean_level_mk_param(rc.lean_inc_ret(u));
+    defer rc.lean_dec(level_u);
+    try std.testing.expect(!levelHasUndefinedParam(level_u, allowed));
+}
+
+test "levelHasUndefinedParam rejects undeclared params through max" {
+    const u = runtime_helpers.lean_name_mk_str(object.lean_box(0).?, "u");
+    defer rc.lean_dec(u);
+    const v = runtime_helpers.lean_name_mk_str(object.lean_box(0).?, "v");
+    defer rc.lean_dec(v);
+    const allowed = ka.mkList1(rc.lean_inc_ret(u));
+    defer rc.lean_dec(allowed);
+    const level_u = lean_level_mk_param(rc.lean_inc_ret(u));
+    defer rc.lean_dec(level_u);
+    const level_v = lean_level_mk_param(rc.lean_inc_ret(v));
+    defer rc.lean_dec(level_v);
+    const level_max = lean_level_mk_max(rc.lean_inc_ret(level_u), rc.lean_inc_ret(level_v));
+    defer rc.lean_dec(level_max);
+    try std.testing.expect(levelHasUndefinedParam(level_max, allowed));
+}
 comptime {
     if (export_kernel_symbols) {
         @export(&leanKernelWhnf, .{ .name = "lean_kernel_whnf_impl", .linkage = .strong });
         @export(&leanKernelIsDefEq, .{ .name = "lean_kernel_is_def_eq_impl", .linkage = .strong });
         @export(&leanKernelCheck, .{ .name = "lean_kernel_check_impl", .linkage = .strong });
+        @export(&leanKernelCheckWithParams, .{ .name = "lean_kernel_check_with_params_impl", .linkage = .strong });
+        @export(&leanKernelIsDefEqWithParams, .{ .name = "lean_kernel_is_def_eq_with_params_impl", .linkage = .strong });
     }
 }
