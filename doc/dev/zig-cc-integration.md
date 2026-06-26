@@ -19,6 +19,28 @@ The work is split into two phases:
    runtime into `src/`, enabling `lean -z` to produce Zig source files that are
    compiled and linked via `zig build` or `zig build-obj`/`zig build-exe`.
 
+### Current status
+
+Phase 1 is implemented and validated for the **host target only**. The current
+toolchain wrappers execute:
+
+```bash
+zig cc "$@"
+zig c++ "$@"
+```
+
+with no `-target` flag injected. This means each build directory still produces
+artifacts for exactly one target: the host platform seen by CMake. On the current
+development machine, the validated target is:
+
+- `aarch64-apple-darwin`
+
+A full bootstrap and full test run (`3926 / 3926`) passed for that host target.
+
+Target expansion should therefore be treated as a **follow-on phase** to the
+working host-native integration, not as something already implied by the existing
+toolchain file.
+
 ---
 
 ## Phase 1: zig cc/c++ as the C/C++ Compiler
@@ -330,29 +352,98 @@ For end users who don't have the wrapper, they can set `LEAN_CC="zig cc"` and th
 | `-Wl,-Bsymbolic` | :554 | lld supports it | Verify |
 | `-Wl,--gc-sections` / `-Wl,-dead_strip` | :542,545 | lld supports it | Verify |
 | `-Wl,-rpath=\\$$ORIGIN/..` | :559 | Supported | Verify |
-| `-lstdc++` / `-lc++` | :488,491 | zig bundles libc++ | Set `LEAN_CXX_STDLIB=""` |
-| `MACOSX_DEPLOYMENT_TARGET` | Leanc.lean:33 | N/A — zig uses `-target` | Skip when zig |
+| `-lstdc++` / `-lc++` | :507-514 | Still needed when invoking `zig cc` as the linker driver | Keep platform-specific stdlib flags (`-lc++` on Darwin) |
+| `MACOSX_DEPLOYMENT_TARGET` | Leanc.lean / Lake Actions | N/A — zig target selection should come from `-target` | Skip environment hack when zig |
 
-Most flags pass through unchanged. The ones needing conditional handling:
+Most flags pass through unchanged. The ones needing conditional handling are:
 1. `-fuse-ld=lld` — redundant, strip it.
-2. `LEAN_CXX_STDLIB` — zig bundles libc++, set to empty.
-3. `MACOSX_DEPLOYMENT_TARGET` — skip the env hack in leanc.
+2. `LEAN_CXX_STDLIB` — **do not** clear it; `zig cc` still needs explicit platform
+   stdlib flags when it is used as the linker driver.
+3. `MACOSX_DEPLOYMENT_TARGET` — skip the env hack in `leanc` and Lake when zig is active.
 
-#### Cross-compilation scripts
+#### Cross-compilation strategy
 
-`script/prepare-llvm-linux.sh` and its macOS/mingw counterparts override
-`CMAKE_C_COMPILER` and `LEANC_CC` to a bundled clang with a custom sysroot.
-With `zig cc`, cross-compilation becomes simpler — zig handles targets natively:
+Zig can target many architectures and ABIs, but Lean's build system is not organized
+around arbitrary Zig triples. It has explicit platform families and feature branches
+for:
 
-```bash
-# Example: cross-compile for Linux x86_64 from macOS
-cmake -DLEAN_USE_ZIG_CC=ON \
-      -DCMAKE_C_COMPILER_TARGET=x86_64-linux-gnu \
-      -DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-gnu \
-      ..
+- `Darwin`
+- `Linux`
+- `Windows`
+- `Emscripten`
+
+So "supporting Zig targets" should mean **expanding support within Lean's existing
+platform model**, not claiming that every Zig target triple is automatically valid.
+
+##### Current implementation
+
+The current implementation does **not** expose a user-facing target setting. In
+particular, it does not yet support:
+
+- `LEAN_ZIG_TARGET`
+- `CMAKE_C_COMPILER_TARGET`
+- `CMAKE_CXX_COMPILER_TARGET`
+
+as first-class inputs that are propagated through stage0/stage1/stage2.
+
+##### Recommended next interface
+
+Add a single Lean-specific cache variable:
+
+```cmake
+-DLEAN_ZIG_TARGET=<zig-target-triple>
 ```
 
-This is a future enhancement; the initial implementation focuses on native builds.
+and treat `CMAKE_{C,CXX}_COMPILER_TARGET` as optional compatibility inputs. The
+wrappers should then become:
+
+```bash
+zig cc -target "$LEAN_ZIG_TARGET" "$@"
+zig c++ -target "$LEAN_ZIG_TARGET" "$@"
+```
+
+with the target also mapped into:
+
+- `CMAKE_SYSTEM_NAME`
+- `CMAKE_SYSTEM_PROCESSOR`
+- cross-compilation options forwarded through root `PLATFORM_ARGS`
+
+##### Recommended support matrix
+
+Start with a constrained target matrix aligned to Lean's existing platform support:
+
+| Tier | Zig target triple | Notes |
+|------|-------------------|-------|
+| 1 | `aarch64-macos` | host-validated family |
+| 1 | `x86_64-macos` | same Darwin code path |
+| 1 | `x86_64-linux-gnu` | existing Linux code path |
+| 1 | `aarch64-linux-gnu` | existing Linux code path |
+| 1 | `x86_64-linux-musl` | libc variant change, same broad platform family |
+| 1 | `aarch64-linux-musl` | libc variant change, same broad platform family |
+| 1 | `x86_64-windows-gnu` | existing Windows code path, mingw ABI |
+| 2 | `wasm32-emscripten` / `wasm32-wasi` | separate design track; not a drop-in extension of Tier 1 |
+
+##### Why WASM is separate
+
+WASM is not just "one more Zig target". The repository already treats
+`Emscripten` as a special platform:
+
+- OpenSSL is disabled
+- libuv is built differently
+- Lake/shared-library targets are restricted or stubbed
+- dynamic linking expectations differ
+
+So WASM should be planned as an explicit experimental target family, not folded into
+the initial generic cross-target rollout.
+
+##### Rollout plan
+
+1. Add `LEAN_ZIG_TARGET`.
+2. Map supported Zig triples onto Lean/CMake platform families.
+3. Propagate the target through stage0/stage1/stage2.
+4. Run a smoke-build matrix for Tier 1 targets.
+5. Run host-executable tests only for native builds; use compile/link verification for foreign targets.
+6. Design WASM separately once Tier 1 is stable.
 
 ### 1.6 Design: Testing
 
@@ -365,31 +456,36 @@ This is a future enhancement; the initial implementation focuses on native build
 | `LEAN_CC="zig cc" leanc -c test.c -o test.o` | Object file compilation |
 | `LEAN_CC="zig cc" leanc test.o -o test` | Executable linking |
 | `cmake -DLEAN_USE_ZIG_CC=ON .. && make` | Full bootstrap (C + C++ via zig) |
-| `make test ARGS="-R 'compile'"` | Compile test suite passes |
-| `make test ARGS="-R 'compile_bench'"` | Benchmark tests pass |
+| `make test` | Full test suite passes for the host target |
+| Tier 1 smoke builds with `LEAN_ZIG_TARGET` | Cross-target compile/link viability |
 
 #### Regression strategy
 
-1. Build with `zig cc`/`zig c++` and run the full test suite.
+1. Build with `zig cc`/`zig c++` and run the full host test suite.
 2. Compare `leanc --print-cflags` output between `zig cc` and system `cc`.
 3. Compile identical `.c` files with both compilers, diff `.o` symbol tables.
 4. Compile identical `.cpp` files with both C++ compilers, diff `.o` symbol tables.
 5. Verify executables run correctly on the host platform.
-6. Verify `lean --version` works after full bootstrap.
+6. For foreign targets, verify bootstrap completion plus artifact inspection (`file`, symbol tables, link success).
 
-### 1.7 Implementation order
+#### Implementation order
+
+##### Phase 1 (implemented)
 
 1. Add `splitCcCommand` to `src/Leanc.lean`, handle multi-word `LEAN_CC`.
 2. Add `splitCcCommand` to `src/lake/Lake/Build/Actions.lean`.
-3. Skip `MACOSX_DEPLOYMENT_TARGET` hack when compiler is zig.
-4. Add `LEAN_USE_ZIG_CC` CMake option in `src/CMakeLists.txt`:
-   - Create `zig-cc` and `zig-cxx` wrapper scripts in build dir.
-   - Override `CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`.
-   - Set `LEANC_CC` to wrapper.
-   - Strip `-fuse-ld=lld` and clear `LEAN_CXX_STDLIB`.
-5. Build with `cmake -DLEAN_USE_ZIG_CC=ON` and run tests.
-6. Update `src/bin/leanc.in` to handle `LEAN_CC` with spaces (bash handles this natively
-   via `${LEAN_CC:-@CMAKE_C_COMPILER@}` in array context, but verify).
+3. Skip `MACOSX_DEPLOYMENT_TARGET` hacks when compiler is zig.
+4. Add `LEAN_USE_ZIG_CC` CMake option in `src/CMakeLists.txt`.
+5. Handle zig/lld incompatibilities around exported artifact suffixes and Darwin-only flags.
+6. Build with `cmake -DLEAN_USE_ZIG_CC=ON` and run the full test suite.
+
+##### Phase 1b (next)
+
+1. Add `LEAN_ZIG_TARGET`.
+2. Teach the wrappers to inject `-target`.
+3. Map target triples to Lean's supported platform families.
+4. Add Tier 1 smoke-build coverage.
+5. Revisit WASM/Emscripten as a separate experimental track.
 
 ---
 
