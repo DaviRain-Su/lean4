@@ -7,6 +7,20 @@ if(NOT DEFINED STAGE)
 endif()
 include(ExternalProject)
 project(LEAN CXX C)
+
+option(LEAN_USE_ZIG_CC "Use 'zig cc'/'zig c++' as C/C++ compiler instead of system cc/clang" OFF)
+if(LEAN_USE_ZIG_CC)
+  find_program(ZIG_EXE zig REQUIRED)
+  # CMake cannot call `zig` directly — it needs the `cc`/`c++` subcommand.
+  # Create wrapper scripts so CMake sees a normal compiler binary.
+  set(ZIG_CC_WRAPPER  "${CMAKE_BINARY_DIR}/zig-cc")
+  set(ZIG_CXX_WRAPPER "${CMAKE_BINARY_DIR}/zig-cxx")
+  file(WRITE "${ZIG_CC_WRAPPER}"  "#!/bin/bash\nexec \"${ZIG_EXE}\" cc \"$@\"\n")
+  file(WRITE "${ZIG_CXX_WRAPPER}" "#!/bin/bash\nexec \"${ZIG_EXE}\" c++ \"$@\"\n")
+  execute_process(COMMAND chmod +x "${ZIG_CC_WRAPPER}" "${ZIG_CXX_WRAPPER}")
+  set(CMAKE_C_COMPILER   "${ZIG_CC_WRAPPER}"  CACHE FILEPATH "C compiler" FORCE)
+  set(CMAKE_CXX_COMPILER "${ZIG_CXX_WRAPPER}" CACHE FILEPATH "C++ compiler" FORCE)
+endif()
 set(LEAN_VERSION_MAJOR 4 CACHE STRING "")
 set(LEAN_VERSION_MINOR 33 CACHE STRING "")
 set(LEAN_VERSION_PATCH 0 CACHE STRING "")
@@ -53,6 +67,11 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 endif()
 
 set(LEAN_EXTRA_LINKER_FLAGS ${LEAN_EXTRA_LINKER_FLAGS_DEFAULT} CACHE STRING "Additional flags used by the linker")
+# zig bundles its own lld — strip -fuse-ld=lld to avoid conflicts
+if(LEAN_USE_ZIG_CC)
+  string(REPLACE "-fuse-ld=lld" "" LEAN_EXTRA_LINKER_FLAGS "${LEAN_EXTRA_LINKER_FLAGS}")
+  set(LEAN_EXTRA_LINKER_FLAGS "${LEAN_EXTRA_LINKER_FLAGS}" CACHE STRING "Additional flags used by the linker" FORCE)
+endif()
 set(
   LEAN_EXTRA_CXX_FLAGS
   ""
@@ -611,7 +630,11 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   # The second flag is necessary to even *load* dylibs without resolved symbols, as can happen
   # if a Lake `extern_lib` depends on a symbols defined by the Lean library but is loaded even
   # before definition.
-  string(APPEND LEANC_SHARED_LINKER_FLAGS " -Wl,-undefined,dynamic_lookup -Wl,-no_fixup_chains")
+  string(APPEND LEANC_SHARED_LINKER_FLAGS " -Wl,-undefined,dynamic_lookup")
+  # -no_fixup_chains is macOS-specific and unsupported by zig's lld
+  if(NOT LEAN_USE_ZIG_CC)
+    string(APPEND LEANC_SHARED_LINKER_FLAGS " -Wl,-no_fixup_chains")
+  endif()
 endif()
 # Linux ignores undefined symbols in shared libraries by default
 

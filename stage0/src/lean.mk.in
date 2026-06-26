@@ -132,7 +132,15 @@ ifdef CMAKE_LIKE_OUTPUT
 endif
 # on Windows, must remove binary before writing a new one (since the old one may be in use)
 	@rm -f $@
+ifeq (@CMAKE_SYSTEM_NAME@, Darwin)
+ifeq (@LEAN_USE_ZIG_CC@, ON)
+	$(LEANC) -o "$@" -Wl,-force_load,$(basename $<) $(LEANC_OPTS) $(LINK_OPTS)
+else
 	$(LEANC) -o "$@" $< $(LEANC_OPTS) $(LINK_OPTS)
+endif
+else
+	$(LEANC) -o "$@" $< $(LEANC_OPTS) $(LINK_OPTS)
+endif
 
 ifeq (@CMAKE_SYSTEM_NAME@, Windows)
 $(LIB_OUT)/$(STATIC_LIB_NAME): $(NAT_OBJS) | $(LIB_OUT)

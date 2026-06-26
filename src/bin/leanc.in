@@ -7,6 +7,38 @@ for arg in "$@"; do
     [[ "$arg" = "-c" ]] && ldflags=()
     [[ "$arg" = "-v" ]] && v=1
 done
+# zig's lld rejects some exported artifact suffixes by extension. Create
+# temporary canonical-name symlinks for input files and pass those instead.
+# Only active when LEAN_CC contains "zig" to avoid overhead with other compilers.
+# Only transform input files (existing *.export files), not -o output targets.
+if [[ "${LEAN_CC:-@CMAKE_C_COMPILER@}" == *zig* ]]; then
+  newargs=()
+  skip_next=false
+  for arg in "$@"; do
+    if $skip_next; then
+      newargs+=("$arg")
+      skip_next=false
+      continue
+    fi
+    if [[ "$arg" == "-o" ]]; then
+      newargs+=("$arg")
+      skip_next=true
+      continue
+    fi
+    if [[ "$arg" == *.o.export && -f "$arg" ]]; then
+      abs_arg=$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")
+      ln -sf "$abs_arg" "${arg%.o.export}.o" 2>/dev/null || true
+      newargs+=("${arg%.o.export}.o")
+    elif [[ "$arg" == *.a.export && -f "$arg" ]]; then
+      abs_arg=$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")
+      ln -sf "$abs_arg" "${arg%.a.export}.a" 2>/dev/null || true
+      newargs+=("${arg%.a.export}.a")
+    else
+      newargs+=("$arg")
+    fi
+  done
+  set -- "${newargs[@]}"
+fi
 cmd=(${LEAN_CC:-@CMAKE_C_COMPILER@} "-I$root/include" @LEANC_EXTRA_CC_FLAGS@ @LEANC_INTERNAL_FLAGS@ "$@" "${ldflags[@]}" -Wno-unused-command-line-argument)
 cmd=$(printf '%q ' "${cmd[@]}" | sed "s!ROOT!$root!g")
 [[ $v == 1 ]] && echo $cmd

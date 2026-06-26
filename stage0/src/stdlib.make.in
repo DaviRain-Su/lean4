@@ -138,7 +138,7 @@ ifeq "${CMAKE_SYSTEM_NAME}" "Windows"
 	#"${CMAKE_AR}" tP ${LIB}/lean/diff.a
 # now again up to `Lean.Meta`
 	$(LEANC_SH) -shared -o $(OUTLIB)/libleanshared_2$(SO) \
-	  ${LIB}/lean/../temp/Lean/Meta.*o.export ${LIB}/lean/diff.a -Wl,--no-whole-archive -lleanshared_1 -lInit_shared -Wl,--out-implib,${LIB}/lean/libleanshared_2.dll.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS} -Wl,-Map=${LIB}/temp/libleanshared_2.map
+	  ${LIB}/lean/../temp/Lean/Meta.*o ${LIB}/lean/diff.a -Wl,--no-whole-archive -lleanshared_1 -lInit_shared -Wl,--out-implib,${LIB}/lean/libleanshared_2.dll.a ${LEANSHARED_LINKER_FLAGS} ${TOOLCHAIN_SHARED_LINKER_FLAGS} ${LEANC_OPTS} -Wl,-Map=${LIB}/temp/libleanshared_2.map
 	echo -n "$(OUTLIB)/libleanshared_2$(SO) symbols: "
 	nm $(OUTLIB)/libleanshared_2$(SO) --extern-only | wc -l
 	sed -En 's/.*\s(\S*\.o\.export):.*/\1/p' ${LIB}/temp/libleanshared_2.map > ${LIB}/temp/diff.a.in

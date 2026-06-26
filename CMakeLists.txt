@@ -22,6 +22,10 @@ foreach(var ${vars})
     list(APPEND STAGE1_ARGS "-D${CMAKE_MATCH_1}=${${var}}")
   elseif(currentHelpString MATCHES "No help, variable specified on the command line." OR currentHelpString STREQUAL "")
     list(APPEND CL_ARGS "-D${var}=${${var}}")
+    if(var STREQUAL "CMAKE_TOOLCHAIN_FILE")
+      get_filename_component(ABS_VAL "${${var}}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+      list(APPEND PLATFORM_ARGS "-D${var}=${ABS_VAL}")
+    endif()
     if(var MATCHES "USE_GMP|CHECK_OLEAN_VERSION|LEAN_VERSION_.*|LEAN_SPECIAL_VERSION_DESC")
       # must forward options that generate incompatible .olean format
       list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
@@ -32,7 +36,12 @@ foreach(var ${vars})
     list(APPEND CL_ARGS "-D${var}=${${var}}")
     list(APPEND STAGE0_ARGS "-D${var}=${${var}}")
   elseif((var MATCHES "CMAKE_.*") AND NOT (var MATCHES "CMAKE_BUILD_TYPE") AND NOT (var MATCHES "CMAKE_HOME_DIRECTORY"))
-    list(APPEND PLATFORM_ARGS "-D${var}=${${var}}")
+    if(var STREQUAL "CMAKE_TOOLCHAIN_FILE")
+      get_filename_component(ABS_VAL "${${var}}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+      list(APPEND PLATFORM_ARGS "-D${var}=${ABS_VAL}")
+    else()
+      list(APPEND PLATFORM_ARGS "-D${var}=${${var}}")
+    endif()
   endif()
 endforeach()
 
@@ -160,7 +169,7 @@ ExternalProject_Add(
   BINARY_DIR stage1
   CMAKE_ARGS
     -DSTAGE=1 -DPREV_STAGE=${CMAKE_BINARY_DIR}/stage0
-    -DPREV_STAGE_CMAKE_EXECUTABLE_SUFFIX=${STAGE0_CMAKE_EXECUTABLE_SUFFIX} ${CL_ARGS} ${STAGE1_ARGS}
+    -DPREV_STAGE_CMAKE_EXECUTABLE_SUFFIX=${STAGE0_CMAKE_EXECUTABLE_SUFFIX} ${CL_ARGS} ${PLATFORM_ARGS} ${STAGE1_ARGS}
   BUILD_ALWAYS ON
   INSTALL_COMMAND ""
   DEPENDS ${EXTRA_DEPENDS}
@@ -173,7 +182,7 @@ ExternalProject_Add(
   BINARY_DIR stage2
   CMAKE_ARGS
     -DSTAGE=2 -DPREV_STAGE=${CMAKE_BINARY_DIR}/stage1 -DPREV_STAGE_CMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
-    ${CL_ARGS}
+    ${CL_ARGS} ${PLATFORM_ARGS}
   BUILD_ALWAYS ON
   INSTALL_COMMAND ""
   DEPENDS stage1
@@ -187,7 +196,7 @@ ExternalProject_Add(
   BINARY_DIR stage3
   CMAKE_ARGS
     -DSTAGE=3 -DPREV_STAGE=${CMAKE_BINARY_DIR}/stage2 -DPREV_STAGE_CMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
-    ${CL_ARGS}
+    ${CL_ARGS} ${PLATFORM_ARGS}
   BUILD_ALWAYS ON
   INSTALL_COMMAND ""
   DEPENDS stage2
