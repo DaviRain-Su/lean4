@@ -16,7 +16,6 @@ const ctor = @import("ctor.zig");
 const rc = @import("rc.zig");
 const ea = @import("expr_accessors.zig");
 const ka = @import("kernel_accessors.zig");
-const alloc = @import("alloc.zig");
 const kernel = @import("kernel.zig");
 
 // ── Predefined constant names ──────────────────────────────────────────────
@@ -169,11 +168,6 @@ pub fn isStringLit(e: *anyopaque) bool {
 fn natLitValue(e: *anyopaque) *anyopaque {
     return ctor.lean_ctor_get(ea.litValue(e), 0) orelse object.lean_box(0).?;
 }
-fn mkNatLit(nat_obj: *anyopaque) *anyopaque {
-    const lit_val = alloc.lean_alloc_ctor(0, 1, 0);
-    ctor.lean_ctor_set(lit_val, 0, nat_obj);
-    return lean_expr_mk_lit(lit_val);
-}
 
 // ── nat_lit_to_constructor ──────────────────────────────────────────────────
 
@@ -184,7 +178,7 @@ pub fn natLitToConstructor(e: *anyopaque) *anyopaque {
     } else {
         const succ = getNatSucc();
         const pred = object.lean_box(v - 1).?;
-        const lit = mkNatLit(pred);
+        const lit = lean_expr_mk_lit(pred);
         return lean_expr_mk_app(succ, lit);
     }
 }
@@ -211,7 +205,7 @@ pub fn stringLitToConstructor(e: *anyopaque) *anyopaque {
     while (i > 0) {
         i -= 1;
         const char_nat = object.lean_box(codepoints.items[i]).?;
-        const char_lit = mkNatLit(char_nat);
+        const char_lit = lean_expr_mk_lit(char_nat);
         const char_of_nat = getCharOfNat();
         const ch = lean_expr_mk_app(char_of_nat, char_lit);
         const cons = getListConsChar();

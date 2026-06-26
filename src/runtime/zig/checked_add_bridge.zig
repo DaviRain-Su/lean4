@@ -432,6 +432,37 @@ fn exprContainsStringLit(expr: *anyopaque) bool {
         else => false,
     };
 }
+fn exprContainsLiteral(expr: *anyopaque) bool {
+    if (lean_is_scalar(expr)) return false;
+    return switch (lean_ptr_tag(expr)) {
+        5 => blk: {
+            const fn_expr = lean_ctor_get(expr, 0) orelse return false;
+            const arg_expr = lean_ctor_get(expr, 1) orelse return false;
+            break :blk exprContainsLiteral(fn_expr) or exprContainsLiteral(arg_expr);
+        },
+        6, 7 => blk: {
+            const domain = lean_ctor_get(expr, 1) orelse return false;
+            const body = lean_ctor_get(expr, 2) orelse return false;
+            break :blk exprContainsLiteral(domain) or exprContainsLiteral(body);
+        },
+        8 => blk: {
+            const domain = lean_ctor_get(expr, 1) orelse return false;
+            const value = lean_ctor_get(expr, 2) orelse return false;
+            const body = lean_ctor_get(expr, 3) orelse return false;
+            break :blk exprContainsLiteral(domain) or exprContainsLiteral(value) or exprContainsLiteral(body);
+        },
+        9 => true,
+        10 => blk: {
+            const inner = lean_ctor_get(expr, 1) orelse return false;
+            break :blk exprContainsLiteral(inner);
+        },
+        11 => blk: {
+            const inner = lean_ctor_get(expr, 2) orelse return false;
+            break :blk exprContainsLiteral(inner);
+        },
+        else => false,
+    };
+}
 
 fn exprHasUnsupportedResultHead(expr: *anyopaque) bool {
     const head = exprResultHeadConstLastComponent(expr) orelse return false;
@@ -577,7 +608,7 @@ fn canUseZigCheckedValueDecl(name: *anyopaque, decl: *anyopaque) bool {
         !isGeneratedAuxiliary(name) and
         !exprContainsLet(ciValue(decl)) and
         !exprContainsStringLit(ciValue(decl)) and
-        !exprContainsProblematicRecursor(ciType(decl)) and
+        !exprContainsLiteral(ciValue(decl)) and
         !exprContainsProblematicRecursor(ciValue(decl)) and
         !exprHasProofLikeResult(ciType(decl)) and
         !exprHasUnsupportedResultHead(ciType(decl)) and
