@@ -298,8 +298,6 @@ fn zigCheckedAddOpaque(env: *anyopaque, decl: *anyopaque) *anyopaque {
 fn canUseZigCheckedAdd(decl: *anyopaque) bool {
     return switch (lean_ptr_tag(decl)) {
         1 => defnValSafety(decl) == 1 and !hasDuplicateLevelParams(ciLevelParams(decl)),
-        2 => !hasDuplicateLevelParams(ciLevelParams(decl)),
-        3 => !hasDuplicateLevelParams(ciLevelParams(decl)),
         else => false,
     };
 }
