@@ -428,7 +428,7 @@ fn exprDbgPrint(w: *std.Io.Writer, e: *anyopaque, ctx: *BinderCtx, prec: u32) an
     switch (tag) {
         0 => { // bvar
             const idx = object.lean_unbox(ct.lean_ctor_get(e, 0) orelse return);
-            if (ctx.getName(@intCast(idx))) |n| { try printNameDbg(w, n); } else { try w.print("@[{}]", .{idx}); }
+            if (ctx.getName(@intCast(idx))) |n| { try printNameDbg(w, n); } else { try w.print("#{}", .{idx}); }
         },
         1 => try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return), // fvar
         2 => { try w.writeAll("?m."); try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return); }, // mvar
@@ -440,12 +440,21 @@ fn exprDbgPrint(w: *std.Io.Writer, e: *anyopaque, ctx: *BinderCtx, prec: u32) an
         },
         4 => { // const
             try printNameDbg(w, ct.lean_ctor_get(e, 0) orelse return);
+            const levels = ct.lean_ctor_get(e, 1) orelse return;
+            if (!object.lean_is_scalar(levels)) {
+                try w.writeAll(".{");
+                try printLevelList(w, levels);
+                try w.writeByte('}');
+            }
         },
         5 => { // app
+            const paren = prec >= 2;
+            if (paren) try w.writeByte('(');
             try exprDbgPrint(w, ct.lean_ctor_get(e, 0) orelse return, ctx, 1);
             try w.writeByte(' ');
             const arg = ct.lean_ctor_get(e, 1) orelse return;
             try exprDbgPrint(w, arg, ctx, 2);
+            if (paren) try w.writeByte(')');
         },
         6 => { // lam
             const name = ct.lean_ctor_get(e, 0) orelse return;
@@ -536,6 +545,53 @@ fn bvarHasRef(e: *anyopaque, target: u32, _: *const BinderCtx) bool {
     }
     // Quick check: if bvarRange is 0, no bvars
     return false; // Simplified: only checks direct bvar(0)
+}
+
+fn printLevelList(w: *std.Io.Writer, levels: *anyopaque) anyerror!void {
+    var it = levels;
+    var first = true;
+    while (!object.lean_is_scalar(it)) {
+        if (!first) try w.writeAll(", ");
+        const lvl = @import("ctor.zig").lean_ctor_get(it, 0) orelse return;
+        try printLevelAtom(w, lvl);
+        it = @import("ctor.zig").lean_ctor_get(it, 1) orelse return;
+        first = false;
+    }
+}
+
+fn printLevelAtom(w: *std.Io.Writer, l: *anyopaque) anyerror!void {
+    if (object.lean_is_scalar(l)) {
+        try w.print("{}", .{object.lean_unbox(l)});
+        return;
+    }
+    const tag = object.lean_ptr_tag(l);
+    const ct = @import("ctor.zig");
+    switch (tag) {
+        0 => try w.writeAll("0"),
+        1 => {
+            const inner = ct.lean_ctor_get(l, 0) orelse return;
+            try printLevelAtom(w, inner);
+            try w.writeAll("+1");
+        },
+        2 => {
+            try w.writeAll("max ");
+            try printLevelAtom(w, ct.lean_ctor_get(l, 0) orelse return);
+            try w.writeByte(' ');
+            try printLevelAtom(w, ct.lean_ctor_get(l, 1) orelse return);
+        },
+        3 => {
+            try w.writeAll("imax ");
+            try printLevelAtom(w, ct.lean_ctor_get(l, 0) orelse return);
+            try w.writeByte(' ');
+            try printLevelAtom(w, ct.lean_ctor_get(l, 1) orelse return);
+        },
+        4 => try printNameDbg(w, ct.lean_ctor_get(l, 0) orelse return),
+        5 => {
+            try w.writeAll("?u.");
+            try printNameDbg(w, ct.lean_ctor_get(l, 0) orelse return);
+        },
+        else => try w.print("L@{}", .{tag}),
+    }
 }
 
 fn printLevel(w: *std.Io.Writer, l: *anyopaque) anyerror!void {

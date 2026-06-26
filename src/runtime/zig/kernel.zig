@@ -38,6 +38,9 @@ pub fn lean_data_value_beq(a: *anyopaque, b: *anyopaque) callconv(.c) u8 {
 extern fn lean_nat_big_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
 extern fn lean_string_eq(a: *anyopaque, b: *anyopaque) callconv(.c) bool;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
+extern fn lean_string_hash(s: *anyopaque) callconv(.c) u64;
+extern fn lean_name_hash(n: *anyopaque) callconv(.c) u64;
+extern fn lean_uint64_of_nat(n: *anyopaque) callconv(.c) u64;
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
 
 inline fn dataValueEq(a: *anyopaque, b: *anyopaque) bool {
@@ -457,6 +460,108 @@ inline fn extractFlags(data: u64) u64 {
     return data & (@as(u64, 0xF) << 40);
 }
 
+inline fn exprHashFromData(data: u64) u64 {
+    return @as(u32, @truncate(data));
+}
+
+inline fn exprHash(e: *anyopaque) u64 {
+    return exprHashFromData(eData(e));
+}
+
+inline fn natHash(n: *anyopaque) u64 {
+    return lean_uint64_of_nat(n);
+}
+
+inline fn levelData(l: *anyopaque) u64 {
+    if (object.lean_is_scalar(l)) {
+        if (object.lean_unbox(l) == 0) return levelDataFromParts(2221, 0, false, false);
+        return 0;
+    }
+    const nobjs: u32 = @intCast(ctor.ctorNumObjs(l));
+    return ctor.lean_ctor_get_usize(l, nobjs);
+}
+
+inline fn levelHashFromData(data: u64) u64 {
+    return @as(u32, @truncate(data));
+}
+
+inline fn levelHash(l: *anyopaque) u64 {
+    return levelHashFromData(levelData(l));
+}
+
+inline fn levelDepthFromData(data: u64) u64 {
+    return data >> 40;
+}
+
+inline fn levelHasMVarFromData(data: u64) bool {
+    return ((data >> 32) & 1) == 1;
+}
+
+inline fn levelHasParamFromData(data: u64) bool {
+    return ((data >> 33) & 1) == 1;
+}
+
+inline fn levelDataFromParts(hash_val: u64, depth: u64, has_mvar: bool, has_param: bool) u64 {
+    return lean_level_mk_data(
+        hash_val,
+        object.lean_box(@intCast(depth)).?,
+        @intFromBool(has_mvar),
+        @intFromBool(has_param),
+    );
+}
+
+fn levelListHash(ls: *anyopaque) u64 {
+    var h: u64 = 7;
+    var it = ls;
+    while (!object.lean_is_scalar(it)) {
+        const hd = ctor.lean_ctor_get(it, 0) orelse return h;
+        h = hashCombine(h, levelHash(hd));
+        it = ctor.lean_ctor_get(it, 1) orelse break;
+    }
+    return h;
+}
+
+fn levelListHasMVar(ls: *anyopaque) bool {
+    var it = ls;
+    while (!object.lean_is_scalar(it)) {
+        const hd = ctor.lean_ctor_get(it, 0) orelse return false;
+        if (levelHasMVarFromData(levelData(hd))) return true;
+        it = ctor.lean_ctor_get(it, 1) orelse break;
+    }
+    return false;
+}
+
+fn levelListHasParam(ls: *anyopaque) bool {
+    var it = ls;
+    while (!object.lean_is_scalar(it)) {
+        const hd = ctor.lean_ctor_get(it, 0) orelse return false;
+        if (levelHasParamFromData(levelData(hd))) return true;
+        it = ctor.lean_ctor_get(it, 1) orelse break;
+    }
+    return false;
+}
+
+inline fn exprDataFromParts(hash_val: u64, bvar_range: u64, depth: u64, flags: u64) u64 {
+    return lean_expr_mk_data(
+        hash_val,
+        object.lean_box(@intCast(bvar_range)).?,
+        @intCast(depth),
+        @intCast((flags >> 40) & 1),
+        @intCast((flags >> 41) & 1),
+        @intCast((flags >> 42) & 1),
+        @intCast((flags >> 43) & 1),
+    );
+}
+
+fn litHash(l: *anyopaque) u64 {
+    const value = ctor.lean_ctor_get(l, 0) orelse return 0;
+    return switch (object.lean_ptr_tag(l)) {
+        0 => natHash(value),
+        1 => lean_string_hash(value),
+        else => 0,
+    };
+}
+
 // ── Expression constructors ─────────────────────────────────────────────────
 //
 // Expr tags (matching Lean.Expr inductive definition order):
@@ -469,22 +574,24 @@ inline fn extractFlags(data: u64) u64 {
 pub fn lean_expr_mk_bvar(idx: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(0, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, idx);
-    const bvar_range: usize = if (object.lean_is_scalar(idx)) object.lean_unbox(idx) + 1 else 1;
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(bvar_range).?, 0, 0, 0, 0, 0)));
+    const idx_value = natHash(idx);
+    const bvar_range = idx_value + 1;
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(hashCombine(7, idx_value), object.lean_box(@intCast(bvar_range)).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
 pub fn lean_expr_mk_fvar(n: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 1, 0, 0, 0)));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(hashCombine(13, lean_name_hash(n)), object.lean_box(0).?, 0, 1, 0, 0, 0)));
     return o;
 }
 
 pub fn lean_expr_mk_sort(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(3, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
+    const l_data = levelData(l);
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(hashCombine(11, levelHashFromData(l_data)), object.lean_box(0).?, 0, 0, 0, @intFromBool(levelHasMVarFromData(l_data)), @intFromBool(levelHasParamFromData(l_data)))));
     return o;
 }
 
@@ -492,7 +599,8 @@ pub fn lean_expr_mk_const(n: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque
     const o = alloc.lean_alloc_ctor(4, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
     ctor.lean_ctor_set(o, 1, ls);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
+    const levels_hash = levelListHash(ls);
+    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_expr_mk_data(hashCombine(5, hashCombine(lean_name_hash(n), levels_hash)), object.lean_box(0).?, 0, 0, 0, @intFromBool(levelListHasMVar(ls)), @intFromBool(levelListHasParam(ls)))));
     return o;
 }
 
@@ -518,7 +626,7 @@ pub fn lean_expr_mk_lambda(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) 
     const bvar_range: u64 = @max(d_range, body_adj);
     const flags = extractFlags(eData(d)) | extractFlags(eData(b));
     const depth = @max(extractDepth(eData(d)), extractDepth(eData(b))) + 1;
-    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    const data = exprDataFromParts(hashCombine(depth, hashCombine(exprHash(d), exprHash(b))), bvar_range, depth, flags);
     ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
@@ -535,7 +643,7 @@ pub fn lean_expr_mk_forall(n: *anyopaque, d: *anyopaque, b: *anyopaque, bi: u8) 
     const bvar_range: u64 = @max(d_range, body_adj);
     const flags = extractFlags(eData(d)) | extractFlags(eData(b));
     const depth = @max(extractDepth(eData(d)), extractDepth(eData(b))) + 1;
-    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    const data = exprDataFromParts(hashCombine(depth, hashCombine(exprHash(d), exprHash(b))), bvar_range, depth, flags);
     ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 3 * @sizeOf(usize) + @sizeOf(usize), bi);
     return o;
@@ -555,7 +663,7 @@ pub fn lean_expr_mk_let(n: *anyopaque, t: *anyopaque, v: *anyopaque, b: *anyopaq
     const bvar_range: u64 = @max(max_tv, body_adj);
     const flags = extractFlags(eData(t)) | extractFlags(eData(v)) | extractFlags(eData(b));
     const depth = @max(@max(extractDepth(eData(t)), extractDepth(eData(v))), extractDepth(eData(b))) + 1;
-    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    const data = exprDataFromParts(hashCombine(depth, hashCombine(exprHash(t), hashCombine(exprHash(v), exprHash(b)))), bvar_range, depth, flags);
     ctor.lean_ctor_set_usize(o, 4, @intCast(data));
     ctor.lean_ctor_set_uint8(o, 4 * @sizeOf(usize) + @sizeOf(usize), nd);
     return o;
@@ -568,8 +676,8 @@ pub fn lean_expr_mk_mdata(m: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque 
     const e_data = eData(e);
     const bvar_range = extractBvarRange(e_data);
     const flags = extractFlags(e_data);
-    const depth = extractDepth(e_data);
-    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    const depth = extractDepth(e_data) + 1;
+    const data = exprDataFromParts(hashCombine(depth, exprHashFromData(e_data)), bvar_range, depth, flags);
     ctor.lean_ctor_set_usize(o, 2, @intCast(data));
     return o;
 }
@@ -582,8 +690,8 @@ pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.
     const e_data = eData(e);
     const bvar_range = extractBvarRange(e_data);
     const flags = extractFlags(e_data);
-    const depth = extractDepth(e_data);
-    const data = lean_expr_mk_data(0, object.lean_box(@intCast(bvar_range)).?, @intCast(depth), @intCast((flags >> 40) & 1), @intCast((flags >> 41) & 1), @intCast((flags >> 42) & 1), @intCast((flags >> 43) & 1));
+    const depth = extractDepth(e_data) + 1;
+    const data = exprDataFromParts(hashCombine(depth, hashCombine(lean_name_hash(s), hashCombine(natHash(i), exprHashFromData(e_data)))), bvar_range, depth, flags);
     ctor.lean_ctor_set_usize(o, 3, @intCast(data));
     return o;
 }
@@ -591,7 +699,7 @@ pub fn lean_expr_mk_proj(s: *anyopaque, i: *anyopaque, e: *anyopaque) callconv(.
 pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(9, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(0, object.lean_box(0).?, 0, 0, 0, 0, 0)));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_expr_mk_data(hashCombine(3, litHash(l)), object.lean_box(0).?, 0, 0, 0, 0, 0)));
     return o;
 }
 
@@ -601,14 +709,16 @@ pub fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque {
 
 pub fn lean_level_mk_zero(_: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(0, 0, @sizeOf(usize));
-    ctor.lean_ctor_set_usize(o, 0, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
+    ctor.lean_ctor_set_usize(o, 0, @intCast(levelDataFromParts(2221, 0, false, false)));
     return o;
 }
 
 pub fn lean_level_mk_succ(l: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(1, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, l);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
+    const l_data = levelData(l);
+    const depth = levelDepthFromData(l_data) + 1;
+    ctor.lean_ctor_set_usize(o, 1, @intCast(levelDataFromParts(hashCombine(2243, levelHashFromData(l_data)), depth, levelHasMVarFromData(l_data), levelHasParamFromData(l_data))));
     return o;
 }
 
@@ -616,7 +726,10 @@ pub fn lean_level_mk_max(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(2, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
+    const a_data = levelData(a);
+    const b_data = levelData(b);
+    const depth = @max(levelDepthFromData(a_data), levelDepthFromData(b_data)) + 1;
+    ctor.lean_ctor_set_usize(o, 2, @intCast(levelDataFromParts(hashCombine(2251, hashCombine(levelHashFromData(a_data), levelHashFromData(b_data))), depth, levelHasMVarFromData(a_data) or levelHasMVarFromData(b_data), levelHasParamFromData(a_data) or levelHasParamFromData(b_data))));
     return o;
 }
 
@@ -624,14 +737,17 @@ pub fn lean_level_mk_imax(a: *anyopaque, b: *anyopaque) callconv(.c) *anyopaque 
     const o = alloc.lean_alloc_ctor(3, 2, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, a);
     ctor.lean_ctor_set(o, 1, b);
-    ctor.lean_ctor_set_usize(o, 2, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
+    const a_data = levelData(a);
+    const b_data = levelData(b);
+    const depth = @max(levelDepthFromData(a_data), levelDepthFromData(b_data)) + 1;
+    ctor.lean_ctor_set_usize(o, 2, @intCast(levelDataFromParts(hashCombine(2267, hashCombine(levelHashFromData(a_data), levelHashFromData(b_data))), depth, levelHasMVarFromData(a_data) or levelHasMVarFromData(b_data), levelHasParamFromData(a_data) or levelHasParamFromData(b_data))));
     return o;
 }
 
 pub fn lean_level_mk_param(n: *anyopaque) callconv(.c) *anyopaque {
     const o = alloc.lean_alloc_ctor(4, 1, @sizeOf(usize));
     ctor.lean_ctor_set(o, 0, n);
-    ctor.lean_ctor_set_usize(o, 1, @intCast(lean_level_mk_data(0, object.lean_box(0).?, 0, 0)));
+    ctor.lean_ctor_set_usize(o, 1, @intCast(levelDataFromParts(hashCombine(2239, lean_name_hash(n)), 0, false, true)));
     return o;
 }
 extern fn lean_environment_add(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;

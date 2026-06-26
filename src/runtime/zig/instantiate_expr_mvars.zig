@@ -458,10 +458,10 @@ const ScopeCache = struct {
         }
     }
 
-    fn lookup(self: *ScopeCache, key: *anyopaque, depth: u32) ?*anyopaque {
+    fn lookup(self: *ScopeCache, key: *anyopaque, depth: u32) ?ScopeEntry {
         for (self.entries.items) |e| {
             if (e.key == key and e.depth == depth and e.result_scope <= self.scope) {
-                return e.value;
+                return e;
             }
         }
         return null;
@@ -788,24 +788,54 @@ const DelayedVisitor = struct {
         return retain(e);
     }
 
+    fn hasFvarSubstAfter(self: *DelayedVisitor, e: *anyopaque, scope: u32) bool {
+        if (!ea.hasFVar(e)) return false;
+        return switch (ea.kind(e)) {
+            .FVar => blk: {
+                const fid = ea.fvarName(e);
+                if (self.fvar_subst.get(fid)) |entry| {
+                    break :blk entry.scope > scope;
+                }
+                break :blk false;
+            },
+            .App => self.hasFvarSubstAfter(ea.appFn(e), scope) or self.hasFvarSubstAfter(ea.appArg(e), scope),
+            .Lambda, .Pi => self.hasFvarSubstAfter(ea.bindingDomain(e), scope) or self.hasFvarSubstAfter(ea.bindingBody(e), scope),
+            .Let => self.hasFvarSubstAfter(ea.letType(e), scope) or
+                self.hasFvarSubstAfter(ea.letValue(e), scope) or
+                self.hasFvarSubstAfter(ea.letBody(e), scope),
+            .MData => self.hasFvarSubstAfter(ea.mdataExpr(e), scope),
+            .Proj => self.hasFvarSubstAfter(ea.projExpr(e), scope),
+            else => false,
+        };
+    }
+
     fn visit(self: *DelayedVisitor, e: *anyopaque) *anyopaque {
         // Early exit: no fvar (in inner mode), no expr mvar, and no level mvar.
         if ((self.inOuterMode() or !ea.hasFVar(e)) and !ea.hasExprMVar(e) and !ea.hasLevelMVar(e)) {
             return retain(e);
         }
 
+        if (self.cache.lookup(e, self.depth)) |cached| {
+            if (!self.hasFvarSubstAfter(e, cached.result_scope)) {
+                if (cached.result_scope > self.result_scope) self.result_scope = cached.result_scope;
+                return retain(cached.value);
+            }
+        }
+
+        const outer_result_scope = self.result_scope;
+        self.result_scope = 0;
         const r = switch (ea.kind(e)) {
             .BVar, .Lit => @panic("instantiate_delayed: unreachable kind"),
             .FVar => self.visitFVar(e),
-            .Sort, .Const => {
-                // No fvars/mvars (caught by early exit), but keep for safety
-                return retain(e);
+            .Sort, .Const => blk: {
+                // No fvars/mvars (caught by early exit), but keep for safety.
+                break :blk retain(e);
             },
-            .MVar => {
+            .MVar => blk: {
                 // In outer mode, unassigned direct mvars are left alone.
                 // (C++ asserts !get_mvar_assignment; we just return e since
                 // pass 1 already resolved all direct assignments.)
-                return retain(e);
+                break :blk retain(e);
             },
             .MData => blk: {
                 const new_inner = self.visit(ea.mdataExpr(e));
@@ -832,6 +862,9 @@ const DelayedVisitor = struct {
                 break :blk ea.updateLet(e, new_type, new_value, new_body);
             },
         };
+        const result_scope = self.result_scope;
+        _ = self.cache.insert(e, self.depth, r, result_scope);
+        self.result_scope = @max(outer_result_scope, result_scope);
         return r;
     }
 };
