@@ -1090,7 +1090,6 @@ lean_expr_mk_bvar
 lean_expr_mk_fvar
 lean_expr_mk_sort
 lean_expr_mk_const
-lean_expr_mk_lit
 lean_level_mk_zero
 lean_level_mk_succ
 lean_level_mk_max

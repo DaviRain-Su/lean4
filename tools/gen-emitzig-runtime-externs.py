@@ -203,8 +203,11 @@ EXTRA_FUNCS: list[tuple[str, str, str]] = [
 # Manual overrides for signatures the C-header parser cannot reconstruct correctly.
 OVERRIDE_SIGNATURES: dict[str, tuple[str, list[str]]] = {
     "lean_big_int64_to_int": ("LeanObj", ["i64"]),
+    "lean_expr_mk_app_data": ("u64", ["u64", "u64"]),
+    "lean_expr_mk_data": ("u64", ["u64", "LeanObj", "u32", "u8", "u8", "u8", "u8"]),
     "lean_float_once_cold": ("f64", ["*f64", "*lean_once_cell_t", "*const fn() callconv(.c) f64"]),
     "lean_float32_once_cold": ("f32", ["*f32", "*lean_once_cell_t", "*const fn() callconv(.c) f32"]),
+    "lean_level_mk_data": ("u64", ["u64", "LeanObj", "u8", "u8"]),
     "lean_obj_once_cold": ("LeanObj", ["*LeanObj", "*lean_once_cell_t", "*const fn() callconv(.c) LeanObj"]),
     "lean_uint8_once_cold": ("u8", ["*u8", "*lean_once_cell_t", "*const fn() callconv(.c) u8"]),
     "lean_uint16_once_cold": ("u16", ["*u16", "*lean_once_cell_t", "*const fn() callconv(.c) u16"]),
@@ -410,6 +413,8 @@ LEAN_SCALAR_TYPES: dict[str, str] = {
     "Float": "f64",
     "Float32": "f32",
     "FS.Mode": "u8",
+    "Expr.Data": "u64",
+    "Level.Data": "u64",
 }
 
 

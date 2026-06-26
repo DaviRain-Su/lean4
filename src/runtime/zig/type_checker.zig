@@ -67,6 +67,7 @@ extern fn lean_opaque_val_is_unsafe(v: *anyopaque) callconv(.c) u8;
 extern fn lean_kernel_instantiate_type_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_instantiate_value_lparams(env: *anyopaque, ci: *anyopaque, ls: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_cheap_beta_reduce(e: *anyopaque) callconv(.c) *anyopaque;
+extern fn lean_lit_type(lit: *anyopaque) callconv(.c) *anyopaque;
 
 // ── Expr constructors ──────────────────────────────────────────────────────
 
@@ -373,7 +374,7 @@ const State = struct {
 
 // Thread-local pointer to the current TypeChecker instance, used by the
 // C-callable callback wrappers for inductive/quot reduction.
-var g_current_tc: ?*TypeChecker = null;
+threadlocal var g_current_tc: ?*TypeChecker = null;
 
 // C-callable wrappers for inductive_reduce_rec / quot_reduce_rec callbacks.
 fn whnfCallback(env: *anyopaque, lctx: *anyopaque, e: *anyopaque) callconv(.c) *anyopaque {
@@ -555,7 +556,7 @@ const TypeChecker = struct {
 
         if (fvars_buf.items.len > 0) {
             const fvars_arr = array.mkArrayFromSlice(fvars_buf.items);
-            const wrapped = lean_local_ctx_mk_pi(saved_lctx, fvars_arr, r, 0);
+            const wrapped = lean_local_ctx_mk_pi(self.lctx, fvars_arr, r, 0);
             rc.lean_dec(fvars_arr);
             rc.lean_dec(r);
             r = wrapped;
@@ -896,7 +897,7 @@ const TypeChecker = struct {
         // Wrap in Pi using local_ctx::mk_pi
         if (fvars_buf.items.len > 0) {
             const fvars_arr = array.mkArrayFromSlice(fvars_buf.items);
-            const wrapped = lean_local_ctx_mk_pi(saved_lctx, fvars_arr, r, 1);
+            const wrapped = lean_local_ctx_mk_pi(self.lctx, fvars_arr, r, 1);
             rc.lean_dec(fvars_arr);
             rc.lean_dec(r);
             r = wrapped;
@@ -913,9 +914,7 @@ const TypeChecker = struct {
 
         const r = switch (ea.kind(e)) {
             .Lit => blk: {
-                // lit_type: Nat -> Type, String -> Type
-                // Simplified
-                break :blk retain(getTypeZero());
+                break :blk lean_lit_type(ea.litValue(e));
             },
             .MData => self.inferTypeCore(ea.mdataExpr(e), infer_only),
             .Proj => self.inferProj(e),
