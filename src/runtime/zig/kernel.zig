@@ -1362,6 +1362,10 @@ comptime {
         @export(&lean_expr_mk_data, .{ .name = "lean_expr_mk_data", .linkage = .strong });
         @export(&lean_expr_mk_app_data, .{ .name = "lean_expr_mk_app_data", .linkage = .strong });
         @export(&lean_level_mk_data, .{ .name = "lean_level_mk_data", .linkage = .strong });
+        // Expr/Level constructors: exported so the test binary can resolve extern fn
+        // references. Not in the flip list — libLean.a provides the canonical
+        // versions at runtime, and weaken_zig_symbols.py weakens these to avoid
+        // overriding them.
         @export(&lean_expr_mk_bvar, .{ .name = "lean_expr_mk_bvar", .linkage = .strong });
         @export(&lean_expr_mk_fvar, .{ .name = "lean_expr_mk_fvar", .linkage = .strong });
         @export(&lean_expr_mk_sort, .{ .name = "lean_expr_mk_sort", .linkage = .strong });

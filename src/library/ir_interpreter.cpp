@@ -1098,6 +1098,63 @@ public:
         }
         return r;
     }
+    object * call_boxed_decl(decl const & d, unsigned n, object ** args) {
+        name const & fn = decl_fun_id(d);
+        symbol_cache_entry e = lookup_symbol(fn);
+        unsigned arity = decl_params(d).size();
+        object * r;
+        if (arity == 0) {
+            type t = decl_type(d);
+            r = box_t(load(fn, t), t);
+            if (!type_is_scalar(t)) {
+                inc(r);
+            }
+        } else {
+            if (e.m_native.m_addr) {
+                r = alloc_closure(e.m_native.m_addr, arity, 0);
+            } else {
+                decl d_boxed = d;
+                if (option_ref<decl> boxed = find_ir_decl_boxed(m_env, fn)) {
+                    d_boxed = *boxed.get();
+                }
+                r = mk_stub_closure(d_boxed, 0, nullptr);
+            }
+        }
+        if (n > 0) {
+            r = apply_n(r, n, args);
+        }
+        return r;
+    }
+
+    uint32 run_main_decl(list_ref<string_ref> const & args, decl const & d) {
+        array_ref<param> const & params = decl_params(d);
+        buffer<object *> call_args;
+        if (params.size() == 2) {
+            call_args.push_back(args.to_obj_arg());
+        } else {
+            lean_assert(params.size() == 1);
+        }
+        object * w = io_mk_world();
+        call_args.push_back(w);
+        w = call_boxed_decl(d, call_args.size(), &call_args[0]);
+        if (io_result_is_ok(w)) {
+            int ret = 0;
+            lean::expr ret_ty = m_env.get(decl_fun_id(d)).get_type();
+            if (is_arrow(ret_ty)) {
+                ret_ty = binding_body(ret_ty);
+            }
+            if (is_const(app_arg(ret_ty), get_uint32_name())) {
+                ret = unbox_uint32(io_result_get_value(w));
+            }
+            dec_ref(w);
+            return ret;
+        } else {
+            io_result_show_error(w);
+            dec_ref(w);
+            return 1;
+        }
+    }
+
 
     uint32 run_main(list_ref<string_ref> const & args) {
         decl d = get_decl("main");
@@ -1186,9 +1243,11 @@ extern "C" LEAN_EXPORT uint32_t lean_eval_main(b_obj_arg env, b_obj_arg opts, b_
     uint32 ret = run_main(TO_REF(elab_environment, env), TO_REF(options, opts), TO_REF(list_ref<string_ref>, args));
     return ret;
 }
-/* runMain with an explicit IR Decl — delegates to lean_eval_main. */
-extern "C" LEAN_EXPORT uint32_t lean_eval_main_decl(b_obj_arg env, b_obj_arg opts, b_obj_arg args, b_obj_arg) {
-    return lean_eval_main(env, opts, args);
+/* runMain with an explicit IR Decl. */
+extern "C" LEAN_EXPORT uint32_t lean_eval_main_decl(b_obj_arg env, b_obj_arg opts, b_obj_arg args, b_obj_arg d_obj) {
+    return interpreter::with_interpreter<uint32>(TO_REF(elab_environment, env), TO_REF(options, opts), decl_fun_id(TO_REF(decl, d_obj)), [&](interpreter & interp) {
+        return interp.run_main_decl(TO_REF(list_ref<string_ref>, args), TO_REF(decl, d_obj));
+    });
 }
 
 extern "C" LEAN_EXPORT object * lean_eval_const(object * env, object * opts, object * c) {
