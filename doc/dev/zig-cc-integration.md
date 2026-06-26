@@ -373,7 +373,21 @@ for:
 - `Emscripten`
 
 So "supporting Zig targets" should mean **expanding support within Lean's existing
-platform model**, not claiming that every Zig target triple is automatically valid.
+platform model**, not claiming that every Zig target triple on Zig's platform support
+page is automatically valid for Lean.
+
+##### Zig upstream support levels
+
+The upstream Zig support table is still the right starting filter. In particular:
+
+- Zig **Tier 1** means the target is a primary upstream target.
+- Zig **Tier 2** means the standard library, linker, libc, and CI support are all
+  present.
+- Zig **Tier 3/4** or "Additional Platforms" are much weaker signals; they are
+  insufficient by themselves to justify Lean toolchain support.
+
+That implies Lean should prioritize Zig Tier 1 and Tier 2 targets first, and only
+then intersect them with Lean's own platform/runtime constraints.
 
 ##### Current implementation
 
@@ -410,18 +424,37 @@ with the target also mapped into:
 
 ##### Recommended support matrix
 
-Start with a constrained target matrix aligned to Lean's existing platform support:
+Start with a constrained target matrix aligned to both:
 
-| Tier | Zig target triple | Notes |
-|------|-------------------|-------|
-| 1 | `aarch64-macos` | host-validated family |
-| 1 | `x86_64-macos` | same Darwin code path |
-| 1 | `x86_64-linux-gnu` | existing Linux code path |
-| 1 | `aarch64-linux-gnu` | existing Linux code path |
-| 1 | `x86_64-linux-musl` | libc variant change, same broad platform family |
-| 1 | `aarch64-linux-musl` | libc variant change, same broad platform family |
-| 1 | `x86_64-windows-gnu` | existing Windows code path, mingw ABI |
-| 2 | `wasm32-emscripten` / `wasm32-wasi` | separate design track; not a drop-in extension of Tier 1 |
+1. Zig's official Tier 1 / Tier 2 support table, and
+2. Lean's existing Darwin/Linux/Windows/Emscripten code paths.
+
+| Lean rollout tier | Zig target triple | Zig upstream tier | Notes |
+|-------------------|-------------------|-------------------|-------|
+| 1 | `aarch64-macos` | 2 | host-validated family |
+| 1 | `x86_64-macos` | 2 | same Darwin code path |
+| 1 | `x86_64-linux-gnu` | 1 | strongest Linux starting point |
+| 1 | `aarch64-linux-gnu` | 2 | same Linux code path |
+| 1 | `x86_64-linux-musl` | 1 | libc variant change, same broad platform family |
+| 1 | `aarch64-linux-musl` | 2 | libc variant change, same broad platform family |
+| 1 | `x86_64-windows-gnu` | 2 | existing Windows code path, mingw ABI |
+| 2 | `wasm32-wasi` | 2 | separate design track; not a drop-in extension of Tier 1 |
+| 2 | `wasm32-emscripten` | additional platform | Lean already has explicit Emscripten branches |
+
+Targets such as `riscv64-linux`, `x86-freebsd`, or `aarch64-windows` may eventually
+become reasonable follow-on candidates because Zig rates them Tier 2, but they should
+not be in the first Lean rollout until the Darwin/Linux/Windows baseline is stable.
+
+##### Minimum OS expectations from Zig
+
+Per Zig's upstream platform support page, the relevant baseline OS versions include:
+
+- Darwin `14.0+`
+- Linux kernel `5.10+`
+- Windows `10+`
+
+Lean's Zig target support should inherit these as lower bounds unless Lean itself
+needs stricter ones.
 
 ##### Why WASM is separate
 
@@ -435,6 +468,11 @@ WASM is not just "one more Zig target". The repository already treats
 
 So WASM should be planned as an explicit experimental target family, not folded into
 the initial generic cross-target rollout.
+
+Likewise, Zig's "Additional Platforms" section (for example `wasm32-emscripten`,
+`x86_64-fuchsia`, UEFI, freestanding, console, GPU, and embedded targets) should be
+treated as **out of scope for the first cross-target implementation** unless Lean
+gains explicit support for those runtime environments.
 
 ##### Rollout plan
 
