@@ -42,7 +42,7 @@ extern fn lean_string_hash(s: *anyopaque) callconv(.c) u64;
 extern fn lean_name_hash(n: *anyopaque) callconv(.c) u64;
 extern fn lean_uint64_of_nat(n: *anyopaque) callconv(.c) u64;
 const export_kernel_symbols = runtime_options.export_kernel_symbols;
-
+const export_checked_add_symbols = runtime_options.export_checked_add_symbols;
 inline fn dataValueEq(a: *anyopaque, b: *anyopaque) bool {
     rc.lean_inc(a);
     rc.lean_inc(b);
@@ -1381,9 +1381,9 @@ comptime {
         @export(&lean_replace_expr_zig_impl, .{ .name = "lean_replace_expr_zig_impl", .linkage = .strong });
         @export(&lean_find_expr, .{ .name = "lean_find_expr", .linkage = .strong });
         @export(&lean_find_ext_expr, .{ .name = "lean_find_ext_expr", .linkage = .strong });
-        // lean_add_decl_without_checking is now provided by add_decl_bridge.zig
-        // (separate compilation unit) with strong linkage.
-        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
+        // lean_add_decl_without_checking is provided by add_decl_bridge.zig.
+        // When the checked-add bridge owns lean_add_decl, suppress this fallback export.
+        if (!export_checked_add_symbols) @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
         @export(&lean_level_eq, .{ .name = "lean_level_eq", .linkage = .strong });
     }
 }

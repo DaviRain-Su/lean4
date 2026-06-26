@@ -122,12 +122,16 @@ option(LEAN_ZIG_RUNTIME "Build and test the experimental Lean Zig runtime" ON)
 # Zig-only symbols fill gaps in the C++ runtime.
 option(LEAN_ZIG_RT_CUTOVER "Link Zig runtime into leanshared" ON)
 option(LEAN_ZIG_CODEGEN "Use Zig codegen backend instead of C for stdlib" OFF)
+option(LEAN_ZIG_RT_CHECKED_ADD_CUTOVER "Use checked_add_bridge for helperless lean_add_decl" OFF)
 if(LEAN_ZIG_RUNTIME AND LEAN_ZIG_RT_CUTOVER AND STAGE GREATER 0)
   # GMP-free path: Zig big_int + gmp_mpz_compat provide __mpz_struct layout and
   # arithmetic; C++ mpz.cpp is compiled without LEAN_USE_GMP in the cutover archive.
   set(USE_GMP OFF CACHE BOOL "USE_GMP" FORCE)
   message(STATUS "LEAN_ZIG_RT_CUTOVER: USE_GMP=OFF (GMP-free Zig big_int runtime)")
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libadd_decl_bridge.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  if(LEAN_ZIG_RT_CHECKED_ADD_CUTOVER)
+    set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libleanrt_zig.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libadd_decl_bridge.a ${CMAKE_BINARY_DIR}/runtime/zig/zig-out-helperless/lib/libchecked_add_bridge.a ${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")
+  endif()
   set(LEAN_ZIG_RT_DEPS "leanrt_zig_helperless")
 else()
   set(LEAN_RT_LIB "${CMAKE_BINARY_DIR}/runtime/libleanrt_initial-exec.a")

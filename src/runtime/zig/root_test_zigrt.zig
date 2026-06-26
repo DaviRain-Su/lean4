@@ -15,6 +15,7 @@ pub const array = @import("array.zig");
 pub const box = @import("box.zig");
 pub const byteslice = @import("byteslice.zig");
 pub const compact = @import("compact.zig");
+pub const checked_add_bridge = @import("checked_add_bridge.zig");
 pub const compat = @import("compat.zig");
 pub const cpp_compat = @import("cpp_compat.zig");
 pub const debug = @import("debug.zig");
@@ -82,6 +83,7 @@ comptime {
     _ = byteslice;
     _ = compact;
     _ = compat.force_link;
+    _ = checked_add_bridge.force_link;
     _ = cpp_compat;
     _ = debug;
     _ = dbg;

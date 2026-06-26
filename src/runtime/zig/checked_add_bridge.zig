@@ -4,19 +4,31 @@
 //! Standalone checked `lean_add_decl` bridge.
 //!
 //! This file intentionally avoids importing the runtime ZCU modules. It uses
-//! only extern C-ABI entrypoints so it can compile as a separate static
-//! library without duplicating the runtime's exported symbols. It is not yet
-//! wired into the stage1 cutover link; that happens in a follow-up once the
-//! checked declaration path is behaviorally verified.
+//! only exported C-ABI entrypoints so it can build as a separate static
+//! library. Default builds keep it dormant; helperless stage1 enables
+//! `export-checked-add-symbols` so this archive owns `lean_add_decl` during
+//! live checked-add cutover verification.
 
 pub const force_link = true;
+const std = @import("std");
+const builtin = @import("builtin");
+const runtime_options = @import("runtime_options");
+
+const LeanHeader = extern struct {
+    m_rc: i32,
+    m_cs_sz: u16,
+    m_other: u8,
+    m_tag: u8,
+};
 
 const CUInt = u32;
+const export_checked_add_symbols = runtime_options.export_checked_add_symbols;
 
 extern fn lean_add_decl_bridge(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_cpp_environment_add_with_checking(env: *anyopaque, decl: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_kernel_check_with_params_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, lparams: *anyopaque, definition_safety: u8) callconv(.c) *anyopaque;
 extern fn lean_kernel_is_def_eq_with_params_impl(env: *anyopaque, lctx: *anyopaque, a: *anyopaque, b: *anyopaque, lparams: *anyopaque, definition_safety: u8) callconv(.c) u8;
+extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
 extern fn lean_mk_empty_local_ctx(unit: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_environment_find(env: *anyopaque, n: *anyopaque) callconv(.c) *anyopaque;
@@ -25,6 +37,7 @@ extern fn lean_alloc_ctor(tag: CUInt, num_objs: CUInt, scalar_sz: CUInt) callcon
 extern fn lean_ctor_set(o: *anyopaque, i: CUInt, v: *anyopaque) callconv(.c) void;
 extern fn lean_ctor_get(o: *anyopaque, i: CUInt) callconv(.c) ?*anyopaque;
 extern fn lean_ctor_get_uint8(o: *anyopaque, offset: CUInt) callconv(.c) u8;
+extern fn lean_ctor_set_uint8(o: *anyopaque, offset: CUInt, v: u8) callconv(.c) void;
 extern fn lean_ctor_get_usize(o: *anyopaque, i: CUInt) callconv(.c) usize;
 extern fn lean_inc(o: *anyopaque) callconv(.c) void;
 extern fn lean_dec(o: *anyopaque) callconv(.c) void;
@@ -32,6 +45,14 @@ extern fn lean_is_scalar(o: *anyopaque) callconv(.c) bool;
 extern fn lean_box(v: usize) callconv(.c) ?*anyopaque;
 extern fn lean_unbox(o: *anyopaque) callconv(.c) usize;
 extern fn lean_ptr_tag(o: *anyopaque) callconv(.c) CUInt;
+extern fn lean_string_cstr(s: *anyopaque) callconv(.c) [*:0]const u8;
+
+fn header(o: *anyopaque) *LeanHeader {
+    return @ptrCast(@alignCast(o));
+}
+inline fn ctorNumObjs(o: *anyopaque) CUInt {
+    return header(o).m_other;
+}
 
 inline fn incRet(o: *anyopaque) *anyopaque {
     lean_inc(o);
@@ -47,6 +68,51 @@ inline fn someVal(opt: *anyopaque) *anyopaque {
     lean_inc(v);
     lean_dec(opt);
     return v;
+}
+
+fn nameLastComponentStr(name: *anyopaque) ?[*:0]const u8 {
+    var it = name;
+    while (!lean_is_scalar(it)) {
+        switch (lean_ptr_tag(it)) {
+            1 => {
+                const s = lean_ctor_get(it, 1) orelse return null;
+                return lean_string_cstr(s);
+            },
+            2 => {
+                it = lean_ctor_get(it, 0) orelse return null;
+            },
+            else => return null,
+        }
+    }
+    return null;
+}
+
+fn nameLastComponentEq(name: *anyopaque, expected: []const u8) bool {
+    const actual = nameLastComponentStr(name) orelse return false;
+    return std.mem.eql(u8, std.mem.span(actual), expected);
+}
+
+fn nameLastComponentStartsWith(name: *anyopaque, prefix: []const u8) bool {
+    const actual = nameLastComponentStr(name) orelse return false;
+    return std.mem.startsWith(u8, std.mem.span(actual), prefix);
+}
+
+fn isDeferredAuxRecursor(name: *anyopaque) bool {
+    return nameLastComponentEq(name, "recOn") or
+        nameLastComponentEq(name, "casesOn") or
+        nameLastComponentEq(name, "brecOn") or
+        nameLastComponentEq(name, "below") or
+        nameLastComponentEq(name, "ndrec") or
+        nameLastComponentEq(name, "ndrecOn") or
+        nameLastComponentEq(name, "noConfusion") or
+        nameLastComponentEq(name, "noConfusionType") or
+        nameLastComponentEq(name, "ofNat") or
+        nameLastComponentEq(name, "toCtorIdx") or
+        nameLastComponentEq(name, "ctorIdx") or
+        nameLastComponentEq(name, "ctorElim") or
+        nameLastComponentEq(name, "ctorElimType") or
+        nameLastComponentStartsWith(name, "brecOn_") or
+        nameLastComponentStartsWith(name, "below_");
 }
 
 inline fn listIsNil(xs: *anyopaque) bool {
@@ -87,7 +153,8 @@ inline fn ciValue(ci: *anyopaque) *anyopaque {
 
 inline fn defnValSafety(ci: *anyopaque) u8 {
     const v = ciVal(ci);
-    return lean_ctor_get_uint8(v, @intCast(6 * @sizeOf(?*anyopaque)));
+    const offset: CUInt = @intCast(ctorNumObjs(v) * @sizeOf(?*anyopaque));
+    return lean_ctor_get_uint8(v, offset);
 }
 
 inline fn exprNumObjs(e: *anyopaque) CUInt {
@@ -214,6 +281,38 @@ fn checkNoMetavarNoFvar(env: *anyopaque, name: *anyopaque, expr: *anyopaque) ?*a
     return null;
 }
 
+fn exprHasAnyLooseBVar(expr: *anyopaque) bool {
+    if (lean_is_scalar(expr)) return false;
+    return switch (lean_ptr_tag(expr)) {
+        0 => true,
+        5 => blk: {
+            const fn_expr = lean_ctor_get(expr, 0) orelse return false;
+            const arg_expr = lean_ctor_get(expr, 1) orelse return false;
+            break :blk exprHasAnyLooseBVar(fn_expr) or exprHasAnyLooseBVar(arg_expr);
+        },
+        6, 7 => blk: {
+            const domain = lean_ctor_get(expr, 1) orelse return false;
+            const body = lean_ctor_get(expr, 2) orelse return false;
+            break :blk exprHasAnyLooseBVar(domain) or exprHasAnyLooseBVar(body);
+        },
+        8 => blk: {
+            const domain = lean_ctor_get(expr, 1) orelse return false;
+            const value = lean_ctor_get(expr, 2) orelse return false;
+            const body = lean_ctor_get(expr, 3) orelse return false;
+            break :blk exprHasAnyLooseBVar(domain) or exprHasAnyLooseBVar(value) or exprHasAnyLooseBVar(body);
+        },
+        10 => blk: {
+            const inner = lean_ctor_get(expr, 1) orelse return false;
+            break :blk exprHasAnyLooseBVar(inner);
+        },
+        11 => blk: {
+            const inner = lean_ctor_get(expr, 2) orelse return false;
+            break :blk exprHasAnyLooseBVar(inner);
+        },
+        else => false,
+    };
+}
+
 fn levelIsZero(lvl: *anyopaque) bool {
     return (lean_is_scalar(lvl) and lean_unbox(lvl) == 0) or (!lean_is_scalar(lvl) and lean_ptr_tag(lvl) == 0);
 }
@@ -242,15 +341,18 @@ fn checkConstantHeader(env: *anyopaque, lctx: *anyopaque, decl: *anyopaque, defi
 fn zigCheckedAddDefinition(env: *anyopaque, decl: *anyopaque) *anyopaque {
     const lctx = lean_mk_empty_local_ctx(lean_box(0).?);
     defer lean_dec(lctx);
+    const name = ciName(decl);
     switch (checkConstantHeader(env, lctx, decl, 1)) {
         .err => |err| return err,
         .ok => |sort| lean_dec(sort),
     }
-    const name = ciName(decl);
     const value = ciValue(decl);
     if (checkNoMetavarNoFvar(env, name, value)) |err| return err;
     const value_type = lean_kernel_check_with_params_impl(env, lctx, value, ciLevelParams(decl), 1);
     defer lean_dec(value_type);
+    if (exprHasAnyLooseBVar(value_type) or exprHasAnyLooseBVar(ciType(decl))) {
+        return lean_cpp_environment_add_with_checking(env, decl);
+    }
     if (lean_kernel_is_def_eq_with_params_impl(env, lctx, value_type, ciType(decl), ciLevelParams(decl), 1) == 0) {
         return mkDeclTypeMismatchError(env, decl, value_type);
     }
@@ -271,6 +373,9 @@ fn zigCheckedAddTheorem(env: *anyopaque, decl: *anyopaque) *anyopaque {
     if (checkNoMetavarNoFvar(env, name, value)) |err| return err;
     const value_type = lean_kernel_check_with_params_impl(env, lctx, value, ciLevelParams(decl), 1);
     defer lean_dec(value_type);
+    if (exprHasAnyLooseBVar(value_type) or exprHasAnyLooseBVar(ciType(decl))) {
+        return lean_cpp_environment_add_with_checking(env, decl);
+    }
     if (lean_kernel_is_def_eq_with_params_impl(env, lctx, value_type, ciType(decl), ciLevelParams(decl), 1) == 0) {
         return mkDeclTypeMismatchError(env, decl, value_type);
     }
@@ -289,6 +394,9 @@ fn zigCheckedAddOpaque(env: *anyopaque, decl: *anyopaque) *anyopaque {
     if (checkNoMetavarNoFvar(env, name, value)) |err| return err;
     const value_type = lean_kernel_check_with_params_impl(env, lctx, value, ciLevelParams(decl), 1);
     defer lean_dec(value_type);
+    if (exprHasAnyLooseBVar(value_type) or exprHasAnyLooseBVar(ciType(decl))) {
+        return lean_cpp_environment_add_with_checking(env, decl);
+    }
     if (lean_kernel_is_def_eq_with_params_impl(env, lctx, value_type, ciType(decl), ciLevelParams(decl), 1) == 0) {
         return mkDeclTypeMismatchError(env, decl, value_type);
     }
@@ -297,7 +405,12 @@ fn zigCheckedAddOpaque(env: *anyopaque, decl: *anyopaque) *anyopaque {
 
 fn canUseZigCheckedAdd(decl: *anyopaque) bool {
     return switch (lean_ptr_tag(decl)) {
-        1 => defnValSafety(decl) == 1 and !hasDuplicateLevelParams(ciLevelParams(decl)),
+        1 => {
+            const name = ciName(decl);
+            return defnValSafety(decl) == 1 and
+                !hasDuplicateLevelParams(ciLevelParams(decl)) and
+                !isDeferredAuxRecursor(name);
+        },
         else => false,
     };
 }
@@ -319,5 +432,32 @@ fn lean_add_decl(env: *anyopaque, max_heartbeat: usize, decl: *anyopaque, opt_ca
 }
 
 comptime {
-    @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
+    if (!builtin.is_test and export_checked_add_symbols) {
+        @export(&lean_add_decl, .{ .name = "lean_add_decl", .linkage = .strong });
+    }
+}
+
+test "defnValSafety reads nested DefinitionVal scalar offset" {
+    const constant_val = lean_alloc_ctor(0, 3, 0);
+    lean_ctor_set(constant_val, 0, lean_box(0).?);
+    lean_ctor_set(constant_val, 1, lean_box(0).?);
+    lean_ctor_set(constant_val, 2, lean_box(0).?);
+
+    const defn_val = lean_alloc_ctor(0, 4, @intCast(2 * @sizeOf(?*anyopaque) + 1));
+    lean_ctor_set(defn_val, 0, constant_val);
+    lean_ctor_set(defn_val, 1, lean_box(0).?);
+    lean_ctor_set(defn_val, 2, lean_box(0).?);
+    lean_ctor_set(defn_val, 3, lean_box(0).?);
+
+    const safety_offset: CUInt = @intCast(4 * @sizeOf(?*anyopaque));
+    const stale_flat_offset: CUInt = @intCast(6 * @sizeOf(?*anyopaque));
+    lean_ctor_set_uint8(defn_val, safety_offset, 0);
+    lean_ctor_set_uint8(defn_val, stale_flat_offset, 1);
+
+    const decl = lean_alloc_ctor(1, 1, 0);
+    lean_ctor_set(decl, 0, defn_val);
+    defer lean_dec(decl);
+
+    try std.testing.expectEqual(@as(CUInt, 4), ctorNumObjs(defn_val));
+    try std.testing.expectEqual(@as(u8, 0), defnValSafety(decl));
 }

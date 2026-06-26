@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
     const export_kernel_symbols = b.option(bool, "export-kernel-symbols", "Export pure-Zig kernel entrypoints") orelse true;
+    const export_checked_add_symbols = b.option(bool, "export-checked-add-symbols", "Export checked_add_bridge's lean_add_decl instead of kernel.zig's fallback") orelse false;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const use_gmp = b.option(bool, "use-gmp", "Use libgmp for big integers instead of std.math.big.int") orelse false;
     const compile_cpp_cutover = b.option(bool, "compile-cpp-cutover", "Compile remaining C++ runtime shims into the Zig archive") orelse false;
@@ -25,6 +26,7 @@ pub fn build(b: *std.Build) void {
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
+    opts.addOption(bool, "export_checked_add_symbols", export_checked_add_symbols);
     opts.addOption(bool, "compile_cpp_cutover", compile_cpp_cutover);
     opts.addOption(bool, "cpp_init_modules_available", compile_cpp_cutover);
     opts.addOption(bool, "cpp_use_mimalloc", cpp_use_mimalloc);
@@ -41,6 +43,7 @@ pub fn build(b: *std.Build) void {
     zigrt_opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     zigrt_opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
     zigrt_opts.addOption(bool, "export_kernel_symbols", export_kernel_symbols);
+    zigrt_opts.addOption(bool, "export_checked_add_symbols", export_checked_add_symbols);
     zigrt_opts.addOption(bool, "compile_cpp_cutover", compile_cpp_cutover);
     zigrt_opts.addOption(bool, "cpp_init_modules_available", false);
     zigrt_opts.addOption(bool, "cpp_use_mimalloc", cpp_use_mimalloc);
@@ -203,16 +206,17 @@ pub fn build(b: *std.Build) void {
         .linkage = .static,
     });
     b.installArtifact(add_decl_bridge_lib);
-    // checked_add_bridge.zig — separate module for the future checked
-    // declaration-add cutover path. Keep it outside the runtime ZCU so it can
-    // depend only on exported C-ABI entrypoints without duplicating runtime
-    // symbols in the main archive.
+    // checked_add_bridge.zig — separate module for the checked declaration-add
+    // cutover path. When `export-checked-add-symbols=true`, helperless stage1
+    // links this archive so it owns `lean_add_decl` instead of kernel.zig.
+    // Keeping it outside the runtime ZCU avoids duplicate runtime symbols.
     const checked_add_bridge_mod = b.createModule(.{
         .root_source_file = b.path("checked_add_bridge.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    checked_add_bridge_mod.addImport("runtime_options", opts_mod);
     const checked_add_bridge_lib = b.addLibrary(.{
         .name = "checked_add_bridge",
         .root_module = checked_add_bridge_mod,

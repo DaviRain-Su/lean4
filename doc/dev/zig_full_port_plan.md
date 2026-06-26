@@ -1,6 +1,6 @@
 # Zig Full Port Plan
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 ## Current Status
 
@@ -9,16 +9,17 @@ Last updated: 2026-06-25
 - Compiles to `libleanrt_zig.a`, linked into `libleanshared.dylib`
 - Zig unit tests (`zig build test`): 232/232 pass (per docs; not independently re-verified this session)
 
-### Kernel layer ✅ (99.97% pure Zig)
-- `kernel.zig`, `type_checker.zig`, `add_decl_bridge.zig`, `inductive.zig`, `environment.zig` — full Zig implementations
-- Only **2 C++ extern functions remain** (the elab↔kernel environment bridge):
-  - `lean_elab_environment_to_kernel_env` (`src/runtime/zig/elab_environment.zig:20`)
-  - `lean_elab_environment_update_base_after_kernel_add` (`src/runtime/zig/elab_environment.zig:21`)
-- These are the last architectural barrier to a 100% pure Zig kernel.
+### Kernel layer ✅ (mostly Zig, Phase B still owns checked-add cutover)
+- `kernel.zig`, `type_checker.zig`, `add_decl_bridge.zig`, `inductive.zig`, `environment.zig` — substantial Zig implementations are in place.
+- The core kernel entrypoints (`lean_kernel_check`, `lean_kernel_whnf`, `lean_kernel_is_def_eq`) now route through Zig wrappers and return the required `Except Kernel.Exception T` shape.
+- Remaining C++ dependencies are now narrow and explicit:
+  - `lean_cpp_environment_add_with_checking` is still used for `lean_add_decl` tags 0-3 (axiom/defn/theorem/opaque); Phase B cuts this to Zig.
+  - Nested inductives still fall back to the C++ `elim_nested_inductive_fn` path; this is C-polish / later coverage, not the old core Phase C blocker.
+  - The elab↔kernel environment bridge still has 2 externs: `lean_elab_environment_to_kernel_env` and `lean_elab_environment_update_base_after_kernel_add` (`src/runtime/zig/elab_environment.zig:20-21`).
 
 ### Symbol flip mechanism ✅
-- 1,089 symbols flipped from C++ weak → Zig strong via `tools/phase3_flip_symbols.txt`
-- `libleanshared.dylib` links `libleanrt_zig.a` + `libadd_decl_bridge.a` + `libleanrt_initial-exec.a`
+- 1,098 symbols flipped from C++ weak → Zig strong via `tools/phase3_flip_symbols.txt`
+- `libleanshared.dylib` links `libleanrt_zig.a` + `libadd_decl_bridge.a` + `libkernel_entrypoints.a` + `libleanrt_initial-exec.a`
 
 ### Stage1 build ✅
 - `build/release/stage1/bin/lean --version` = `Lean (version 4.33.0-pre, arm64-apple-darwin25.4.0, Release)`
@@ -114,13 +115,13 @@ Plus the 2 elab-env externs declared in `elab_environment.zig:20-21` (`lean_elab
 
 **Note on the "78 symbols" claim:** The earlier "78 C++ symbols to remove" figure does not match the actual `nm` surface (56 `lean_*` in `libleancpp.a`, all already in the dylib; 0 cpp-only `lean_*` deps). The 78 likely conflated mangled C++ classes with `lean_*` C-api, or counted a different build artifact. The calibrated numbers above supersede it.
 
-**Path forward (revised, evidence-based):**
-1. **Phase A (flip + link fix): ✅ COMPLETE 2026-06-25.** Verified `export_kernel_symbols` is genuinely active: `CMakeLists.txt:79-82` passes `-Dexport-kernel-symbols=true` when `LEAN_ZIG_RT_CUTOVER=ON`; the generated options module (not the `runtime_options.zig` fallback, which has `false`) wins, and `libleanrt_zig.a` contains `_lean_kernel_check_impl`/`_whnf_impl`/`_is_def_eq_impl` as strong `external` symbols. **However**, `src/stdlib.make.in` (stage1+ branch) was *missing* `libkernel_entrypoints.a` from the dylib link line — the Zig `lean_kernel_check`/`whnf`/`is_def_eq` wrappers lived only in that archive, so despite the flip making them strong, only the weak C++ `lean_kernel_check` (from `elab_environment.cpp:48-66`) was present at link time…
-2. **Phase B (type checker — wire-up, NOT a port):** The Zig type checker is **already complete** — `src/runtime/zig/type_checker.zig` (1551 lines) implements `TypeChecker.{whnf,isDefEq,inferType,reduceRecursor,reduceProj,...}` and exports `leanKernelWhnf`/`leanKernelIsDefEq`/`leanKernelCheck` as `lean_kernel_whnf_impl`/`_is_def_eq_impl`/`_check_impl` (`type_checker.zig:1545-1550`, gated on `export_kernel_symbols`). `kernel_entrypoints.zig:26-41` already wraps these as `lean_kernel_whnf`/`is_def_eq`/`check`. So the 53 `lean::type_checker` mangled symbols in the dylib are **dead C++** kept alive by one caller: `kernel.zig:1091`'s `lean_cpp_environment_add_with_checking` (which `environment.cpp:294-297` implements as `environment::add(decl, /*check…
-3. **Phase C (recursor / inductive):** Complete `lean::add_inductive_fn` + `lean::elim_nested_inductive_fn` (35 mangled) in `add_decl_bridge.zig` — nested inductives and indexed inductive recursors. (Task 1 already fixed the IH generation bug; this extends coverage.)
-4. **Phase D (IR interpreter):** Port `lean::ir` (48 mangled) + `lean_eval_main` to Zig (`ir_interpreter.zig` already partially exists).
-5. **Phase E (library/serial):** Port `lean::object_compactor` + `lean::region_reader` (olean r/w, 29 mangled) and `lean::mpz` (44 mangled, mostly already in `mp.zig` — flip + fill gaps), plus the 2 elab-env externs (read elab `Environment` layout directly in Zig).
-6. **Phase F (cleanup):** The remaining ~1200 mangled symbols (STL-like containers `rb_tree`/`optional`/`buffer`/`list_ref`, exception classes, `lthread`, `name`) are mostly C++ infrastructure that becomes dead once Phases B-E remove the last C++ callers; delete `libleancpp.a` from the link line and verify the dylib still links.
+**Path forward (current, 2026-06-26):**
+0. **A-residual / B0-precheck (abstract flip gating):** `lean_expr_instantiate_range`, `lean_expr_instantiate_rev`, and `lean_expr_instantiate_rev_range` are already in `tools/phase3_flip_symbols.txt`. `lean_expr_abstract` and `lean_expr_abstract_range` are implemented/exported in `kernel.zig` but are not flipped yet. Before touching the main type-checker track, first isolate whether the red `abstractExpr` signal is a real `lean_expr_abstract` semantic bug or just `lean_expr_dbg_to_string` fidelity noise once the flip is attempted. The current flip list still includes `lean_expr_dbg_to_string`, so this precheck must separate printer noise from abstract/instantiate/sharing semantics.
+1. **Phase B (type checker edge cases + checked-add cutover — NOT a from-scratch port):** The Zig type checker is already substantial and live on the `lean_kernel_*` entrypoints. The main work is to fix remaining Zig type-checker edge cases (`isDefEq`/`whnf`/`inferLet`/error-shape fidelity) and route `lean_add_decl` tags 0-3 through Zig checking + `lean_environment_add` instead of `lean_cpp_environment_add_with_checking`. This removes the last active C++ checked-add/type-checker caller.
+2. **Phase C-polish (inductive fidelity, non-blocking):** The original Phase C recursor/indexed-inductive blocker is basically fixed. Remaining work is fidelity/polish: `brecOn`/`below` binder display (`_` vs `t`), `List.{max v v}` vs `List.{v}` display, warning-position diffs, old `coinductive_syntax` behavior, and eventually porting the nested-inductive C++ fallback.
+3. **Phase D (IR interpreter):** Port `lean::ir` (48 mangled) + `lean_eval_main` to Zig (`ir_interpreter.zig` already partially exists).
+4. **Phase E (library/serial):** Port `lean::object_compactor` + `lean::region_reader` (olean r/w, 29 mangled), `lean::mpz` gaps (44, mostly already in `mp.zig` — flip + fill gaps), and the 2 elab-env externs.
+5. **Phase F (cleanup):** Once Phases B-E remove the last live C++ callers, drop `libleancpp.a` from the link line and verify the dylib still links; the remaining STL-like containers, exception classes, `lthread`, and `name` helpers should become dead surface.
 
 ### B3. Stage1 CMake race
 - `DeclNameGen.c.tmp` / `libInit.a` file-level dependency ordering. Retry workaround works.
@@ -134,27 +135,27 @@ Plus the 2 elab-env externs declared in `elab_environment.zig:20-21` (`lean_elab
 
 Earlier versions of this doc tracked Waves 1–3 (symbol flips, bridge elimination, kernel port) as pending. In reality those are **done**:
 
-- **Wave 1 (Phase 3 flips): ✅ COMPLETE** — 1,089 symbols flipped.
+- **Wave 1 (Phase 3 flips): ✅ COMPLETE** — 1,098 symbols flipped.
 - **Wave 2 (C++ bridge elimination): ✅ largely complete** — runtime is pure Zig.
 - **Wave 3 (kernel C++ → Zig): ✅ ~99.97% complete** — only 2 externs remain (B2).
 
-The actual remaining work is the **stdlib codegen path (B1)**, which is an architecture/tooling problem, not a kernel-logic port.
+The actual remaining work now splits into two tracks: **B1 stdlib codegen** (an architecture/tooling blocker for `LEAN_ZIG_CODEGEN=ON`) and the **B0-precheck → A-residual → B → C-polish → D → E → F** C++-surface cleanup track below.
 
 ---
 
 ## Next Steps (priority order)
 
-1. **B1 stdlib codegen path** — `host_lean_env` LEAN_PATH fix already applied (44->39 failures). Remaining work: investigate `.olean`-based emission in `zigc-stdlib` to resolve the 39 residual elaborator errors and unblock `LEAN_ZIG_CODEGEN=ON` + `EMITZIG_STDLIB_TESTS`.
-2. **Phase A — flip + link fix ✅ DONE 2026-06-25** (B2): Verified `export_kernel_symbols` is active in the build (CMake passes `-Dexport-kernel-symbols=true`; `libleanrt_zig.a` has strong `lean_kernel_*_impl`). Found & fixed a real bug: `src/stdlib.make.in` was missing `libkernel_entrypoints.a` on the dylib link line, so the weak C++ `lean_kernel_check` won despite the flip. Added the force_load; relinked; verified `lean_kernel_check` now resolves to the Zig wrapper → Zig `type_checker.leanKernelCheck`. Smoke tests pass. Latent risk noted: `runtime_options.zig:8` fallback has `export_kernel_symbols=false` (only hit by tools that `@import("root.zig")` without the build runner — non-blocking, guardrail later). **Phase A.2 (2026-06-25):** regression slice found & fixed a real wrapper-shape bug — Zig `lean_kernel_{is_def_eq,whnf,check}` returned a bare boxed scalar but the Lean `@[extern]` decls expect `Except Kernel.Exception T`; added `mkExceptOk` (ctor tag 1) wrapping. See Phase A.2 log.
-3. **Phase C — fix inductive-derivation regressions (NOW BEFORE Phase B)** (B2): 15/18 `elab/inductive*` tests fail with `(kernel) application type mismatch @motive …` from `SizeOf`/`casesOn`/`noConfusion`/`brecOn`/`recursor` derivation (mutual `isEven`/`isOdd`, indexed `Vec α n`, nested inductives). **A/B test confirmed this is NOT Phase A** — reproduces on the pure-C++ kernel path too. Root cause is in the Zig inductive-add path (`add_decl_bridge.zig`/`inductive.zig`, `can_handle = true`) producing a slightly-malformed recursor that the elaborator's motive then fails to def-eq against. Plus a latent Zig `type_checker.reduceRecursor` → `inductiveReduceRec` env-threading bug (null env at `lean_environment_find`, `isDefEqProjIssue`). This is the highest-priority correctness item — it blocks normal inductive use — and must land before Phase B.
-4. **Phase B — wire type checker to Zig (NOT a port)** (B2): Zig type checker already complete (`type_checker.zig` 1551 lines, exports `lean_kernel_*_impl`). Work = route `lean_add_decl` tags 0-3 through `leanKernelCheck` + `lean_environment_add` instead of `lean_cpp_environment_add_with_checking` (`kernel.zig:1091`), then delete that C++ helper (`environment.cpp:293-297`). C++ `type_checker.cpp` dies with it. Exception-fidelity design (the `catchKernelExceptions` helper producing `Except.error (Kernel.Exception.<tag 0-16> …)` field-for-field) is validated by the 12/12 `elab_fail` slice passing — the C++ shape is achievable in Zig.
-4. **Phase C — extend inductive recursor coverage** (B2): `add_decl_bridge.zig:663` sets `can_handle = true` — the inductive path is already pure Zig (no C++ fallback reached). Task 1 fixed the IH-generation bug. Remaining work is *coverage extension* (nested mutual edge cases, indexed inductive recursor shapes), not porting `lean::add_inductive_fn` from scratch. Verify which of the 35 `lean::add_inductive_fn`+`lean::elim_nested_inductive_fn` mangled symbols are still reachable after Phase B; many may already be dead.
-6. **Phase D — port IR interpreter** (B2): `lean::ir` (48 mangled) + `lean_eval_main` into `ir_interpreter.zig`.
-7. **Phase E — library/serialization + elab-env externs** (B2): `lean::object_compactor`/`region_reader` (olean r/w, 29), `lean::mpz` gaps (44, mostly in `mp.zig`), and the 2 elab-env externs (read elab `Environment` layout directly in Zig using `kernel_accessors.zig` as reference).
-8. **Phase F — drop `libleancpp.a`** (B2): remove the C++ archive from the link line, verify dylib still links, delete dead STL/exception/lthread C++ (~1200 mangled).
-8. **B3 Stage1 CMake race** — add proper file-level dependency for `DeclNameGen.c.tmp`.
-9. **B4 Build & run stage2** — verify self-bootstrap reproducibility.
-10. **Re-verify `zig build test`** independently.
+1. **B0-precheck — abstract flip signal cleanup** — before flipping `lean_expr_abstract*`, classify whether `abstractExpr` is failing because of `lean_expr_dbg_to_string` fidelity or because of a real `lean_expr_abstract` semantic bug. Run the focused slice: `abstractExpr`, `abstractMVars`, `grind_abstract_mvars`, `sym_instantiate`, `instantiateMVarsCrossScope`, `instantiateMVarsSharing`.
+2. **A-residual — flip `lean_expr_abstract*` only after B0-precheck is clean enough** — once the failure mode is clearly semantic or clearly cosmetic, either keep the abstract flip and fix the semantic bug, or defer the flip and keep the printer out of the way. Do not mark A-residual complete just because the build links.
+3. **Phase B — Zig type-checker edge cases + checked-add cutover** — fix the remaining `isDefEq`/`whnf`/`inferLet`/error-shape fidelity risks, then route `lean_add_decl` tags 0-3 through Zig checking + `lean_environment_add` instead of `lean_cpp_environment_add_with_checking` (`kernel.zig`), and remove the C++ helper once the representative `elab`/`elab_fail` slices pass.
+4. **C-polish — remaining inductive fidelity** — the original indexed/recursor blocker is basically fixed. Remaining non-blocking items are binder-display diffs (`brecOn`/`below` `_` vs `t`), universe-display diffs (`List.{max v v}` vs `List.{v}`), warning-position formatting, old `coinductive_syntax` behavior, and later porting/removing the nested-inductive C++ fallback.
+5. **B1 stdlib codegen path (parallel blocker)** — `host_lean_env` LEAN_PATH fix already applied (44->39 failures). Remaining work: investigate `.olean`-based emission in `zigc-stdlib` to resolve the residual standalone elaboration errors and unblock `LEAN_ZIG_CODEGEN=ON` + `EMITZIG_STDLIB_TESTS`. This is independent of the checked-add C++ surface cleanup track.
+6. **Phase D — port IR interpreter** — port `lean::ir` (48 mangled) + `lean_eval_main` into `ir_interpreter.zig`.
+7. **Phase E — library/serialization + elab-env externs** — port `lean::object_compactor`/`region_reader`, fill/flip `lean::mpz` gaps, and remove the 2 elab-env externs by reading the elab `Environment` layout directly in Zig.
+8. **Phase F — drop `libleancpp.a`** — remove the C++ archive from the link line, verify dylib link/runtime behavior, and delete dead STL/exception/lthread/name support that becomes unreachable.
+9. **B3 Stage1 CMake race** — add proper file-level dependency for `DeclNameGen.c.tmp`.
+10. **B4 Build & run stage2** — verify self-bootstrap reproducibility.
+11. **Re-verify `zig build test`** independently.
 
 ---
 
@@ -274,9 +275,9 @@ Evidence:
 
 **Files changed this phase:** `src/runtime/zig/add_decl_bridge.zig` (5 fixes above). No changes to `kernel.zig` / `type_checker.zig` / `inductive.zig` / `kernel_entrypoints.zig` / `stdlib.make.in` (those remain as fixed in Phase A / A.2).
 
-**Net Phase C outcome:** The Zig inductive-add path now produces correct recursors for the common cases (params, indices, mutual, inductive predicates, empty inductives) and falls back to C++ only for nested inductives (which need the unported `elim_nested_inductive_fn`). 15/16 inductive tests pass; the one remaining failure is a pre-existing C++ display bug. Phase B (wire `lean_add_decl` tags 0-3 to the Zig checked-add path) is now unblocked — the kernel's inductive machinery is correct for the non-nested cases.
+**Net Phase C outcome:** The Zig inductive-add path now produces correct recursors for the common cases (params, indices, mutual, inductive predicates, empty inductives) and falls back to C++ only for nested inductives (which need the unported `elim_nested_inductive_fn`). The kernel/no-error path is unblocked for the core inductive slice; remaining strict expected-output failures are display/location fidelity (`brecOn`/`below` binder names, `List.{max v v}` vs `List.{v}`, warning formatting) rather than the original Phase C recursor bug.
 
-### Phase B — IN PROGRESS (design finalized, implementation pending)
+### Phase B — NEXT (design finalized, implementation pending)
 
 **Current state:** `kernel.zig:1078-1092` `lean_add_decl` for tags 0-3 (axiom/defn/theorem/opaque) calls `lean_cpp_environment_add_with_checking(env, decl)`, which is `environment.cpp:293-297` → `environment::add(decl, check=true)` → builds a C++ `type_checker` and runs `check_constant_val` + per-kind checks. This is now the **only** remaining path that builds a C++ `type_checker` for declaration checking (the kernel-check entry points `lean_kernel_*` already route to Zig).
 

@@ -137,6 +137,8 @@ lean_event_loop_is_alive
 lean_event_loop_lock
 lean_event_loop_loop
 lean_event_loop_unlock
+lean_expr_abstract
+lean_expr_abstract_range
 lean_expr_equal
 lean_expr_eqv
 lean_expr_lt
