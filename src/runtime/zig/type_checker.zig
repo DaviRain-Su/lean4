@@ -54,6 +54,7 @@ extern fn lean_expr_mk_lit(l: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_expr_instantiate_rev(a: *anyopaque, subst: *anyopaque) callconv(.c) *anyopaque;
 extern fn lean_name_eq(a: *anyopaque, b: *anyopaque) callconv(.c) u8;
 extern fn lean_local_ctx_mk_local_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, bi: u8) callconv(.c) *anyopaque;
+extern fn lean_local_ctx_mk_let_decl(lctx: *anyopaque, fvar_id: *anyopaque, user_name: *anyopaque, type: *anyopaque, value: *anyopaque, nondep: u8) callconv(.c) *anyopaque;
 extern fn lean_local_ctx_mk_pi(lctx: *anyopaque, fvars: *anyopaque, e: *anyopaque, remove_dead_let: u8) callconv(.c) *anyopaque;
 extern fn lean_expr_has_loose_bvar(e: *anyopaque, idx: *anyopaque) callconv(.c) u8;
 extern fn lean_axiom_val_is_unsafe(v: *anyopaque) callconv(.c) u8;
@@ -854,7 +855,14 @@ const TypeChecker = struct {
 
             const let_name = ea.letName(e);
             const fvar_name = util_name.mkInternalUniqueName();
-            self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), rc.lean_inc_ret(let_name), lt, 0);
+            self.lctx = lean_local_ctx_mk_let_decl(
+                self.lctx,
+                rc.lean_inc_ret(fvar_name.obj.?),
+                rc.lean_inc_ret(let_name),
+                rc.lean_inc_ret(lt),
+                rc.lean_inc_ret(lv),
+                0,
+            );
 
             const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
             fvars_buf.append(self.allocator, fvar) catch @panic("inferLet: OOM");
@@ -868,10 +876,12 @@ const TypeChecker = struct {
                 rc.lean_dec(val_type);
                 if (!ok) {
                     rc.lean_dec(lv);
+                    rc.lean_dec(lt);
                     @panic("let-declaration type mismatch");
                 }
             }
             rc.lean_dec(lv);
+            rc.lean_dec(lt);
             e = ea.letBody(e);
         }
 
