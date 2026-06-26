@@ -483,6 +483,169 @@ gains explicit support for those runtime environments.
 5. Run host-executable tests only for native builds; use compile/link verification for foreign targets.
 6. Design WASM separately once Tier 1 is stable.
 
+##### Appendix: Zig upstream targets outside the first Lean rollout
+
+The following inventories are included so that future target work can be discussed
+with explicit names instead of vague references to "Tier 3", "Tier 4", or
+"Additional Platforms". **Listing a target here does not mean Lean supports it.**
+It only means Zig has some documented level of upstream support for it.
+
+###### Zig Tier 3 targets
+
+These targets have Zig code generation and linker support, but are below the Tier 2
+bar that we want for Lean's first cross-target rollout:
+
+- `aarch64-haiku`
+- `aarch64-ios`
+- `aarch64-serenity`
+- `aarch64-tvos`
+- `aarch64-visionos`
+- `aarch64-watchos`
+- `arm-freebsd`
+- `arm-haiku`
+- `arm[eb]-linux`
+- `arm[eb]-netbsd`
+- `arm-openbsd`
+- `mips64[el]-netbsd`
+- `riscv64-haiku`
+- `riscv64-serenity`
+- `thumb[eb]-linux`
+- `wasm64-wasi`
+- `x86-freebsd`
+- `x86-haiku`
+- `x86-illumos`
+- `x86_64-dragonfly`
+- `x86_64-haiku`
+- `x86_64-illumos`
+- `x86_64-serenity`
+
+For Lean, these are plausible **second-wave investigation candidates** only after
+the Darwin/Linux/Windows Tier 1 rollout is stable.
+
+###### Zig Tier 4 targets
+
+These targets have weaker upstream support. They are useful to track, but should be
+treated as far outside Lean's initial Zig target plan:
+
+- `alpha-linux`
+- `alpha-netbsd`
+- `alpha-openbsd`
+- `arc[eb]-linux`
+- `csky-linux`
+- `hppa-linux`
+- `hppa-netbsd`
+- `hppa-openbsd`
+- `hppa64-linux`
+- `m68k-linux`
+- `m68k-netbsd`
+- `m88k-openbsd`
+- `microblaze[el]-linux`
+- `or1k-linux`
+- `sh[eb]-linux`
+- `sh[eb]-netbsd`
+- `sh-openbsd`
+- `sparc-linux`
+- `sparc-netbsd`
+- `sparc64-linux`
+- `sparc64-netbsd`
+- `sparc64-openbsd`
+- `xtensa[eb]-linux`
+
+Lean should not target these until there is a concrete downstream need and a clear
+plan for runtime, libc, linker, and CI coverage.
+
+###### Zig Additional Platforms
+
+Zig also documents a large "Additional Platforms" set where the normal tier system
+does not fully apply. For Lean, these should be considered **explicitly out of
+scope** for the first cross-target implementation unless we add platform-specific
+runtime and build support.
+
+**Apple / kernel / alternate OS targets**
+
+- `aarch64-driverkit`
+- `aarch64-fuchsia`
+- `aarch64-hurd`
+- `aarch64-uefi`
+- `arm-fuchsia`
+- `arm-uefi`
+- `loongarch(32,64)-uefi`
+- `riscv(32,64)-uefi`
+- `riscv64-fuchsia`
+- `thumb-fuchsia`
+- `x86[_64]-hurd`
+- `x86[_64]-uefi`
+- `x86_64-driverkit`
+- `x86_64-fuchsia`
+- `x86_64-plan9`
+
+**Freestanding / bare-metal targets**
+
+- `aarch64[_be]-freestanding`
+- `alpha-freestanding`
+- `arc[eb]-freestanding`
+- `arm[eb]-freestanding`
+- `avr-freestanding`
+- `bpf(eb,el)-freestanding`
+- `csky-freestanding`
+- `ez80-freestanding`
+- `hexagon-freestanding`
+- `hppa[64]-freestanding`
+- `kalimba-freestanding`
+- `kvx-freestanding`
+- `lanai-freestanding`
+- `loongarch(32,64)-freestanding`
+- `m68k-freestanding`
+- `m88k-freestanding`
+- `microblaze[el]-freestanding`
+- `mips[64][el]-freestanding`
+- `msp430-freestanding`
+- `or1k-freestanding`
+- `powerpc[64][le]-freestanding`
+- `propeller-freestanding`
+- `riscv(32,64)[be]-freestanding`
+- `s390x-freestanding`
+- `sh[eb]-freestanding`
+- `sparc[64]-freestanding`
+- `thumb[eb]-freestanding`
+- `ve-freestanding`
+- `wasm(32,64)-freestanding`
+- `x86[_16,_64]-freestanding`
+- `xcore-freestanding`
+- `xtensa[eb]-freestanding`
+
+**Console / handheld / device targets**
+
+- `arm-3ds`
+- `arm-vita`
+- `ez80-tios`
+- `mipsel-psx`
+- `mipsel-psp`
+- `powerpc-wiiu`
+- `powerpc64-ps3`
+- `thumb-vita`
+- `x86_64-ps4`
+- `x86_64-ps5`
+
+**GPU / accelerator / shader targets**
+
+- `amdgcn-amdhsa`
+- `amdgcn-amdpal`
+- `amdgcn-mesa3d`
+- `nvptx[64]-cuda`
+- `nvptx[64]-nvcl`
+- `spirv(32,64)-opencl`
+- `spirv(32,64)-opengl`
+- `spirv(32,64)-vulkan`
+
+**WASM special-case targets**
+
+- `wasm(32,64)-emscripten`
+
+These names are documented here so future planning discussions can be concrete, but
+they should not be added to Lean's supported target matrix without dedicated design
+work for their runtime and packaging model.
+
 ### 1.6 Design: Testing
 
 #### Test matrix
