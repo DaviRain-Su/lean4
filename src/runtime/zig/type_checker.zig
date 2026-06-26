@@ -526,7 +526,6 @@ const TypeChecker = struct {
                 _ = self.ensureSortCore(d_type);
                 rc.lean_dec(d_type);
             }
-            rc.lean_dec(d);
 
             // Create the FVar expression
             const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
@@ -605,8 +604,6 @@ const TypeChecker = struct {
             rc.lean_inc(binding_name);
             const bi_val = ea.bindingInfo(e);
             self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), binding_name, d, bi_val);
-            rc.lean_dec(d);
-            rc.lean_dec(binding_name);
 
             // Create the FVar expression
             const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
@@ -843,7 +840,6 @@ const TypeChecker = struct {
             const let_name = ea.letName(e);
             const fvar_name = util_name.mkInternalUniqueName();
             self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), rc.lean_inc_ret(let_name), lt, 0);
-            rc.lean_dec(lt);
 
             const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
             fvars_buf.append(self.allocator, fvar) catch @panic("inferLet: OOM");
@@ -1325,8 +1321,6 @@ const TypeChecker = struct {
                 const binding_name_s = ea.bindingName(s);
                 rc.lean_inc(binding_name_s);
                 self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), binding_name_s, var_s_type, bi_val);
-                rc.lean_dec(var_s_type);
-                rc.lean_dec(binding_name_s);
 
                 const fvar = lean_expr_mk_fvar(fvar_name.obj.?);
                 subst_buf.append(self.allocator, fvar) catch @panic("isDefEqBinding: OOM");
