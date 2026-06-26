@@ -162,6 +162,7 @@ var g_nat_shiftl: ?*anyopaque = null;
 var g_nat_shiftr: ?*anyopaque = null;
 var g_bool_true: ?*anyopaque = null;
 var g_bool_false: ?*anyopaque = null;
+var g_eager_reduce: ?*anyopaque = null;
 var g_prop: ?*anyopaque = null;
 var g_type_zero: ?*anyopaque = null;
 var g_dontcare: ?*anyopaque = null;
@@ -252,7 +253,6 @@ fn getBoolTrue() *anyopaque {
     g_bool_true = c;
     return c;
 }
-
 fn getBoolFalse() *anyopaque {
     if (g_bool_false) |c| return c;
     const name = mkConstName(&.{ "Bool", "false" });
@@ -262,6 +262,14 @@ fn getBoolFalse() *anyopaque {
     return c;
 }
 
+fn getEagerReduce() *anyopaque {
+    if (g_eager_reduce) |c| return c;
+    const name = mkConstName(&.{ "eagerReduce" });
+    const c = lean_expr_mk_const(name, object.lean_box(0).?);
+    rc.lean_inc(c);
+    g_eager_reduce = c;
+    return c;
+}
 fn getProp() *anyopaque {
     if (g_prop) |c| return c;
     // Prop = Sort 0
@@ -293,7 +301,11 @@ fn getDontCare() *anyopaque {
 }
 
 inline fn isConstNamed(e: *anyopaque, c: *anyopaque) bool {
-    return ea.isConst(e) and lean_name_eq(ea.constName(e), ka.ciName(c)) != 0;
+    return ea.isConst(e) and ea.isConst(c) and lean_name_eq(ea.constName(e), ea.constName(c)) != 0;
+}
+
+fn isEagerReduce(e: *anyopaque) bool {
+    return isConstNamed(ea.getAppFn(e), getEagerReduce()) and ea.getAppNumArgs(e) == 2;
 }
 
 inline fn isNatLit(e: *anyopaque) bool {
@@ -644,6 +656,9 @@ const TypeChecker = struct {
 
     fn inferApp(self: *TypeChecker, e: *anyopaque, infer_only: bool) *anyopaque {
         if (!infer_only) {
+            const saved_eager_reduce = self.eager_reduce;
+            defer self.eager_reduce = saved_eager_reduce;
+            if (isEagerReduce(ea.appArg(e))) self.eager_reduce = true;
             const f_type = self.ensurePiCore(self.inferTypeCore(ea.appFn(e), infer_only));
             const a_type = self.inferTypeCore(ea.appArg(e), infer_only);
             const d_type = ea.bindingDomain(f_type);
@@ -1506,12 +1521,13 @@ const TypeChecker = struct {
             const r = self.isDefEqOffset(t_n.*, s_n.*);
             if (r != .lundef) return r;
 
-            // Try reduce_nat on both
-            if (self.reduceNat(t_n.*)) |t_v| {
-                return toLbool(self.isDefEqCore(t_v, s_n.*));
-            }
-            if (self.reduceNat(s_n.*)) |s_v| {
-                return toLbool(self.isDefEqCore(t_n.*, s_v));
+            if ((!ea.hasFVar(t_n.*) and !ea.hasFVar(s_n.*)) or self.eager_reduce) {
+                if (self.reduceNat(t_n.*)) |t_v| {
+                    return toLbool(self.isDefEqCore(t_v, s_n.*));
+                }
+                if (self.reduceNat(s_n.*)) |s_v| {
+                    return toLbool(self.isDefEqCore(t_n.*, s_v));
+                }
             }
 
             switch (self.lazyDeltaReductionStep(t_n, s_n)) {
@@ -1529,6 +1545,13 @@ const TypeChecker = struct {
         const r = self.quickIsDefEq(t, s);
         if (r != .lundef) return lboolToBool(r);
         if (self.st.equiv.isEquiv(t, s, false)) return true;
+        if ((!ea.hasFVar(t) or self.eager_reduce) and isConstNamed(s, getBoolTrue())) {
+            const wt = self.whnf(t);
+            defer rc.lean_dec(wt);
+            if (isConstNamed(wt, getBoolTrue())) {
+                return true;
+            }
+        }
 
         // whnf_core without delta/proj reduction
         var t_n = self.whnfCore(t, false, true);
