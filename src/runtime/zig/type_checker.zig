@@ -482,7 +482,7 @@ const TypeChecker = struct {
     // Port of C++ type_checker::infer_lambda (type_checker.cpp:116-132).
     // Creates fvars for each binder, infers body type, wraps result in Pi.
 
-    fn inferLambda(self: *TypeChecker, e0: *anyopaque) *anyopaque {
+    fn inferLambda(self: *TypeChecker, e0: *anyopaque, infer_only: bool) *anyopaque {
         const saved_lctx = self.lctx;
         defer self.lctx = saved_lctx;
 
@@ -520,6 +520,12 @@ const TypeChecker = struct {
             // Create unique fvar name and add to local context
             const fvar_name = util_name.mkInternalUniqueName();
             self.lctx = lean_local_ctx_mk_local_decl(self.lctx, rc.lean_inc_ret(fvar_name.obj.?), binding_name, d, bi_val);
+
+            if (!infer_only) {
+                const d_type = self.inferTypeCore(d, infer_only);
+                _ = self.ensureSortCore(d_type);
+                rc.lean_dec(d_type);
+            }
             rc.lean_dec(d);
 
             // Create the FVar expression
@@ -540,7 +546,7 @@ const TypeChecker = struct {
         else
             rc.lean_inc_ret(e);
 
-        const r = self.inferTypeCore(body, true);
+        const r = self.inferTypeCore(body, infer_only);
         rc.lean_dec(body);
 
         // Wrap result in Pi for each binder (reverse order)
@@ -559,7 +565,7 @@ const TypeChecker = struct {
     // Creates fvars for each binder, infers domain sorts and body sort,
     // builds imax chain: r = imax(us[i], r) for each binder (reverse order).
 
-    fn inferPi(self: *TypeChecker, e0: *anyopaque) *anyopaque {
+    fn inferPi(self: *TypeChecker, e0: *anyopaque, infer_only: bool) *anyopaque {
         const saved_lctx = self.lctx;
         defer self.lctx = saved_lctx;
 
@@ -587,7 +593,7 @@ const TypeChecker = struct {
                 rc.lean_inc_ret(ea.bindingDomain(e));
 
             // Infer domain type and ensure it's a sort
-            const t1 = self.ensureSortCore(self.inferTypeCore(d, true));
+            const t1 = self.ensureSortCore(self.inferTypeCore(d, infer_only));
             const u = ea.sortLevel(t1);
             rc.lean_inc(u);
             us_buf.append(self.allocator, u) catch @panic("inferPi: OOM");
@@ -620,15 +626,13 @@ const TypeChecker = struct {
         else
             rc.lean_inc_ret(e);
 
-        const s = self.ensureSortCore(self.inferTypeCore(body, true));
+        const s = self.ensureSortCore(self.inferTypeCore(body, infer_only));
         rc.lean_dec(body);
         var r = ea.sortLevel(s);
         rc.lean_inc(r);
         rc.lean_dec(s);
 
         // Build imax chain: r = imax(us[i], r) for i = n-1..0
-        // lean_level_mk_imax consumes both args, so inc us[i] before calling
-        // (the defer block still owns them).
         var i = us_buf.items.len;
         while (i > 0) {
             i -= 1;
@@ -641,18 +645,55 @@ const TypeChecker = struct {
 
     // ── infer_app ─────────────────────────────────────────────────────────────
 
-    fn inferApp(self: *TypeChecker, e: *anyopaque) *anyopaque {
-        // Simplified: infer fn type, strip Pi, instantiate with arg
-        const f_type = self.ensurePiCore(self.inferTypeCore(ea.appFn(e), true));
-        const a_type = self.inferTypeCore(ea.appArg(e), true);
-        const d_type = ea.bindingDomain(f_type);
-        // Check is_def_eq(a_type, d_type)
-        if (!self.isDefEq(a_type, d_type)) {
-            @panic("application type mismatch");
+    fn inferApp(self: *TypeChecker, e: *anyopaque, infer_only: bool) *anyopaque {
+        if (!infer_only) {
+            const f_type = self.ensurePiCore(self.inferTypeCore(ea.appFn(e), infer_only));
+            const a_type = self.inferTypeCore(ea.appArg(e), infer_only);
+            const d_type = ea.bindingDomain(f_type);
+            if (!self.isDefEq(a_type, d_type)) {
+                @panic("application type mismatch");
+            }
+            const result = kernel.lean_expr_instantiate1(ea.bindingBody(f_type), ea.appArg(e));
+            rc.lean_dec(f_type);
+            rc.lean_dec(a_type);
+            return result;
         }
-        const result = kernel.lean_expr_instantiate1(ea.bindingBody(f_type), ea.appArg(e));
+
+        var args_buf = std.ArrayListUnmanaged(*anyopaque).empty;
+        defer args_buf.deinit(self.allocator);
+        var curr = e;
+        while (ea.isApp(curr)) {
+            args_buf.append(self.allocator, ea.appArg(curr)) catch @panic("inferApp: OOM");
+            curr = ea.appFn(curr);
+        }
+        std.mem.reverse(*anyopaque, args_buf.items);
+
+        var f_type = self.inferTypeCore(curr, true);
+        var j: usize = 0;
+        const nargs = args_buf.items.len;
+        var i: usize = 0;
+        while (i < nargs) : (i += 1) {
+            if (ea.isPi(f_type)) {
+                const next = rc.lean_inc_ret(ea.bindingBody(f_type));
+                rc.lean_dec(f_type);
+                f_type = next;
+            } else {
+                const subst = array.mkArrayFromSlice(args_buf.items[j..i]);
+                const inst = lean_expr_instantiate_rev(f_type, subst);
+                rc.lean_dec(subst);
+                rc.lean_dec(f_type);
+                const ensured = self.ensurePiCore(inst);
+                rc.lean_dec(inst);
+                const next = rc.lean_inc_ret(ea.bindingBody(ensured));
+                rc.lean_dec(ensured);
+                f_type = next;
+                j = i;
+            }
+        }
+        const subst = array.mkArrayFromSlice(args_buf.items[j..nargs]);
+        const result = lean_expr_instantiate_rev(f_type, subst);
+        rc.lean_dec(subst);
         rc.lean_dec(f_type);
-        rc.lean_dec(a_type);
         return result;
     }
 
@@ -875,9 +916,9 @@ const TypeChecker = struct {
                 break :blk lean_expr_mk_sort(level_succ);
             },
             .Const => self.inferConstant(e, infer_only),
-            .Lambda => self.inferLambda(e),
-            .Pi => self.inferPi(e),
-            .App => self.inferApp(e),
+            .Lambda => self.inferLambda(e, infer_only),
+            .Pi => self.inferPi(e, infer_only),
+            .App => self.inferApp(e, infer_only),
             .Let => self.inferLet(e, infer_only),
         };
         rc.lean_inc(r);
