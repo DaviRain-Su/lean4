@@ -40,11 +40,7 @@ if [[ "${LEAN_CC:-@CMAKE_C_COMPILER@}" == *zig* ]]; then
   set -- "${newargs[@]}"
 fi
 compiler="${LEAN_CC:-@CMAKE_C_COMPILER@}"
-target_args=()
-if [[ "$compiler" == *"zig cc"* || "$compiler" == *"zig c++"* ]] && [[ -n "${LEAN_ZIG_TARGET:-}" ]] && [[ "$compiler" != *" -target "* ]]; then
-  target_args=(-target "$LEAN_ZIG_TARGET")
-fi
-cmd=(${LEAN_CC:-@CMAKE_C_COMPILER@} "${target_args[@]}" "-I$root/include" @LEANC_EXTRA_CC_FLAGS@ @LEANC_INTERNAL_FLAGS@ "$@" "${ldflags[@]}" -Wno-unused-command-line-argument)
+cmd=($compiler "-I$root/include" @LEANC_EXTRA_CC_FLAGS@ @LEANC_INTERNAL_FLAGS@ "$@" "${ldflags[@]}" -Wno-unused-command-line-argument)
 cmd=$(printf '%q ' "${cmd[@]}" | sed "s!ROOT!$root!g")
 [[ $v == 1 ]] && echo $cmd
 eval $cmd

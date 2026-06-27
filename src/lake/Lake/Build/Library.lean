@@ -94,20 +94,14 @@ public def LeanLib.leanArtsFacetConfig : LibraryFacetConfig leanArtsFacet :=
         -- The Lean core build is not built with the bundled `llvm-ar`,
         -- so it must be special-cased to resolve issues with the system `ar`.
         if System.Platform.isOSX then
-          let hasZigTarget := match (← IO.getEnv "LEAN_ZIG_TARGET") with
-            | some target => !target.isEmpty
-            | none => false
-          if hasZigTarget then
-            compileStaticLib libFile oFiles (← getLeanAr)
-          else
-            -- macOS BSD `ar` does not support `@file` response files.
-            -- Use `libtool -static -filelist` instead, which handles long argument lists natively.
-            createParentDirs libFile
-            let filelistPath := libFile.addExtension "filelist"
-            let h ← IO.FS.Handle.mk filelistPath .write
-            oFiles.forM fun f => h.putStr s!"{f}\n"
-            proc {cmd := "libtool", args := #["-static", "-o", libFile.toString,
-              "-filelist", filelistPath.toString]}
+          -- macOS BSD `ar` does not support `@file` response files.
+          -- Use `libtool -static -filelist` instead, which handles long argument lists natively.
+          createParentDirs libFile
+          let filelistPath := libFile.addExtension "filelist"
+          let h ← IO.FS.Handle.mk filelistPath .write
+          oFiles.forM fun f => h.putStr s!"{f}\n"
+          proc {cmd := "libtool", args := #["-static", "-o", libFile.toString,
+            "-filelist", filelistPath.toString]}
         else if System.Platform.isWindows then
           -- The Lean core build requires a thin static library
           -- with exported symbols as part of its build process on Windows.
