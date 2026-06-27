@@ -1043,6 +1043,51 @@ C++ `lean_alloc_object` and only contributes Lean-object logic in Zig; with it
 on, the Zig runtime owns the heap. This lets the migration proceed component by
 component while the link graph stays valid at every step.
 
+#### Symbol coexistence: no duplicate-definition conflicts
+
+Coexistence is safe only if the C++ and Zig runtimes do not both define the same
+C ABI symbol as a strong export — that is a multiple-definition link error, the
+real risk behind "can they coexist?". The prototype resolves it with two
+mechanisms, and the design keeps both:
+
+1. **Compile-time export gating.** The allocator entry points are emitted as
+   exports only under `comptime` guard:
+   ```zig
+   comptime {
+       if (export_allocator_symbols) {
+           @export(&lean_alloc_small, .{ .name = "lean_alloc_small" });
+           @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
+           @export(&lean_free_object,  .{ .name = "lean_free_object" });
+           // ...
+       }
+   }
+   ```
+   With `export_allocator_symbols=false`, these become `extern` references
+   resolved to the C++ runtime's strong definitions at link time. Exactly one
+   side defines each symbol; there is no conflict. This covers every symbol the
+   Allocator/ObjectAdapter migration touches (2.8 steps 1–3).
+
+2. **Weak-symbol bridges for helper functions.** For Lean-object helpers that
+   live in Zig but must be callable from C++ (e.g. `lean_box_uint8_zig`), the
+   prototype ships a thin C shim with `__attribute__((weak))`:
+   ```c
+   // box_weak_exports.c
+   void *lean_box_uint8_zig_impl(uint8_t v);   // defined in Zig
+   __attribute__((weak)) void *lean_box_uint8_zig(uint8_t v) {
+       return lean_box_uint8_zig_impl(v);
+   }
+   ```
+   The weak default forwards to the Zig implementation; if the C++ runtime ever
+   provides a strong `lean_box_uint8_zig`, it overrides the weak one. This lets
+   a single link unit expose Zig-defined helpers to C++ callers without the C++
+   side having to know whether the Zig runtime is present.
+
+The rule for new code: a symbol is either (a) gated behind
+`export_allocator_symbols` if it is an allocator entry point, or (b) exposed
+through a weak bridge if it is a helper C++ may call. A symbol must never be a
+strong export from both sides. With that held, the C++ and Zig runtimes can be
+linked into the same artifact at any migration step.
+
 Recommended migration order, each step independently switchable:
 
 1. **mpz wrapper** — small, well-bounded; verifies the C ABI seam end to end.
@@ -1267,11 +1312,42 @@ talking to a contract VM. That is the payoff of the two-layer split — WASM is
 just another backend value, not a fork of the runtime.
 
 The non-allocator host surface (IO, storage, crypto, hashing) is a separate
-`host_imports` interface, out of scope for this phase but shaped the same way: a
-vtable the host fills, which the runtime's IO/storage modules call instead of
-libuv/OpenSSL. When libuv/OpenSSL are absent (the existing Emscripten path
-already disables OpenSSL), those modules must degrade to host imports or stubs
-rather than link-fail.
+`HostIo` interface, shaped the same way as the Allocator: one vtable, multiple
+backends, selected at build time. The runtime already has this split embryonically
+— `io_posix.zig` is the POSIX backend for native — so a WASM target adds a
+`host` backend rather than forking the IO source:
+
+```zig
+// src/runtime/zig/host_io.zig (design)
+// Same shape as Allocator: a backend vtable the host fills.
+pub const HostIo = struct {
+    ctx: *anyopaque,
+    // The minimal surface a contract VM must provide. Each maps to a libuv /
+    // OpenSSL operation the native runtime uses, so callers do not change.
+    read:      *const fn (ctx, fd: u32, buf: []u8) usize,
+    write:     *const fn (ctx, fd: u32, buf: []const u8) usize,
+    storage_get:  *const fn (ctx, key: []const u8) ?[]const u8,
+    storage_set:  *const fn (ctx, key: []const u8, val: []const u8) bool,
+    sha256:    *const fn (ctx, data: []const u8, out: *[32]u8) void,
+    // ... grow as concrete hosts demand
+
+    pub const posix:   HostIo = .{ ... };   // native (io_posix.zig today)
+    pub const none:    HostIo = .{ ... };   // stubs: no IO (pure compute)
+    pub fn host(imports: *anyopaque) HostIo { ... } // contract VM
+};
+```
+
+`none` is important: a Lean program compiled for a pure-compute WASM target
+(no IO, like a verification kernel) links against stubbed `HostIo` and simply
+has no IO capability, rather than failing to find libuv. This is the WASM
+equivalent of the existing Emscripten path that already disables OpenSSL —
+absent capabilities degrade to stubs, they do not break the link.
+
+When libuv/OpenSSL are absent, the IO/storage/crypto modules must route through
+`HostIo` (host or none) instead of link-failing. This interface is out of scope
+for the first WASM slice — `wasi-arena` + `compat` + metering (F.2.1–2.3) are
+sufficient to get a pure-compute Lean module running on `wasm32-wasi`; `HostIo`
+lands when a target actually needs IO or storage.
 
 #### 2. MVP WASM compatibility layer
 
