@@ -175,7 +175,7 @@ jobs:
             echo "expected LEAN_ZIG_TARGET stage2 configure to fail" >&2
             exit 1
           fi
-          grep -F "LEAN_ZIG_TARGET currently supports host-native stage0 and foreign-target stage1 leaf builds only" "$log"
+          grep -F "do not build stage2+ with LEAN_ZIG_TARGET set" "$log"
       - name: Build Stage 0 & Configure Stage 1
         run: |
           ulimit -c unlimited  # coredumps
