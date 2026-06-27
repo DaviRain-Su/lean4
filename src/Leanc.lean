@@ -38,11 +38,12 @@ Interesting options:
   -- It is difficult to identify the correct minor version here, leading to linking warnings like:
   -- `ld64.lld: warning: /usr/lib/system/libsystem_kernel.dylib has version 13.5.0, which is newer than target minimum of 13.0.0`
   -- In order to suppress these we set the MACOSX_DEPLOYMENT_TARGET variable into the far future.
-  -- Skip this when using zig cc — zig uses -target triples instead.
-  let isZigCc := cc.startsWith "zig"
+  let zigTarget? ← IO.getEnv "LEAN_ZIG_TARGET"
+  -- Skip the deployment-target hack when using zig or targeting a foreign platform via zig.
+  let isZigCc := cc.contains "zig"
   let env := match (← IO.getEnv "MACOSX_DEPLOYMENT_TARGET") with
     | some _ => #[]
-    | none   => if isZigCc then #[] else #[("MACOSX_DEPLOYMENT_TARGET", "99.0")]
+    | none   => if isZigCc || zigTarget?.isSome then #[] else #[("MACOSX_DEPLOYMENT_TARGET", "99.0")]
 
   -- let compileOnly := args.contains "-c"
   let linkStatic := !(args.contains "-shared" || args.contains "-leanshared")
@@ -67,16 +68,22 @@ Interesting options:
     | _ => pure ()
 
   let mut extraArgs : Array String := #[]
-  let mut isZig := false
+  let mut isZig := isZigCc
+  let mut needsTargetInjection := false
   if let some cc' ← IO.getEnv "LEAN_CC" then
     -- Support multi-word commands like "zig cc" or "zig cc -target x86_64-linux"
     let (cmd, args') := splitCcCommand cc'
     cc := cmd
     extraArgs := args'
     isZig := cc'.contains "zig"
+    needsTargetInjection := cc'.contains "zig cc" || cc'.contains "zig c++"
     -- these are intended for the bundled compiler only
     cflagsInternal := #[]
     ldflagsInternal := #[]
+  if needsTargetInjection then
+    if let some zigTarget := zigTarget? then
+      if !(extraArgs.contains "-target") then
+        extraArgs := extraArgs ++ #["-target", zigTarget]
   let mut args := cflags ++ cflagsInternal ++ args ++ ldflagsInternal ++ ldflags ++ ["-Wno-unused-command-line-argument"]
   args := (extraArgs ++ args).filter (!·.isEmpty)
   if isZig then

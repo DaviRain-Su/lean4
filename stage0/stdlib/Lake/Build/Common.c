@@ -22660,7 +22660,6 @@ v___x_7606_ = l___private_Lake_Build_Common_0__Lake_mkLinkObjArgs(v_objs_7585_, 
 v___x_7607_ = l_Array_append___redArg(v___x_7606_, v_weakArgs_7586_);
 v___x_7608_ = l_Array_append___redArg(v___x_7607_, v_traceArgs_7587_);
 v___x_7609_ = l_Lake_compileSharedLib(v_libFile_7588_, v___x_7608_, v_linker_7589_, v_log_7598_);
-lean_dec_ref(v___x_7608_);
 if (lean_obj_tag(v___x_7609_) == 0)
 {
 lean_object* v_a_7610_; lean_object* v_a_7611_; lean_object* v___x_7613_; uint8_t v_isShared_7614_; uint8_t v_isSharedCheck_7621_; 
@@ -23524,7 +23523,6 @@ lean_dec_ref(v___x_7946_);
 v___x_7948_ = l_Array_append___redArg(v___x_7947_, v_ccLinkSharedFlags_7933_);
 lean_inc_ref(v_cc_7932_);
 v___x_7949_ = l_Lake_compileSharedLib(v_libFile_7915_, v___x_7948_, v_cc_7932_, v_log_7934_);
-lean_dec_ref(v___x_7948_);
 if (lean_obj_tag(v___x_7949_) == 0)
 {
 lean_object* v_a_7950_; lean_object* v_a_7951_; lean_object* v___x_7953_; uint8_t v_isShared_7954_; uint8_t v_isSharedCheck_7961_; 
@@ -24070,7 +24068,6 @@ v___x_8226_ = l_Array_append___redArg(v___x_8224_, v___x_8225_);
 lean_dec_ref(v___x_8225_);
 lean_inc_ref(v_cc_8208_);
 v___x_8227_ = l_Lake_compileExe(v_exeFile_8193_, v___x_8226_, v_cc_8208_, v_log_8209_);
-lean_dec_ref(v___x_8226_);
 if (lean_obj_tag(v___x_8227_) == 0)
 {
 lean_object* v_a_8228_; lean_object* v_a_8229_; lean_object* v___x_8231_; uint8_t v_isShared_8232_; uint8_t v_isSharedCheck_8239_; 
