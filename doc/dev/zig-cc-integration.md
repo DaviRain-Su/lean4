@@ -450,6 +450,33 @@ invokes `PREV_STAGE/bin/lean` and `PREV_STAGE/bin/lake`, and `STAGE > 1` reuses
 C++ artifacts from `PREV_STAGE`. A foreign-target `stage1` therefore cannot
 currently become the bootstrap input for `stage2` on the host machine.
 
+GitHub renders the following Mermaid diagram directly, so the full execution
+flow is visible in the repository view as well:
+
+```mermaid
+flowchart TD
+    A["Lean source + runtime + C/C++ deps"] --> B["host-native stage0 tools<br/>lean / lake / leanc"]
+    B --> C["emit C / compile C/C++ with zig cc -target &lt;triple&gt;"]
+    C --> D["target objects / static libs / shared libs / executables"]
+
+    D --> E["Can host execute them?"]
+    E -- "yes, native target" --> F["continue bootstrap to stage2/stage3"]
+    E -- "no, foreign target" --> G["leaf output only<br/>stop bootstrap here"]
+
+    H["What Zig gives you"] --> H1["cross compiler frontend"]
+    H --> H2["target codegen"]
+    H --> H3["target linker driver"]
+
+    I["What Lean still needs"] --> I1["target sysroot / crt / libc"]
+    I --> I2["GMP / libuv / OpenSSL for target"]
+    I --> I3["platform-specific link rules<br/>Darwin / Linux / Windows"]
+    I --> I4["bootstrap rule changes<br/>PREV_STAGE tools are executed"]
+    I --> I5["Lake / downstream build propagation"]
+
+    C -. depends on .-> H
+    D -. still blocked by .-> I
+```
+
 ##### Recommended rollout order
 
 Start with a constrained target matrix aligned to both:
