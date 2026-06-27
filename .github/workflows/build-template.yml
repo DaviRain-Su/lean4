@@ -65,6 +65,10 @@ jobs:
         run: |
           brew install ccache tree zstd coreutils gmp libuv openssl
         if: runner.os == 'macOS'
+      - name: Install Zig
+        run: |
+          brew install zig
+        if: runner.os == 'macOS' && matrix.zig
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -119,10 +123,7 @@ jobs:
       - name: Set up env
         run: |
           echo "NPROC=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)" >> $GITHUB_ENV
-          if [[ -n '${{ matrix.cross_target }}' ]]; then
-            echo "cross-target smoke is stage1-only"
-            echo "TARGET_STAGE=stage1" >> $GITHUB_ENV
-          elif ! diff src/stdlib_flags.h stage0/src/stdlib_flags.h; then
+          if ! diff src/stdlib_flags.h stage0/src/stdlib_flags.h; then
             echo "src/stdlib_flags.h and stage0/src/stdlib_flags.h differ, will test and pack stage 2"
             echo "TARGET_STAGE=stage2" >> $GITHUB_ENV
           else
@@ -140,17 +141,8 @@ jobs:
             # `.olean`s across commits, so we don't do it in the fast non-release CI
             OPTIONS+=(-DCHECK_OLEAN_VERSION=ON)
           fi
-          if [[ -n '${{ matrix.cross_target }}' ]]; then
-            # used by `prepare-llvm` and the target-stage CMake configure
-            export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
-            OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
-            OPTIONS+=(-DLEAN_ZIG_TARGET=${{ matrix.cross_target }})
-          fi
           if [[ -n '${{ matrix.prepare-llvm }}' ]]; then
             wget -q ${{ matrix.llvm-url }}
-            if [[ -n '${{ matrix.llvm_host_url }}' ]]; then
-              wget -q ${{ matrix.llvm_host_url }}
-            fi
             PREPARE="$(${{ matrix.prepare-llvm }})"
             cp -r stage1 stage2
             cp -r stage1 stage3
@@ -168,17 +160,6 @@ jobs:
           fi
           # contortion to support empty OPTIONS with old macOS bash
           cmake .. --preset ${{ matrix.CMAKE_PRESET || 'release' }} -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
-      - name: Verify Zig Stage 2 Guard
-        if: matrix.cross
-        run: |
-          guard_dir=$(mktemp -d build/zig-stage2-guard.XXXXXX)
-          log="$guard_dir/configure.log"
-          if cmake -S src -B "$guard_dir" -G "Unix Makefiles" -DSTAGE=2 -DLEAN_USE_ZIG_CC=ON -DLEAN_ZIG_TARGET=${{ matrix.cross_target }} >"$log" 2>&1; then
-            cat "$log"
-            echo "expected LEAN_ZIG_TARGET stage2 configure to fail" >&2
-            exit 1
-          fi
-          grep -F "do not build stage2+ with LEAN_ZIG_TARGET set" "$log"
       - name: Build Stage 0 & Configure Stage 1
         run: |
           ulimit -c unlimited  # coredumps
