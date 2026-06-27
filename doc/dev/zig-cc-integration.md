@@ -391,14 +391,19 @@ then intersect them with Lean's own platform/runtime constraints.
 
 ##### Current implementation
 
-The current implementation does **not** expose a user-facing target setting. In
-particular, it does not yet support:
+The current implementation is **host-native only**. It supports
+`-DLEAN_USE_ZIG_CC=ON` for replacing the host C/C++ compiler with `zig cc` /
+`zig c++`, but it does not yet expose a user-facing target selector, and it
+does not define a usable foreign-target bootstrap story.
+
+In particular, it does not yet support:
 
 - `LEAN_ZIG_TARGET`
 - `CMAKE_C_COMPILER_TARGET`
 - `CMAKE_CXX_COMPILER_TARGET`
 
-as first-class inputs that are propagated through stage0/stage1/stage2.
+as first-class inputs propagated through bootstrap, test, and downstream Lake
+builds.
 
 ##### Recommended next interface
 
@@ -409,41 +414,60 @@ Add a single Lean-specific cache variable:
 ```
 
 and treat `CMAKE_{C,CXX}_COMPILER_TARGET` as optional compatibility inputs. The
-wrappers should then become:
+Zig wrappers should then become:
 
 ```bash
 zig cc -target "$LEAN_ZIG_TARGET" "$@"
 zig c++ -target "$LEAN_ZIG_TARGET" "$@"
 ```
 
-with the target also mapped into:
+For target-aware builds, this selector should also drive:
 
 - `CMAKE_SYSTEM_NAME`
 - `CMAKE_SYSTEM_PROCESSOR`
-- cross-compilation options forwarded through root `PLATFORM_ARGS`
+- target-specific linker / rpath / stdlib selections
+- target-aware test and Lake environment propagation
 
-##### Recommended support matrix
+`stage0` should stay host-native during the first rollout. Target-derived
+platform arguments should only flow into the foreign-target `stage1` lane, not
+into the shared root `PLATFORM_ARGS` path that also configures `stage0`.
+
+##### Execution model: host tools, target artifacts first
+
+The next step should **not** be "full foreign-target bootstrap". The practical
+model is:
+
+1. Keep `stage0` host-native.
+2. Continue executing host-native previous-stage tools during bootstrap.
+3. Use Zig's `-target` support to produce foreign-target objects, libraries,
+   and executables.
+4. Treat a foreign-target `stage1` as a **leaf output**.
+5. Reject foreign-target `stage2+` until a separate host-tools / target-artifact
+   bootstrap mode exists.
+
+This follows directly from the current bootstrap structure: the stdlib build
+invokes `PREV_STAGE/bin/lean` and `PREV_STAGE/bin/lake`, and `STAGE > 1` reuses
+C++ artifacts from `PREV_STAGE`. A foreign-target `stage1` therefore cannot
+currently become the bootstrap input for `stage2` on the host machine.
+
+##### Recommended rollout order
 
 Start with a constrained target matrix aligned to both:
 
 1. Zig's official Tier 1 / Tier 2 support table, and
 2. Lean's existing Darwin/Linux/Windows/Emscripten code paths.
 
-| Lean rollout tier | Zig target triple | Zig upstream tier | Notes |
-|-------------------|-------------------|-------------------|-------|
-| 1 | `aarch64-macos` | 2 | host-validated family |
-| 1 | `x86_64-macos` | 2 | same Darwin code path |
-| 1 | `x86_64-linux-gnu` | 1 | strongest Linux starting point |
-| 1 | `aarch64-linux-gnu` | 2 | same Linux code path |
-| 1 | `x86_64-linux-musl` | 1 | libc variant change, same broad platform family |
-| 1 | `aarch64-linux-musl` | 2 | libc variant change, same broad platform family |
-| 1 | `x86_64-windows-gnu` | 2 | existing Windows code path, mingw ABI |
-| 2 | `wasm32-wasi` | 2 | separate design track; not a drop-in extension of Tier 1 |
-| 2 | `wasm32-emscripten` | additional platform | Lean already has explicit Emscripten branches |
+| Rollout wave | Zig target triple(s) | Why this wave comes here |
+|--------------|----------------------|---------------------------|
+| 1 | `x86_64-linux-gnu`, `aarch64-linux-gnu` | Lowest risk. Same Linux/ELF family, strongest overlap with existing standalone packaging and linker behavior. |
+| 2 | `x86_64-linux-musl`, `aarch64-linux-musl` | Still Linux/ELF, but requires new musl sysroot and dependency packaging. |
+| 3 | `x86_64-macos`, `aarch64-macos` | Same Zig target family as the host-validated path, but Mach-O, SDK, `install_name`, and `@rpath` handling raise the cost above Linux. |
+| 4 | `x86_64-windows-gnu` | Highest native-OS cost among the near-term targets: PE/COFF, import libraries, DLL placement, ICU / SDK, and the existing multi-DLL split. |
+| 5 | `wasm32-emscripten`, `wasm32-wasi` | Separate experimental track. Do not treat WASM as a normal extension of the native OS rollout. |
 
-Targets such as `riscv64-linux`, `x86-freebsd`, or `aarch64-windows` may eventually
-become reasonable follow-on candidates because Zig rates them Tier 2, but they should
-not be in the first Lean rollout until the Darwin/Linux/Windows baseline is stable.
+Targets such as `riscv64-linux`, `x86-freebsd`, or `aarch64-windows` may
+eventually become reasonable follow-on candidates, but they should stay behind
+the Linux/Darwin/Windows baseline until the initial rollout is stable.
 
 ##### Minimum OS expectations from Zig
 
@@ -465,6 +489,7 @@ WASM is not just "one more Zig target". The repository already treats
 - libuv is built differently
 - Lake/shared-library targets are restricted or stubbed
 - dynamic linking expectations differ
+- `leanc` is not built in the existing Emscripten path
 
 So WASM should be planned as an explicit experimental target family, not folded into
 the initial generic cross-target rollout.
@@ -474,14 +499,57 @@ Likewise, Zig's "Additional Platforms" section (for example `wasm32-emscripten`,
 treated as **out of scope for the first cross-target implementation** unless Lean
 gains explicit support for those runtime environments.
 
-##### Rollout plan
+##### Roadmap phases
 
-1. Add `LEAN_ZIG_TARGET`.
-2. Map supported Zig triples onto Lean/CMake platform families.
-3. Propagate the target through stage0/stage1/stage2.
-4. Run a smoke-build matrix for Tier 1 targets.
-5. Run host-executable tests only for native builds; use compile/link verification for foreign targets.
-6. Design WASM separately once Tier 1 is stable.
+1. **Linux-only target selector + foreign `stage1` leaf scope**
+   - add `LEAN_ZIG_TARGET`
+   - inject `-target` into the Zig wrappers
+   - keep `stage0` host-native
+   - hard-error on foreign-target `STAGE > 1`
+2. **Dedicated build-only cross smoke**
+   - add one small cross-target verification path that emits C on the host,
+     cross-compiles with Zig, links, and inspects the artifact architecture
+   - do **not** run foreign target binaries
+3. **Lake / downstream package propagation**
+   - teach `lake env` / `lake build` to preserve the target-aware compiler
+     selection
+   - do not claim broad target support before this lands
+4. **Build-only mode for compile suites**
+   - add an explicit no-exec mode to `tests/compile*`
+   - keep elab/server/doc suites native-host
+5. **Family expansion**
+   - Linux GNU
+   - Linux musl
+   - Darwin
+   - Windows GNU
+   - WASM separately
+
+##### First implementation slice
+
+The first PR should stay intentionally narrow:
+
+- Linux-only `LEAN_ZIG_TARGET` plumbing
+- foreign-target `stage1` as a supported **leaf build**
+- one dedicated cross-smoke test
+- explicit documentation that foreign `stage2+` is out of scope
+
+The first PR should **not** attempt:
+
+- foreign-target `stage2+`
+- full CI matrix expansion
+- downstream Lake propagation
+- changes to the large native execution-heavy test suites
+- any EmitZig backend work
+
+##### Acceptance gates
+
+The first cross-target slice is done when:
+
+1. the existing native host Zig bootstrap still passes;
+2. one foreign Linux `stage1` leaf build succeeds with `LEAN_ZIG_TARGET`;
+3. a dedicated build-only cross smoke proves host-tool → target-artifact flow
+   end to end; and
+4. foreign-target `STAGE > 1` fails early with an explicit configuration error.
 
 ##### Appendix: Zig upstream targets outside the first Lean rollout
 
@@ -652,41 +720,52 @@ work for their runtime and packaging model.
 
 | Test | What it verifies |
 |------|-----------------|
-| `LEAN_CC="zig cc" leanc --print-cflags` | Flag output is correct |
-| `LEAN_CC="zig cc" leanc --print-ldflags` | Linker flag output is correct |
-| `LEAN_CC="zig cc" leanc -c test.c -o test.o` | Object file compilation |
-| `LEAN_CC="zig cc" leanc test.o -o test` | Executable linking |
-| `cmake -DLEAN_USE_ZIG_CC=ON .. && make` | Full bootstrap (C + C++ via zig) |
-| `make test` | Full test suite passes for the host target |
-| Tier 1 smoke builds with `LEAN_ZIG_TARGET` | Cross-target compile/link viability |
+| `LEAN_CC="zig cc" leanc --print-cflags` | Flag output is correct for host-native Zig builds |
+| `LEAN_CC="zig cc" leanc --print-ldflags` | Linker flag output is correct for host-native Zig builds |
+| `LEAN_CC="zig cc" leanc -c test.c -o test.o` | Host-native object file compilation |
+| `LEAN_CC="zig cc" leanc test.o -o test` | Host-native executable linking |
+| `cmake -DLEAN_USE_ZIG_CC=ON .. && make` | Full host-native bootstrap (C + C++ via Zig) |
+| `make test` | Full host-native test suite passes |
+| `lean --c=test.c test.lean` | L0 cross-target smoke: host tool emits C for a foreign-target flow |
+| `zig cc -target <triple> -c test.c -o test.o && zig cc -target <triple> test.o -o test.out` | L1 cross-target smoke: target compile + link succeeds |
+| dedicated `tests/cross_verify` smoke | Host-tool → target-artifact flow succeeds without executing the target binary |
+| build-only `compile*` mode (future) | L2 cross-target suite coverage for compile paths without host execution |
 
 #### Regression strategy
 
-1. Build with `zig cc`/`zig c++` and run the full host test suite.
-2. Compare `leanc --print-cflags` output between `zig cc` and system `cc`.
-3. Compile identical `.c` files with both compilers, diff `.o` symbol tables.
-4. Compile identical `.cpp` files with both C++ compilers, diff `.o` symbol tables.
-5. Verify executables run correctly on the host platform.
-6. For foreign targets, verify bootstrap completion plus artifact inspection (`file`, symbol tables, link success).
+1. Keep the current host-native Zig bootstrap green.
+2. Add a dedicated build-only cross smoke before modifying the large native suites.
+3. For foreign targets, verify compile success, link success, and artifact identity (`file`, symbol tables, archive inspection), not binary execution.
+4. Only run the full binary-executing test suite for native targets.
+5. Treat Lake/downstream package builds as a separate verification phase, not as an automatic consequence of bootstrap support.
 
 #### Implementation order
 
 ##### Phase 1 (implemented)
 
-1. Add `splitCcCommand` to `src/Leanc.lean`, handle multi-word `LEAN_CC`.
-2. Add `splitCcCommand` to `src/lake/Lake/Build/Actions.lean`.
-3. Skip `MACOSX_DEPLOYMENT_TARGET` hacks when compiler is zig.
-4. Add `LEAN_USE_ZIG_CC` CMake option in `src/CMakeLists.txt`.
-5. Handle zig/lld incompatibilities around exported artifact suffixes and Darwin-only flags.
-6. Build with `cmake -DLEAN_USE_ZIG_CC=ON` and run the full test suite.
+1. Add Zig wrapper-based host compiler replacement.
+2. Handle multi-word `LEAN_CC` and Zig-specific linker quirks.
+3. Build the host-native Zig bootstrap and run the full host test suite.
 
-##### Phase 1b (next)
+##### Phase 1b (next PR)
 
 1. Add `LEAN_ZIG_TARGET`.
-2. Teach the wrappers to inject `-target`.
-3. Map target triples to Lean's supported platform families.
-4. Add Tier 1 smoke-build coverage.
-5. Revisit WASM/Emscripten as a separate experimental track.
+2. Restrict the first rollout to Linux targets.
+3. Keep `stage0` host-native and foreign `stage1` leaf-only.
+4. Inject `-target` into the Zig wrappers and `leanc`.
+5. Add one dedicated build-only cross smoke.
+
+##### Phase 1c
+
+1. Propagate the target-aware toolchain through Lake/downstream builds.
+2. Add explicit build-only / skip-exec coverage to `tests/compile*`.
+3. Expand from Linux GNU to Linux musl.
+
+##### Phase 1d
+
+1. Extend the same model to Darwin.
+2. Extend the same model to Windows GNU.
+3. Keep Emscripten / WASM on a separate experimental track.
 
 ---
 
