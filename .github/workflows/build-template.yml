@@ -119,7 +119,10 @@ jobs:
       - name: Set up env
         run: |
           echo "NPROC=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)" >> $GITHUB_ENV
-          if ! diff src/stdlib_flags.h stage0/src/stdlib_flags.h; then
+          if [[ -n '${{ matrix.cross_target }}' ]]; then
+            echo "cross-target smoke is stage1-only"
+            echo "TARGET_STAGE=stage1" >> $GITHUB_ENV
+          elif ! diff src/stdlib_flags.h stage0/src/stdlib_flags.h; then
             echo "src/stdlib_flags.h and stage0/src/stdlib_flags.h differ, will test and pack stage 2"
             echo "TARGET_STAGE=stage2" >> $GITHUB_ENV
           else
@@ -138,9 +141,10 @@ jobs:
             OPTIONS+=(-DCHECK_OLEAN_VERSION=ON)
           fi
           if [[ -n '${{ matrix.cross_target }}' ]]; then
-            # used by `prepare-llvm`
+            # used by `prepare-llvm` and the target-stage CMake configure
             export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
             OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
+            OPTIONS+=(-DLEAN_ZIG_TARGET=${{ matrix.cross_target }})
           fi
           if [[ -n '${{ matrix.prepare-llvm }}' ]]; then
             wget -q ${{ matrix.llvm-url }}

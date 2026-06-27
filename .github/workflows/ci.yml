@@ -316,6 +316,22 @@ jobs:
                 "CMAKE_OPTIONS": "-DLEAN_EXTRA_CXX_FLAGS=-Werror -DUSE_LAKE_CACHE=ON",
               },
               {
+                // first dedicated LEAN_ZIG_TARGET smoke, keep it build-only and Linux-only for now
+                "name": "Linux Zig Target Smoke (x86_64-linux-gnu)",
+                "os": "ubuntu-latest",
+                "enabled": level >= 1,
+                "test": true,
+                "secondary": true,
+                "cross": true,
+                "cross_target": "x86_64-linux-gnu",
+                "shell": "nix develop .#oldGlibc -c bash -euxo pipefail {0}",
+                "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-x86_64-linux-gnu.tar.zst",
+                "prepare-llvm": "../script/prepare-llvm-linux.sh lean-llvm*",
+                "binary-check": "file",
+                "CMAKE_OPTIONS": "-DLEAN_USE_ZIG_CC=ON",
+                "CTEST_OPTIONS": "-R 'cross_verify'",
+              },
+              {
                 "name": "Linux RelWithAssert",
                 "os": "ubuntu-latest",
                 "enabled": level >= 2,
