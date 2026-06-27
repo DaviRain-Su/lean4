@@ -709,7 +709,84 @@ if(LEAN_ZIG_RUNTIME)
 endif()
 ```
 
-### 2.5 Design: Testing for EmitZig
+### 2.5 Design: Runtime Allocator Backend Interface
+
+The Zig runtime's `alloc.zig` is the single chokepoint through which every Lean
+object allocation flows. It is also the component that must differ the most across
+execution environments: a native desktop process wants mimalloc's size-class pools,
+an embedded target wants a fixed pre-allocated arena, and a WASM contract wants a
+host-imported allocator plus gas metering.
+
+This subsection defines the interface that lets one runtime source tree serve all
+of those environments without `#ifdef` slicing or per-target forks.
+
+#### Current state (build tree prototype)
+
+The prototype runtime ships a binary delegation switch in `runtime_options.zig`:
+
+```zig
+pub const export_allocator_symbols: bool = true;
+```
+
+When `true`, the Zig runtime exports `lean_alloc_small` / `lean_alloc_object` /
+`lean_free_object` and owns the heap end to end (small-object pool + large-object
+fallback). When `false`, those symbols are declared `extern` and the runtime
+*delegates* to an external (today: the existing C++ `lean_alloc_object`)
+implementation. This is sufficient for incremental coexistence (see 2.8) but it
+is **not** a backend interface: it can only choose between "Zig owns it all" and
+"C++ owns it all". It cannot express "use a fixed buffer" or "route through a
+WASM host import".
+
+#### Design target: `AllocatorBackend`
+
+The design target is a value-type vtable resolved at `comptime`, so that each
+build produces exactly one backend with zero runtime dispatch overhead:
+
+```zig
+// src/runtime/zig/allocator_backend.zig (design)
+pub const AllocatorBackend = struct {
+    ctx: *anyopaque,
+    alloc: *const fn (ctx: *anyopaque, size: usize, alignment: usize) ?[*]u8,
+    free:  *const fn (ctx: *anyopaque, ptr: [*]u8, size: usize, alignment: usize) void,
+
+    pub const mimalloc: AllocatorBackend = .{ ... };   // native default
+    pub const libc:     AllocatorBackend = .{ ... };
+    pub fn fixed(buf: []u8) AllocatorBackend { ... }   // embedded / arena
+    pub fn from(allocator: std.mem.Allocator) AllocatorBackend { ... } // WASM host
+};
+```
+
+The small-object pool in `alloc.zig` is then refactored to obtain raw pages from
+`AllocatorBackend` rather than calling `malloc` / `lean_alloc_object` directly.
+This is the same pattern used by the `ffi/zig_allocator.{h,zig}` interop in the
+zml project, which exposes `std.mem.Allocator` across the C ABI as a
+`{ ctx, alloc, free }` struct — confirming the shape is portable both ways.
+
+#### Backend selection
+
+`build.zig` gains a `comptime`-selected option instead of a runtime flag:
+
+```bash
+zig build -Dallocator-backend=mimalloc   # native (default)
+zig build -Dallocator-backend=libc        # minimal native / freestanding
+zig build -Dallocator-backend=fixed       # embedded: FixedBufferAllocator
+zig build -Dallocator-backend=wasi-arena  # WASM: host-imported arena
+```
+
+Because the backend is chosen at build time, each target compiles a distinct
+runtime with no dead branches for the backends it did not select. This is what
+makes "one source tree, many runtimes" cheap, and it is the prerequisite for the
+constrained-runtime targets described in the Future section below.
+
+#### Why this belongs in Phase 2
+
+Without this interface, Phase 2 only reproduces the C++ runtime's behavior in
+Zig — it does not unlock new execution environments. The allocator backend is
+the seam at which a constrained runtime (WASM, embedded, sandbox) plugs in, so
+defining it as part of the Zig runtime merge keeps the migration honest about
+what it is actually buying beyond a language swap.
+
+### 2.6 Design: Testing for EmitZig
 
 #### In-tree tests
 
@@ -736,7 +813,7 @@ Each test:
 add_test_pile(emitzig emitzig "Lean → Zig codegen tests")
 ```
 
-### 2.6 Implementation order for Phase 2
+### 2.7 Implementation order for Phase 2
 
 1. Copy `EmitZig.lean`, `EmitZig/InlineHelpers.lean`, `EmitZig/RuntimeExterns.lean`
    into `src/Lean/Compiler/LCNF/`.
@@ -748,6 +825,29 @@ add_test_pile(emitzig emitzig "Lean → Zig codegen tests")
 6. Copy emitzig tests to `tests/emitzig/` and wire into `tests/CMakeLists.txt`.
 7. Build with `cmake -DLEAN_ZIG_RUNTIME=ON -DLEAN_USE_ZIG_CC=ON` and run tests.
 8. Run `make update-stage0` to snapshot the new source files into `stage0/`.
+
+### 2.8 Design: Incremental Runtime Replacement
+
+The Zig runtime does not need to replace the C++ runtime in one shot. The
+`export_allocator_symbols` switch (2.5) is deliberately a coexistence gate, not
+just a build option: with it off, the Zig runtime links against the existing
+C++ `lean_alloc_object` and only contributes Lean-object logic in Zig; with it
+on, the Zig runtime owns the heap. This lets the migration proceed component by
+component while the link graph stays valid at every step.
+
+Recommended migration order, each step independently switchable:
+
+1. **mpz wrapper** — small, well-bounded; verifies the C ABI seam end to end.
+2. **object / rc** — Lean object layout and reference counting in Zig, allocator
+   still delegated to C++ (`export_allocator_symbols=false`).
+3. **alloc** — flip the switch: the Zig `AllocatorBackend` (2.5) now owns the
+   heap. From this point the C++ allocator is dead code for the Zig-runtime build.
+4. **ir_interpreter** — the IR evaluator (`src/library/ir_interpreter.cpp`); the
+   most self-contained large C++ unit and the natural execution engine for
+   WASM/embedded once it is Zig.
+
+At every step the native test suite must stay green; a step that breaks ABI is
+held until the seam is fixed rather than forcing a big-bang replacement.
 
 ---
 
@@ -793,3 +893,97 @@ at CMake configure time.
 | EmitZig merge strategy | Copy into `src/`, gate behind CMake option | Keeps master clean; opt-in |
 | Zig runtime build | `zig build` via `add_custom_command` | Uses existing `build.zig`; no custom CMake for Zig |
 | Default state | Both features OFF | No impact on existing builds until explicitly enabled |
+
+---
+
+## Future: Constrained Runtimes & Target Expansion (Design)
+
+The phases above are deliberately **native-host-first**. This section documents
+the design direction for execution environments that the native-host rollout does
+not cover — primarily WASM (smart-contract VMs) and embedded/freestanding targets.
+Nothing here is implemented or scheduled; it is recorded so that later target
+work has concrete seams to aim at instead of restarting the design from scratch.
+
+It depends on the Phase 2 `AllocatorBackend` interface (2.5): constrained
+runtimes are exactly the backends that interface exists to serve.
+
+### F.1 Why target expansion is gated on dependency availability
+
+Phase 1 deferred cross-compilation not because `zig cc` cannot emit foreign
+objects — it can — but because a foreign Lean artifact must still link against
+runtime dependencies that are only available for the host today:
+
+| Dependency | Role | Host status | Foreign-target blocker |
+|---|---|---|---|
+| **GMP** | arbitrary-precision integers (`mpz`) | system package | Hand-written asm; near-impossible to cross-compile to `wasm32` |
+| **libuv** | async IO / event loop | system package | Not part of any WASM/embedded libc |
+| **OpenSSL** | crypto / TLS | system package | Excluded entirely on the existing Emscripten path |
+
+**GMP is the hardest blocker for WASM.** `src/runtime/mpz.cpp` is a thin wrapper
+over GMP, and GMP relies on architecture-specific inline assembly that does not
+survive a `wasm32-wasi` build (volume, calling-convention, asm constraints).
+Practical WASM support therefore waits on a Zig `mpz` implementation (or a move
+to `std.math.big.int`), not on better cross-compilation plumbing. This is the
+real reason WASM is a separate track, not merely "platform specialness".
+
+For native cross-target (e.g. `x86_64-linux` built from `aarch64-macos`), GMP /
+libuv / OpenSSL can instead be cross-compiled from source via `zig cc`, which is
+the cheaper path and the natural follow-on once the native matrix is stable.
+
+### F.2 WASM runtime profile
+
+A WASM target is not "one more native host". It removes or replaces several
+runtime assumptions the native code depends on. A WASM runtime profile must
+define contracts for three constraints. (These mirror lessons from shipping a
+Zig contract SDK on a MVP-only WASM VM, where `@memcpy`/`@memset` generated
+illegal `bulk_memory` instructions.)
+
+#### 1. Host imports (replace libuv / OpenSSL)
+
+There is no libuv or OpenSSL inside a contract VM. IO, storage, and crypto must
+be exposed as host imports. The runtime needs a `host_imports` interface —
+analogous to how the NEAR SDK binds `near-sys` host functions — declaring the
+import surface a given WASM host provides, and stubbing the rest.
+
+#### 2. MVP WASM compatibility layer
+
+VMs such as NEAR support only MVP WASM (WebAssembly 1.0) and reject
+`bulk_memory`, `sign_ext`, `simd`, `reference_types`, and `multivalue`. Zig's
+`@memcpy`, `@memset`, and `std.mem.eql/copy` lower to `bulk_memory` and must be
+replaced by software loops for those targets. A `compat` module (the same shape
+as a contract SDK's `wasm_compat.zig`) must shadow these primitives so that
+EmitZig output and the runtime stay valid on MVP-only hosts.
+
+#### 3. Execution metering (gas)
+
+Lean's existing `lean_inc_heartbeat` counts allocations only — too coarse for
+contract gas accounting, which needs near-instruction-level metering. A WASM
+profile needs a `meter` hook injected at allocation and loop backedges, with a
+configurable cost table, rather than repurposing the heartbeat.
+
+### F.3 `leanzigc` target / profile propagation
+
+The Phase 1 target selection lives in the `zig-cc` / `zig-cxx` wrapper scripts
+(used by `leanc` for C). EmitZig output is compiled by `leanzigc`, which calls
+`zig build-exe` **directly** and bypasses those wrappers. So target selection
+for the Zig backend is a separate seam:
+
+- When a target/profile is active, `leanzigc` must pass `-Dtarget=<triple>` to
+  `zig build-exe`, independent of the C-side wrapper.
+- It must also select the matching runtime profile
+  (`-Dallocator-backend=...`, WASM `compat`, host imports) so the linked runtime
+  matches the target — otherwise the produced WASM is missing symbols or
+  contains illegal instructions.
+
+This is the join point between Phase 1's C-side target handling and Phase 2's
+Zig-side compilation, and it must be designed together with the allocator and
+WASM-profile work above rather than bolted on later.
+
+### F.4 Relationship to the native-first decision
+
+This Future section does **not** contradict the native-host boundary in Phase 1.
+The boundary exists because dependency packaging, tool discovery, and executable
+test coverage all assume a real host. The work described here is what removes
+those assumptions for constrained environments — but only after the `AllocatorBackend`
+seam, the `mpz` port, and the WASM contracts are in place. Until then, native
+rollout (Phase 1 waves 1–5) remains the only supported path.
