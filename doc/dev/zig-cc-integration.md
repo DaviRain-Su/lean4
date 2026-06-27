@@ -1048,7 +1048,7 @@ Recommended migration order, each step independently switchable:
 1. **mpz wrapper** — small, well-bounded; verifies the C ABI seam end to end.
 2. **object / rc** — Lean object layout and reference counting in Zig, allocator
    still delegated to C++ (`export_allocator_symbols=false`).
-3. **alloc** — flip the switch: the Zig `AllocatorBackend` (2.5) now owns the
+3. **alloc** — flip the switch: the Zig `Allocator` / `ObjectAdapter` (2.5) now owns the
    heap. From this point the C++ allocator is dead code for the Zig-runtime build.
 4. **ir_interpreter** — the IR evaluator (`src/library/ir_interpreter.cpp`); the
    most self-contained large C++ unit and the natural execution engine for
@@ -1112,8 +1112,19 @@ not cover — primarily WASM (smart-contract VMs) and embedded/freestanding targ
 Nothing here is implemented or scheduled; it is recorded so that later target
 work has concrete seams to aim at instead of restarting the design from scratch.
 
-It depends on the Phase 2 `AllocatorBackend` interface (2.5): constrained
+It depends on the Phase 2 `Allocator` + `ObjectAdapter` interface (2.5): constrained
 runtimes are exactly the backends that interface exists to serve.
+
+### Development branch guidance
+
+A prototype Zig runtime exists on an experimental branch (`zig-backend-m6-*`).
+It is a **reference only**: the code there informed the designs in this section
+(`alloc.zig`, `lean_object.zig`, the `AllocationMeta` layout) and is cited as
+such. Real development does not continue on that branch. All new runtime code
+lands on `zig-backend-codegen` (the upstream-tracking target branch) so that the
+Zig runtime merges against current Lean `src/` and stays rebasable. The
+experimental branch should be treated as a frozen snapshot to mine for patterns,
+not as a base to build on.
 
 ### F.1 Why target expansion is gated on dependency availability
 
@@ -1199,17 +1210,107 @@ rather than link-fail.
 
 VMs such as NEAR support only MVP WASM (WebAssembly 1.0) and reject
 `bulk_memory`, `sign_ext`, `simd`, `reference_types`, and `multivalue`. Zig's
-`@memcpy`, `@memset`, and `std.mem.eql/copy` lower to `bulk_memory` and must be
-replaced by software loops for those targets. A `compat` module (the same shape
-as a contract SDK's `wasm_compat.zig`) must shadow these primitives so that
-EmitZig output and the runtime stay valid on MVP-only hosts.
+`@memcpy`, `@memset`, and `std.mem.eql` / `std.mem.copy` lower to `bulk_memory`
+(`memory.copy` / `memory.fill`) and must be replaced by software loops for those
+targets, or the module is rejected at instantiation.
+
+The `compat` module shadows the offending primitives so that **both** emission
+paths stay valid on MVP-only hosts without per-target source edits:
+
+```zig
+// src/runtime/zig/wasm_compat.zig (design)
+// Software-loop fallbacks that do not emit bulk_memory / sign_ext / simd.
+// On a MVP-only host (wasm32-freestanding, NEAR), call these instead of
+// @memcpy / @memset / std.mem.*. On a full-WASM host they are unused dead
+// code stripped at link time.
+
+pub fn memcpy(comptime T: type, dst: []T, src: []const T) void {
+    const n = if (dst.len < src.len) dst.len else src.len;
+    var i: usize = 0;
+    while (i < n) : (i += 1) dst[i] = src[i];
+}
+
+pub fn memset(comptime T: type, dst: []T, value: T) void {
+    for (dst) |*p| p.* = value;
+}
+
+pub fn eql(comptime T: type, a: []const T, b: []const T) bool {
+    if (a.len != b.len) return false;
+    var i: usize = 0;
+    while (i < a.len) : (i += 1) if (a[i] != b[i]) return false;
+    return true;
+}
+
+// Sign-extension on MVP hosts: wasi/i32 wraps but the host expects
+// sign_ext semantics for sub-word stores. Provide explicit helpers.
+pub fn sext_i8(x: i8) i32  { return @as(i32, x); }
+pub fn sext_i16(x: i16) i32 { return @as(i32, x); }
+```
+
+Two practical constraints fall out of this:
+
+1. **EmitZig output must be constrained.** The emitter must not emit `@memcpy`
+   / `@memset` / `std.mem.copy` when the target is MVP-only; it must call the
+   `compat` equivalents. This is an emission-policy flag on `leanzigc`
+   (see F.3), not a post-pass.
+2. **The runtime itself must be MVP-clean.** The Zig runtime uses `@memset` in
+   `zeroPayload` and several constructors. For a WASM build those become
+   `compat.memset` calls behind the same flag, so the runtime source does not
+   fork per host.
+
+This mirrors the field lesson from shipping a Zig contract SDK on NEAR: the
+constraint is not "avoid memcpy" but "make the MVP-safe path the default for
+that target, with zero source changes".
 
 #### 3. Execution metering (gas)
 
 Lean's existing `lean_inc_heartbeat` counts allocations only — too coarse for
-contract gas accounting, which needs near-instruction-level metering. A WASM
-profile needs a `meter` hook injected at allocation and loop backedges, with a
-configurable cost table, rather than repurposing the heartbeat.
+contract gas accounting, which needs near-instruction-level metering. The
+heartbeat stays for native use (it drives deterministic timeouts in the
+elaborator), but a WASM profile adds a separate `meter` that is not a
+repurposing of it.
+
+The meter is a cost counter drained at injection points, with a host-defined
+out-of-gas behavior:
+
+```zig
+// src/runtime/zig/gas_meter.zig (design)
+pub const Meter = struct {
+    remaining: u64,
+    out_of_gas: *const fn () void,   // host-defined: trap, revert, or raise
+
+    pub fn charge(self: *Meter, cost: u64) void {
+        const r = self.remaining;
+        if (r < cost) { self.out_of_gas(); unreachable; }
+        self.remaining = r - cost;
+    }
+};
+
+// Cost table is host-defined; the runtime never hardcodes gas values.
+pub const CostTable = struct {
+    per_alloc: u64,
+    per_free:  u64,
+    per_loop_backedge: u64,
+    per_call:  u64,
+};
+```
+
+Injection points, in increasing invasiveness:
+
+1. **Allocation** — `ObjectAdapter.allocSmall` / `allocLarge` call
+   `meter.charge(costs.per_alloc)` once. Cheapest, and already where the
+   heartbeat bumps today, so it reuses that seam.
+2. **Free** — symmetric `per_free` charge inside `ObjectAdapter.free`.
+3. **Loop backedges** — EmitZig emits `meter.charge(costs.per_loop_backedge)`
+   at the head of every loop. This is the most valuable for bounded-execution
+   guarantees and requires emitter support, not a runtime-only change.
+4. **Function entry** — optional `per_call` charge, also emitter-side.
+
+Points 1–2 are runtime-only and can land before EmitZig metering exists.
+Points 3–4 require the emitter to take a metering policy flag (see F.3),
+otherwise unbounded loops in generated code can exhaust gas silently. The
+split keeps the runtime meterable on its own first, with emitter metering as a
+follow-on.
 
 ### F.3 `leanzigc` target / profile propagation
 
@@ -1234,6 +1335,7 @@ WASM-profile work above rather than bolted on later.
 This Future section does **not** contradict the native-host boundary in Phase 1.
 The boundary exists because dependency packaging, tool discovery, and executable
 test coverage all assume a real host. The work described here is what removes
-those assumptions for constrained environments — but only after the `AllocatorBackend`
+those assumptions for constrained environments — but only after the `Allocator` /
+`ObjectAdapter`
 seam, the `mpz` port, and the WASM contracts are in place. Until then, native
 rollout (Phase 1 waves 1–5) remains the only supported path.
