@@ -43,9 +43,6 @@ if(DEFINED PREV_STAGE)
   string(APPEND TEST_VARS " PREV_STAGE='${MANGLED_PREV_STAGE}'")
   string(APPEND TEST_VARS " PREV_STAGE_CMAKE_EXECUTABLE_SUFFIX='${PREV_STAGE_CMAKE_EXECUTABLE_SUFFIX}'")
 endif()
-if(LEAN_ZIG_TARGET)
-  string(APPEND TEST_VARS " LEAN_ZIG_TARGET='${LEAN_ZIG_TARGET}'")
-endif()
 
 # Pre-elaborated header snapshots reused by tests with matching imports, gated
 # by the `LEAN_HEADER_SNAPSHOTS` option. The `_lean` snapshot is for tests whose
@@ -319,43 +316,40 @@ endforeach(T)
 # Lint test suite and parts of the repository.
 add_test(NAME lint.py COMMAND python3 lint.py WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
-if(LEAN_ZIG_TARGET)
-  add_test_dir(cross_verify)
-else()
-  add_test_pile(../doc/examples *.lean)
-  add_test_pile(compile *.lean BENCH PART2)
-  add_test_pile(compile_bench *.lean BENCH PART2)
-  add_test_pile(docparse *.txt)
-  add_test_pile(
-    elab
-    *.lean
-    EXCEPT
-      async_select_channel.lean # Flaky
-      sync_mutex.lean # Flaky
-    ${ELAB_FIXTURES}
-  )
-  add_test_pile(elab_bench *.lean BENCH PART2 ${ELAB_FIXTURES})
-  add_test_pile(elab_fail *.lean ${ELAB_FIXTURES})
-  add_test_pile(misc *.sh)
-  add_test_pile(misc_bench *.sh BENCH PART2)
-  add_test_pile(server *.lean)
-  add_test_pile(server_interactive *.lean)
+add_test_dir(zig_native_verify)
+add_test_pile(../doc/examples *.lean)
+add_test_pile(compile *.lean BENCH PART2)
+add_test_pile(compile_bench *.lean BENCH PART2)
+add_test_pile(docparse *.txt)
+add_test_pile(
+  elab
+  *.lean
+  EXCEPT
+    async_select_channel.lean # Flaky
+    sync_mutex.lean # Flaky
+  ${ELAB_FIXTURES}
+)
+add_test_pile(elab_bench *.lean BENCH PART2 ${ELAB_FIXTURES})
+add_test_pile(elab_fail *.lean ${ELAB_FIXTURES})
+add_test_pile(misc *.sh)
+add_test_pile(misc_bench *.sh BENCH PART2)
+add_test_pile(server *.lean)
+add_test_pile(server_interactive *.lean)
 
-  add_test_dir(../doc/examples/compiler)
-  add_test_dir(bench/build BENCH PART1)
-  add_test_dir(bench/vcgen BENCH PART2)
-  add_test_dir(bench/size BENCH PART1)
-  add_test_dir(lake_bench/inundation BENCH PART2)
+add_test_dir(../doc/examples/compiler)
+add_test_dir(bench/build BENCH PART1)
+add_test_dir(bench/vcgen BENCH PART2)
+add_test_dir(bench/size BENCH PART1)
+add_test_dir(lake_bench/inundation BENCH PART2)
 
-  add_dir_of_test_dirs(misc_dir)
-  add_dir_of_test_dirs(
-    pkg
-    EXCEPT
-      signal # Flaky
-      test_extern # Flaky
-      user_ext # Test started being nondeterministic
-  )
-endif()
+add_dir_of_test_dirs(misc_dir)
+add_dir_of_test_dirs(
+  pkg
+  EXCEPT
+    signal # Flaky
+    test_extern # Flaky
+    user_ext # Test started being nondeterministic
+)
 
 #######################
 ## Benchmark targets ##
