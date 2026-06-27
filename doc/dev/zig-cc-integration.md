@@ -872,6 +872,118 @@ Because the backend is chosen at build time, each target compiles a distinct
 runtime with no dead branches for backends it did not select. This is the
 prerequisite for the constrained-runtime targets in the Future section.
 
+#### Reference skeleton (compiled to the real ABI)
+
+The skeleton below maps onto the existing prototype field-for-field, so it is a
+faithful refactor target rather than a greenfield sketch. Constants and the
+`AllocationMeta` header are taken verbatim from the current `alloc.zig`.
+
+```zig
+// src/runtime/zig/object_adapter.zig (design skeleton)
+const std = @import("std");
+const lean = @import("lean_object.zig");
+const allocator_mod = @import("allocator.zig");
+
+// Verbatim from the current prototype — these are Adapter constants, not backend:
+pub const LEAN_PAGE_SIZE: usize = 8192;
+pub const LEAN_MAX_SMALL_OBJECT_SIZE: usize = 4096;
+pub const LEAN_OBJECT_SIZE_DELTA: usize = 8;
+const small_slot_count = LEAN_MAX_SMALL_OBJECT_SIZE / LEAN_OBJECT_SIZE_DELTA;
+const allocation_magic: u32 = 0x4C45414E;
+const allocation_kind_small: u8 = 1;
+const allocation_kind_large: u8 = 2;
+
+const AllocationMeta = extern struct {
+    payload_size: usize,
+    slot_idx: u16,
+    kind: u8,
+    reserved: u8,
+    magic: u32,
+};
+comptime { if (@sizeOf(AllocationMeta) != 16) @compileError("AllocationMeta must stay 16 bytes"); }
+
+pub const ObjectAdapter = struct {
+    backend: allocator_mod.Allocator,           // the ONLY backend touchpoint
+    free_lists: [small_slot_count]?*anyopaque = [_]?*anyopaque{null} ** small_slot_count,
+    heartbeat: u64 = 0,
+
+    // ---- small-object path: free-list first, backend only on miss ----
+    pub fn allocSmall(self: *ObjectAdapter, payload_size: usize, slot_idx: usize) *anyopaque {
+        self.heartbeat += 1;
+        const aligned = alignObjectSize(payload_size);
+        const index = if (slot_idx == slotIndexForSize(aligned)) slot_idx else
+            @panic("small allocator slot mismatch");
+
+        if (self.free_lists[index]) |ptr| {              // reuse — no backend call
+            self.free_lists[index] = freeListNext(ptr);
+            @memset(payloadBytes(ptr, aligned), 0);
+            metaOf(ptr).* = .{ .payload_size = aligned, .slot_idx = @intCast(index),
+                               .kind = allocation_kind_small, .reserved = 0, .magic = allocation_magic };
+            return ptr;
+        }
+        return self.allocSmallFresh(aligned, index);    // backend touched here only
+    }
+
+    fn allocSmallFresh(self: *ObjectAdapter, payload_size: usize, slot_idx: usize) *anyopaque {
+        const total = @sizeOf(AllocationMeta) + payload_size;
+        // THE single backend call that replaced std.heap.page_allocator:
+        const raw = self.backend.alloc(self.backend.ctx, total, LEAN_OBJECT_SIZE_DELTA)
+            orelse @panic("out of memory");
+        const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
+        meta.* = .{ .payload_size = payload_size, .slot_idx = @intCast(slot_idx),
+                    .kind = allocation_kind_small, .reserved = 0, .magic = allocation_magic };
+        const payload = @as([*]u8, @ptrCast(meta)) + @sizeOf(AllocationMeta);
+        @memset(payload[0..payload_size], 0);
+        return @ptrCast(payload);
+    }
+
+    // ---- large-object path: straight to backend ----
+    pub fn allocLarge(self: *ObjectAdapter, sz: usize) *anyopaque {
+        self.heartbeat += 1;
+        const total = @sizeOf(AllocationMeta) + sz;
+        // THE single backend call that replaced std.c.malloc:
+        const raw = self.backend.alloc(self.backend.ctx, total, 16)
+            orelse @panic("out of memory");
+        const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
+        meta.* = .{ .payload_size = sz, .slot_idx = 0,
+                    .kind = allocation_kind_large, .reserved = 0, .magic = allocation_magic };
+        return @ptrCast(@as([*]u8, @ptrCast(meta)) + @sizeOf(AllocationMeta));
+    }
+
+    // ---- free: small returns to free-list, large returns to backend ----
+    pub fn free(self: *ObjectAdapter, ptr: *anyopaque) void {
+        const meta = metaFromPayload(ptr);
+        if (meta.magic != allocation_magic) @panic("missing allocation record");
+        switch (meta.kind) {
+            allocation_kind_small => {
+                const idx = meta.slot_idx;
+                setFreeListNext(ptr, self.free_lists[idx]);
+                self.free_lists[idx] = ptr;          // no backend call
+            },
+            allocation_kind_large => self.backend.free(self.backend.ctx,
+                @ptrCast(metaFromPayload(ptr)), @sizeOf(AllocationMeta) + meta.payload_size, 16),
+            else => @panic("unknown allocation kind"),
+        }
+    }
+
+    // ---- helpers, unchanged from the current prototype ----
+    fn alignObjectSize(sz: usize) usize { /* verbatim */ }
+    fn slotIndexForSize(sz: usize) usize { /* verbatim */ }
+    fn metaOf(ptr: *anyopaque) *AllocationMeta { /* verbatim */ }
+    fn freeListNext(ptr: *anyopaque) ?*anyopaque { /* verbatim */ }
+    fn setFreeListNext(ptr: *anyopaque, next: ?*anyopaque) void { /* verbatim */ }
+    fn payloadBytes(ptr: *anyopaque, len: usize) []u8 { /* verbatim */ }
+    fn metaFromPayload(ptr: *anyopaque) *AllocationMeta { /* verbatim */ }
+};
+```
+
+The migration from the current file is mechanical: the three hardcoded calls
+(`std.heap.page_allocator.alloc`, `std.c.malloc` × 2) become the two
+`self.backend.alloc` calls shown, and every free-list / `AllocationMeta` /
+slot-indexing helper moves into `ObjectAdapter` verbatim. The public C ABI
+(`lean_alloc_small` / `lean_alloc_object` / `lean_free_object`) then forwards into
+a single process-wide adapter instead of into scattered `malloc` calls.
+
 #### Why this belongs in Phase 2
 
 Without this split, Phase 2 only reproduces the C++ runtime's behavior in Zig —
@@ -1034,12 +1146,54 @@ define contracts for three constraints. (These mirror lessons from shipping a
 Zig contract SDK on a MVP-only WASM VM, where `@memcpy`/`@memset` generated
 illegal `bulk_memory` instructions.)
 
-#### 1. Host imports (replace libuv / OpenSSL)
+#### 1. Host imports and the `wasi-arena` Allocator backend
 
-There is no libuv or OpenSSL inside a contract VM. IO, storage, and crypto must
-be exposed as host imports. The runtime needs a `host_imports` interface —
-analogous to how the NEAR SDK binds `near-sys` host functions — declaring the
-import surface a given WASM host provides, and stubbing the rest.
+There is no libuv or OpenSSL inside a contract VM, and there is no libc heap
+either in the `wasm32-freestanding` case. So a WASM runtime cannot reach `malloc`;
+raw memory comes from the host. Concretely this is the `wasi-arena` value of the
+`Allocator` interface (2.5): it is one more backend, selected at build time, that
+answers "where does raw memory come from?" with "from a host import".
+
+The minimal import surface a WASM host must provide is two functions — a bump
+region and its grow — mirroring what a contract SDK binds as `near-sys` host
+functions:
+
+```zig
+// src/runtime/zig/wasi_host.zig (design)
+// Host import surface. Declared here, satisfied by the WASM host at link time.
+extern fn lean_wasm_alloc(size: usize, alignment: usize) callconv(.c) ?[*]u8;
+extern fn lean_wasm_free(ptr: ?[*]u8, size: usize, alignment: usize) callconv(.c) void;
+// (optional, if the host supports reclaim; otherwise free is a no-op and
+// the runtime relies on deterministic end-of-call reclamation, as contract
+// VMs typically do.)
+
+// wired into the same Allocator vtable as every other backend:
+pub const wasi_arena: Allocator = .{
+    .ctx = undefined,
+    .alloc = &wasiAlloc,
+    .free  = &wasiFree,
+};
+fn wasiAlloc(_: *anyopaque, size: usize, alignment: usize) callconv(.c) ?[*]u8 {
+    return lean_wasm_alloc(size, alignment);
+}
+fn wasiFree(_: *anyopaque, ptr: ?[*]u8, size: usize, alignment: usize) callconv(.c) void {
+    lean_wasm_free(ptr, size, alignment);
+}
+```
+
+Because `wasi_arena` implements the same `Allocator` interface as `mimalloc` /
+`libc` / `fixed`, the `ObjectAdapter` from 2.5 runs **unchanged**: its free lists
+and `AllocationMeta` tracking sit on top of the host-imported memory exactly as
+they sit on top of a native heap. Nothing in `object_adapter.zig` knows it is
+talking to a contract VM. That is the payoff of the two-layer split — WASM is
+just another backend value, not a fork of the runtime.
+
+The non-allocator host surface (IO, storage, crypto, hashing) is a separate
+`host_imports` interface, out of scope for this phase but shaped the same way: a
+vtable the host fills, which the runtime's IO/storage modules call instead of
+libuv/OpenSSL. When libuv/OpenSSL are absent (the existing Emscripten path
+already disables OpenSSL), those modules must degrade to host imports or stubs
+rather than link-fail.
 
 #### 2. MVP WASM compatibility layer
 
