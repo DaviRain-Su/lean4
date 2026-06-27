@@ -165,6 +165,17 @@ jobs:
           fi
           # contortion to support empty OPTIONS with old macOS bash
           cmake .. --preset ${{ matrix.CMAKE_PRESET || 'release' }} -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
+      - name: Verify Zig Stage 2 Guard
+        if: matrix.cross
+        run: |
+          guard_dir=$(mktemp -d build/zig-stage2-guard.XXXXXX)
+          log="$guard_dir/configure.log"
+          if cmake -S src -B "$guard_dir" -G "Unix Makefiles" -DSTAGE=2 -DLEAN_USE_ZIG_CC=ON -DLEAN_ZIG_TARGET=${{ matrix.cross_target }} >"$log" 2>&1; then
+            cat "$log"
+            echo "expected LEAN_ZIG_TARGET stage2 configure to fail" >&2
+            exit 1
+          fi
+          grep -F "LEAN_ZIG_TARGET currently supports host-native stage0 and foreign-target stage1 leaf builds only" "$log"
       - name: Build Stage 0 & Configure Stage 1
         run: |
           ulimit -c unlimited  # coredumps
