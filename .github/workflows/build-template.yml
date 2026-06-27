@@ -148,6 +148,9 @@ jobs:
           fi
           if [[ -n '${{ matrix.prepare-llvm }}' ]]; then
             wget -q ${{ matrix.llvm-url }}
+            if [[ -n '${{ matrix.llvm_host_url }}' ]]; then
+              wget -q ${{ matrix.llvm_host_url }}
+            fi
             PREPARE="$(${{ matrix.prepare-llvm }})"
             cp -r stage1 stage2
             cp -r stage1 stage3
