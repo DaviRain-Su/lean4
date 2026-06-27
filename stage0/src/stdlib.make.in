@@ -167,9 +167,11 @@ endif
 endif
 ifeq "${STRIP_BINARIES}" "ON"
 ifeq "${CMAKE_SYSTEM_NAME}" "Linux"
-# We only strip like this on Linux for now as our other platforms already seem to exclude the
+ifeq "${LEAN_ZIG_TARGET}" ""
+# We only strip like this on native Linux for now as our other platforms already seem to exclude the
 # unexported symbols by default
 	strip --strip-unneeded $@
+endif
 endif
 endif
 

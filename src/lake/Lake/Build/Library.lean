@@ -94,7 +94,10 @@ public def LeanLib.leanArtsFacetConfig : LibraryFacetConfig leanArtsFacet :=
         -- The Lean core build is not built with the bundled `llvm-ar`,
         -- so it must be special-cased to resolve issues with the system `ar`.
         if System.Platform.isOSX then
-          if (← IO.getEnv "LEAN_ZIG_TARGET").isSome then
+          let hasZigTarget := match (← IO.getEnv "LEAN_ZIG_TARGET") with
+            | some target => !target.isEmpty
+            | none => false
+          if hasZigTarget then
             compileStaticLib libFile oFiles (← getLeanAr)
           else
             -- macOS BSD `ar` does not support `@file` response files.

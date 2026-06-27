@@ -2990,7 +2990,7 @@ lean_object* run_main(int argc, char ** argv) {
     }
     return _lean_main(in);
 }
-int main(int argc, char ** argv) {
+LEAN_EXPORT int main(int argc, char ** argv) {
 #if defined(WIN32) || defined(_WIN32)
   SetErrorMode(SEM_FAILCRITICALERRORS);
   SetConsoleOutputCP(CP_UTF8);

@@ -39,11 +39,14 @@ Interesting options:
   -- `ld64.lld: warning: /usr/lib/system/libsystem_kernel.dylib has version 13.5.0, which is newer than target minimum of 13.0.0`
   -- In order to suppress these we set the MACOSX_DEPLOYMENT_TARGET variable into the far future.
   let zigTarget? ← IO.getEnv "LEAN_ZIG_TARGET"
+  let hasZigTarget := match zigTarget? with
+    | some target => !target.isEmpty
+    | none => false
   -- Skip the deployment-target hack when using zig or targeting a foreign platform via zig.
   let isZigCc := cc.contains "zig"
   let env := match (← IO.getEnv "MACOSX_DEPLOYMENT_TARGET") with
     | some _ => #[]
-    | none   => if isZigCc || zigTarget?.isSome then #[] else #[("MACOSX_DEPLOYMENT_TARGET", "99.0")]
+    | none   => if isZigCc || hasZigTarget then #[] else #[("MACOSX_DEPLOYMENT_TARGET", "99.0")]
 
   -- let compileOnly := args.contains "-c"
   let linkStatic := !(args.contains "-shared" || args.contains "-leanshared")
