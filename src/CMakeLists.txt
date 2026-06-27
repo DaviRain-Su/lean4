@@ -80,10 +80,13 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 endif()
 
 set(LEAN_EXTRA_LINKER_FLAGS ${LEAN_EXTRA_LINKER_FLAGS_DEFAULT} CACHE STRING "Additional flags used by the linker")
-# zig bundles its own lld — strip -fuse-ld=lld to avoid conflicts
+# zig bundles its own lld — strip -fuse-ld=lld to avoid conflicts.
+# It also turns mimalloc's `__DATE__` / `__TIME__` expansion into a hard error.
 if(LEAN_USE_ZIG_CC)
   string(REPLACE "-fuse-ld=lld" "" LEAN_EXTRA_LINKER_FLAGS "${LEAN_EXTRA_LINKER_FLAGS}")
   set(LEAN_EXTRA_LINKER_FLAGS "${LEAN_EXTRA_LINKER_FLAGS}" CACHE STRING "Additional flags used by the linker" FORCE)
+  set(CMAKE_C_FLAGS "-Wno-date-time ${CMAKE_C_FLAGS}")
+  set(CMAKE_CXX_FLAGS "-Wno-date-time ${CMAKE_CXX_FLAGS}")
 endif()
 set(
   LEAN_EXTRA_CXX_FLAGS
