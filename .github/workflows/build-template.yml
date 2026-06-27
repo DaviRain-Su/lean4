@@ -230,6 +230,7 @@ jobs:
           make -C build/$TARGET_STAGE install
       - name: Check Binaries
         run: ${{ matrix.binary-check }} lean-*/bin/* || true
+        if: matrix.binary-check
       - name: Count binary symbols
         run: |
           for f in lean-*/bin/*; do
@@ -274,7 +275,7 @@ jobs:
         if: always() && steps.test.conclusion != 'skipped'
       - name: Check Test Binary
         run: ${{ matrix.binary-check }} tests/compile/534.lean.out
-        if: (!matrix.cross) && steps.test.conclusion != 'skipped'
+        if: matrix.binary-check && (!matrix.cross) && steps.test.conclusion != 'skipped'
       - name: Build Stage 2
         run: |
           make -C build -j$NPROC stage2
