@@ -1057,6 +1057,20 @@ Recommended migration order, each step independently switchable:
 At every step the native test suite must stay green; a step that breaks ABI is
 held until the seam is fixed rather than forcing a big-bang replacement.
 
+#### Out of bounds: the kernel is never rewritten
+
+The migration above covers runtime and library only. `src/kernel/` is
+explicitly excluded and stays C++. The kernel is Lean's trusted computing base:
+the type checker, the expression/environment representation, and the soundness
+critical path. It is audited and relied on as-is, and any rewrite would have to
+reproduce its behavior byte-for-byte or risk invalidating the whole proof
+system. A Zig rewrite of the kernel has negative expected value: high risk,
+near-zero upside (it is not on the constrained-runtime path that motivates the
+rest of this work — WASM/embedded targets need the runtime and allocator
+touched, not the type checker). The Zig runtime links against the kernel's
+existing C ABI and treats it as a fixed dependency, exactly as the C++ runtime
+does today.
+
 ---
 
 ## Combined Build Flow
@@ -1148,6 +1162,59 @@ real reason WASM is a separate track, not merely "platform specialness".
 For native cross-target (e.g. `x86_64-linux` built from `aarch64-macos`), GMP /
 libuv / OpenSSL can instead be cross-compiled from source via `zig cc`, which is
 the cheaper path and the natural follow-on once the native matrix is stable.
+
+#### mpz beyond GMP
+
+The current `mpz_zig.zig` (m6 reference) is a thin Zig wrapper over GMP: it
+extern-declares `__gmpz_init` / `__gmpz_set` / ... and lays out `Mpz` to match
+GMP's `__mpz_struct` so `MpzObject` embeds a real `mpz_t`. That keeps ABI parity
+with the C++ runtime on native targets, but it means GMP is still linked — so
+this wrapper does **not** unblock WASM. The WASM blocker is not "mpz is in C++",
+it is "mpz calls GMP, and GMP will not build for `wasm32`".
+
+The resolution is a backend split on mpz, mirroring the Allocator split in 2.5:
+one `mpz` interface, multiple implementations behind it, selected at build time.
+
+```zig
+// src/runtime/zig/mpz.zig (design)
+// Interface every mpz backend implements. Same surface the GMP wrapper
+// already exposes, so callers (compat.zig, object.zig) do not change.
+pub const Mpz = struct {
+    // backend-defined representation; opaque to callers
+    rep: Rep,
+
+    pub fn init(a: std.mem.Allocator) !Mpz         { return backend.init(a); }
+    pub fn deinit(self: *Mpz) void                  { backend.deinit(&self.rep); }
+    pub fn add(self: *Mpz, o: *const Mpz) !void    { try backend.add(&self.rep, &o.rep); }
+    pub fn cmp(self: *const Mpz, o: *const Mpz) i32 { return backend.cmp(&self.rep, &o.rep); }
+    // ... the full op set the runtime calls
+};
+```
+
+Three backends, each valid for a different target class:
+
+| Backend | Representation | Target class | Status |
+|---|---|---|---|
+| **gmp** | GMP `__mpz_struct` (current) | native | shipped (m6 wrapper) |
+| **zig-bigint** | `std.math.big.int.Managed` | native / WASI / freestanding | design |
+| **host** | opaque handle, ops via host import | contract VMs (NEAR) | design |
+
+`zig-bigint` is the WASM-unblocking path: it is pure Zig, builds for
+`wasm32-wasi` and `wasm32-freestanding` with no asm, and its API covers the
+arithmetic the runtime needs. The cost is performance on native (no GMP
+hand-tuning), which is why `gmp` stays the native default — the split lets each
+target pick its tradeoff instead of forcing one representation everywhere.
+
+`host` is the contract-VM extreme: large-number ops become host imports, like
+`wasi-arena` routes raw memory to the host. It is only needed where even
+`std.math.big.int`'s allocations are disallowed.
+
+The migration order is deliberately gmp → zig-bigint → host, because
+`zig-bigint` alone unblocks the first real WASM target (`wasm32-wasi`) without
+inventing a host ABI. `host` is deferred until a concrete contract VM requires
+it. This sequencing is why WASM support is gated on a Zig mpz backend existing
+at all — until then no amount of allocator or compat work makes Lean link for
+`wasm32`.
 
 ### F.2 WASM runtime profile
 
@@ -1315,19 +1382,74 @@ follow-on.
 ### F.3 `leanzigc` target / profile propagation
 
 The Phase 1 target selection lives in the `zig-cc` / `zig-cxx` wrapper scripts
-(used by `leanc` for C). EmitZig output is compiled by `leanzigc`, which calls
-`zig build-exe` **directly** and bypasses those wrappers. So target selection
-for the Zig backend is a separate seam:
+(used by `leanc` for the C side). EmitZig output is compiled by `leanzigc`,
+which invokes `zig build-exe` **directly** and bypasses those wrappers. So
+target and profile selection for the Zig backend is a separate seam, and it
+must thread through every option the runtime and emitter need to agree on.
 
-- When a target/profile is active, `leanzigc` must pass `-Dtarget=<triple>` to
-  `zig build-exe`, independent of the C-side wrapper.
-- It must also select the matching runtime profile
-  (`-Dallocator-backend=...`, WASM `compat`, host imports) so the linked runtime
-  matches the target — otherwise the produced WASM is missing symbols or
-  contains illegal instructions.
+#### The single-source-of-truth profile
+
+Rather than let `leanzigc` infer a profile from flags, one build-time profile
+object carries the whole target contract. For a native host it is almost
+empty; for a constrained target it carries the full set:
+
+```bash
+# native host (default): nothing extra
+leanzigc app.zig -o app
+
+# constrained target: one profile name resolves to a coherent option bundle
+leanzigc app.zig -o app.wasm \
+  --profile wasm-near          # resolves the options below as a group
+```
+
+A profile is a named bundle of build options, not independent flags, so it is
+impossible to ask for "WASM target with the mimalloc backend and bulk_memory" —
+an inconsistent combination that would link-fail at the end. The profile either
+exists as a tested whole or it does not.
+
+#### What a profile resolves
+
+Each profile maps to a consistent set passed to `zig build-exe` and into the
+runtime's `build.zig` options:
+
+| Option | Native default | `wasm-near` example | Resolved by |
+|---|---|---|---|
+| `-Dtarget=<triple>` | host | `wasm32-freestanding` | leanzigc → `zig build-exe` |
+| `-Dallocator-backend` | `mimalloc` | `wasi-arena` (F.2.1) | runtime `build.zig` option |
+| MVP-safe emission | off | on (F.2.2) | EmitZig policy flag |
+| gas metering | off | on (F.2.3) | EmitZig policy flag |
+| host imports | none | `near-sys` set (F.2.1) | runtime `build.zig` option |
+| threads | on | off (single-threaded VM) | runtime `build.zig` option |
+
+The last row (threads) matters: the runtime's `threadlocal` free-lists and
+`std.atomic` counters are dead overhead on a single-threaded VM, and the
+profile is what tells the runtime to compile them out.
+
+#### Alignment with Phase 1, not duplication
+
+The C side (`leanc` → `zig-cc` wrapper) and the Zig side (`leanzigc` →
+`zig build-exe`) both select a target, but they read it from the same source:
+the CMake-configured `LEAN_ZIG_TARGET` cache variable (when Phase 1 reintroduces
+target selection as a follow-on to the host-native rollout). `leanzigc` does
+not invent its own target string. This keeps a single build directory from
+producing a C artifact for one target and a Zig artifact for another.
+
+For the native-host case (the only case Phase 1 ships), `leanzigc` passes no
+`-Dtarget` at all, exactly like the `zig-cc` wrapper today — so the two sides
+stay aligned by default and diverge only when a constrained profile is named.
+
+#### Why profiles, not flags
+
+Per-flag freedom was rejected deliberately. The WASM constraints in F.2 are
+not independent: MVP-safe emission is only meaningful with a MVP-only target;
+gas metering is only meaningful with a metering host; `wasi-arena` is only
+meaningful where there is no libc heap. Letting a user set them independently
+invites the inconsistent-combination link failure that profiles exist to
+prevent. A profile is validated as a whole at build time, which is the only
+point that can catch the contradictions before they reach the linker.
 
 This is the join point between Phase 1's C-side target handling and Phase 2's
-Zig-side compilation, and it must be designed together with the allocator and
+Zig-side compilation, and it is designed together with the allocator and
 WASM-profile work above rather than bolted on later.
 
 ### F.4 Relationship to the native-first decision
