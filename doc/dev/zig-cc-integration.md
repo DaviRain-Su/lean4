@@ -709,82 +709,178 @@ if(LEAN_ZIG_RUNTIME)
 endif()
 ```
 
-### 2.5 Design: Runtime Allocator Backend Interface
+### 2.5 Design: Allocator Backend and Object Adapter
 
 The Zig runtime's `alloc.zig` is the single chokepoint through which every Lean
-object allocation flows. It is also the component that must differ the most across
-execution environments: a native desktop process wants mimalloc's size-class pools,
-an embedded target wants a fixed pre-allocated arena, and a WASM contract wants a
-host-imported allocator plus gas metering.
+object allocation flows. It must also differ the most across execution
+environments: a native desktop wants mimalloc's size-class pools, an embedded
+target wants a fixed pre-allocated arena, and a WASM contract wants a
+host-imported allocator.
 
-This subsection defines the interface that lets one runtime source tree serve all
-of those environments without `#ifdef` slicing or per-target forks.
+This subsection defines the two-layer split that lets one runtime source tree
+serve all of those environments without `#ifdef` slicing or per-target forks.
 
-#### Current state (build tree prototype)
+The design separates two concerns that the current prototype conflates:
 
-The prototype runtime ships a binary delegation switch in `runtime_options.zig`:
+- the **Allocator** — the backend that answers "where does raw memory come
+  from?" (mimalloc, libc, a fixed buffer, a WASM host import). This is a thin,
+  environment-specific vtable.
+- the **Adapter** (also referred to as the *Breaker*) — the Lean-side layer
+  that answers "how does a Lean object allocation map onto that backend?". It
+  owns the small-object free lists, the `AllocationMeta` tracking header, and
+  the page/slot segmentation. Its logic is identical across every backend; only
+  the raw-memory call at the bottom differs.
+
+Splitting them is what makes "one source tree, many runtimes" cheap: the Adapter
+is written once, and swapping an execution environment only swaps the Allocator
+beneath it.
+
+#### What the current prototype conflates
+
+The build-tree `alloc.zig` mixes three raw-memory calls with Lean object logic
+in the same file:
+
+```zig
+// current alloc.zig — these three are the hardcoded backend points:
+fn allocSmallFresh(payload_size, slot_idx) *anyopaque {
+    ...
+    const words = std.heap.page_allocator.alloc(usize, word_count) ...;  // ← backend
+    ...
+}
+fn allocLarge(sz) *anyopaque {
+    ...
+    const raw = std.c.malloc(total_size) ...;                              // ← backend
+    ...
+}
+fn allocTrackedPayload(payload_size, kind) *anyopaque {
+    ...
+    const raw = std.c.malloc(total_size) ...;                              // ← backend
+    ...
+}
+```
+
+Around those calls, `g_small_free_lists`, `AllocationMeta`, the 16-byte
+tracking header, and the slot indexing are **Adapter logic** — they do not
+change when the backend changes. Today they are intermixed with the three
+hardcoded points, so changing the backend means editing the file per target,
+which is exactly the `#ifdef` slicing this design removes.
+
+The companion `runtime_options.zig` is only a coexistence gate, not a backend
+selector:
 
 ```zig
 pub const export_allocator_symbols: bool = true;
 ```
 
-When `true`, the Zig runtime exports `lean_alloc_small` / `lean_alloc_object` /
-`lean_free_object` and owns the heap end to end (small-object pool + large-object
-fallback). When `false`, those symbols are declared `extern` and the runtime
-*delegates* to an external (today: the existing C++ `lean_alloc_object`)
-implementation. This is sufficient for incremental coexistence (see 2.8) but it
-is **not** a backend interface: it can only choose between "Zig owns it all" and
-"C++ owns it all". It cannot express "use a fixed buffer" or "route through a
-WASM host import".
+It can choose "Zig owns the heap" versus "delegate to external
+`lean_alloc_object`" (the C++ runtime). It cannot choose a third backend.
 
-#### Design target: `AllocatorBackend`
-
-The design target is a value-type vtable resolved at `comptime`, so that each
-build produces exactly one backend with zero runtime dispatch overhead:
+#### Design: the `Allocator` interface (backend vtable)
 
 ```zig
-// src/runtime/zig/allocator_backend.zig (design)
-pub const AllocatorBackend = struct {
+// src/runtime/zig/allocator.zig (design)
+// Backend interface: "where does raw memory come from?"
+// One resolved value per build, selected at comptime (see selection below).
+pub const Allocator = struct {
     ctx: *anyopaque,
     alloc: *const fn (ctx: *anyopaque, size: usize, alignment: usize) ?[*]u8,
     free:  *const fn (ctx: *anyopaque, ptr: [*]u8, size: usize, alignment: usize) void,
 
-    pub const mimalloc: AllocatorBackend = .{ ... };   // native default
-    pub const libc:     AllocatorBackend = .{ ... };
-    pub fn fixed(buf: []u8) AllocatorBackend { ... }   // embedded / arena
-    pub fn from(allocator: std.mem.Allocator) AllocatorBackend { ... } // WASM host
+    // Backend factories. Each returns a value satisfying the interface.
+    pub const mimalloc: Allocator = .{ ... };                 // native default
+    pub const libc:     Allocator = .{ ... };                  // minimal / freestanding
+    pub fn fixed(buf: []u8) Allocator { ... }                 // embedded: FixedBufferAllocator
+    pub fn from(a: std.mem.Allocator) Allocator { ... }       // generic host allocator (WASM)
+    pub const external_cpp: Allocator = .{ ... };             // delegate to C++ lean_alloc_object
 };
 ```
 
-The small-object pool in `alloc.zig` is then refactored to obtain raw pages from
-`AllocatorBackend` rather than calling `malloc` / `lean_alloc_object` directly.
-This is the same pattern used by the `ffi/zig_allocator.{h,zig}` interop in the
-zml project, which exposes `std.mem.Allocator` across the C ABI as a
-`{ ctx, alloc, free }` struct — confirming the shape is portable both ways.
+This is deliberately a value-type vtable (not a trait/typeclass), resolved at
+`comptime` so each build compiles exactly one backend with zero runtime
+dispatch overhead. The shape `{ ctx, alloc, free }` mirrors the
+`ffi/zig_allocator.{h,zig}` interop used in the zml project, which exposes
+`std.mem.Allocator` across the C ABI — confirming the shape ports both ways, so
+the same Allocator value can be handed to C++ callers if coexistence needs it.
 
-#### Backend selection
+#### Design: the Object Adapter (Breaker)
 
-`build.zig` gains a `comptime`-selected option instead of a runtime flag:
+```zig
+// src/runtime/zig/object_adapter.zig (design)
+// Lean-side layer: "how does a Lean object map onto the backend?"
+// Written once; identical across all backends. Owns:
+//   - the small-object free lists (g_small_free_lists today)
+//   - the AllocationMeta tracking header (16 bytes per allocation)
+//   - page/slot segmentation and the large-object fallback
+// The ONLY backend-aware call is `backend.alloc(...)` at the bottom.
+pub const ObjectAdapter = struct {
+    backend: Allocator,   // injected, never read directly by Lean code
 
-```bash
-zig build -Dallocator-backend=mimalloc   # native (default)
-zig build -Dallocator-backend=libc        # minimal native / freestanding
-zig build -Dallocator-backend=fixed       # embedded: FixedBufferAllocator
-zig build -Dallocator-backend=wasi-arena  # WASM: host-imported arena
+    pub fn allocSmall(self: *ObjectAdapter, payload_size: usize) *anyopaque {
+        // slot index from payload_size, check per-thread free list, ...
+        // if a fresh page is needed, the ONLY backend touch:
+        const page = self.backend.alloc(self.backend.ctx, page_size, page_alignment)
+            orelse @panic("out of memory");
+        ...
+    }
+    pub fn allocLarge(self: *ObjectAdapter, sz: usize) *anyopaque {
+        const total = @sizeOf(AllocationMeta) + sz;
+        const raw = self.backend.alloc(self.backend.ctx, total, .@"16") ...;
+        ...
+    }
+    pub fn free(self: *ObjectAdapter, ptr: *anyopaque) void { ... }
+};
 ```
 
+The three current hardcoded points become three calls through `self.backend`,
+and nothing else in the Adapter changes. The public C ABI
+(`lean_alloc_small_object` / `lean_alloc_object` / `lean_free_object`) then
+forwards into a single process-wide `ObjectAdapter` rather than into scattered
+`malloc` calls, which is also what makes the large-object path, the mpz path,
+and the small-object path share one backend instead of each having its own.
+
+#### Backend selection (comptime, via build.zig options)
+
+`build.zig` already threads options into `runtime_options.zig` through
+`b.addOptions()` + `addOption(bool, ...)`. The design extends that with one
+enum the Adapter reads at `comptime`:
+
+```zig
+// build.zig (extended)
+const backend = b.option(
+    .{ mimalloc = {}, libc = {}, fixed = {}, wasi_arena = {}, external_cpp = {} },
+    "allocator-backend",
+    "Runtime allocator backend",
+) orelse .mimalloc;
+opts.addOption(Backend, "allocator_backend", backend);
+```
+
+```bash
+# the user-facing selection (resolved at build time, no runtime branch):
+zig build -Dallocator-backend=mimalloc     # native (default)
+zig build -Dallocator-backend=libc          # minimal native / freestanding
+zig build -Dallocator-backend=fixed         # embedded: FixedBufferAllocator
+zig build -Dallocator-backend=wasi-arena    # WASM: host-imported arena
+zig build -Dallocator-backend=external-cpp  # coexist with C++ runtime (see 2.8)
+```
+
+`external-cpp` subsumes today's `export_allocator_symbols=false` path: instead
+of a boolean "delegate", it is just the `external_cpp` Allocator value wired
+into the same Adapter. That lets the C++ and Zig runtimes share the free-list
+and tracking logic during incremental migration instead of duplicating them.
+
 Because the backend is chosen at build time, each target compiles a distinct
-runtime with no dead branches for the backends it did not select. This is what
-makes "one source tree, many runtimes" cheap, and it is the prerequisite for the
-constrained-runtime targets described in the Future section below.
+runtime with no dead branches for backends it did not select. This is the
+prerequisite for the constrained-runtime targets in the Future section.
 
 #### Why this belongs in Phase 2
 
-Without this interface, Phase 2 only reproduces the C++ runtime's behavior in
-Zig — it does not unlock new execution environments. The allocator backend is
-the seam at which a constrained runtime (WASM, embedded, sandbox) plugs in, so
-defining it as part of the Zig runtime merge keeps the migration honest about
-what it is actually buying beyond a language swap.
+Without this split, Phase 2 only reproduces the C++ runtime's behavior in Zig —
+it does not unlock new execution environments. The Adapter is written once and
+is backend-agnostic; the Allocator is the seam at which a constrained runtime
+(WASM, embedded, sandbox) plugs in. Defining both as part of the Zig runtime
+merge keeps the migration honest about what it buys beyond a language swap: a
+single tree that can target a desktop heap, a fixed buffer, or a contract VM
+by changing one build option.
 
 ### 2.6 Design: Testing for EmitZig
 
