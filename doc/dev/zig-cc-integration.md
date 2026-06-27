@@ -1160,6 +1160,10 @@ at CMake configure time.
 | EmitZig merge strategy | Copy into `src/`, gate behind CMake option | Keeps master clean; opt-in |
 | Zig runtime build | `zig build` via `add_custom_command` | Uses existing `build.zig`; no custom CMake for Zig |
 | Default state | Both features OFF | No impact on existing builds until explicitly enabled |
+| Build system: Phase 1 (C/C++) | Stay on CMake, use `zig cc` as the compiler | Lean's C++ dependencies (GMP/libuv/OpenSSL/mimalloc) are few and CMake already manages them; Bazel's strength is managing *large* C++ dependency graphs (the zml project needs it for MLIR/XLA), which Lean does not have. `zig cc` gives cross-compilation without a build-system rewrite |
+| Build system: Phase 2 (Zig runtime) | `build.zig` invoked via `add_custom_command` | The Zig runtime is Zig code; `build.zig` is the native tool and handles WASM/embedded cross-targets with one flag (`-Dtarget`), which CMake cannot. CMake still orchestrates the overall build and calls `zig build` as a sub-step |
+| Why not Bazel | Rejected for now | Bazel's `rules_zig` forces `--strategy=ZigBuildLib=local` (seen in production use) and needs heavy `.bazelrc`/custom `.bzl` setup. Justified only if Lean adopts large C++ ecosystems like MLIR; until then it is over-engineering |
+| Backend selection mechanism | `comptime` via `build.zig` options | The Allocator, mpz, HostIo, and threading model are all resolved at build time, so each target compiles one backend with zero runtime dispatch and no dead branches for unselected backends |
 
 ---
 
@@ -1454,6 +1458,42 @@ Points 3–4 require the emitter to take a metering policy flag (see F.3),
 otherwise unbounded loops in generated code can exhaust gas silently. The
 split keeps the runtime meterable on its own first, with emitter metering as a
 follow-on.
+
+#### 4. Single-threaded target stripping
+
+A contract VM is single-threaded, but the native runtime is built around
+threading primitives: the allocator uses `threadlocal` per-thread free lists and
+heartbeat counters, test/task counters are `std.atomic.Value`, and `task_manager`
+coordinates concurrent tasks. On `wasm32` these are not just dead code — they
+are dead **overhead** (atomics lower to heavier sequences than plain loads) and,
+for `threadlocal`, a TLS model that a freestanding target may not support at all.
+
+The profile's `threads` flag (see F.3 table) drives a `comptime` constant the
+runtime reads to compile these out:
+
+```zig
+// src/runtime/zig/runtime_options.zig (extended)
+pub const threaded: bool = true;   // native default; profile sets false for wasm-near
+
+// alloc.zig — threadlocal only when threaded:
+const FreeLists = if (runtime_options.threaded)
+    [small_slot_count]?*anyopaque   // one set per thread
+else
+    *const [small_slot_count]?*anyopaque; // single shared set, no TLS
+
+// counters: atomic when threaded, plain usize when not
+const Counter = if (runtime_options.threaded) std.atomic.Value(usize) else usize;
+```
+
+When `threaded=false`, `threadlocal` is dropped entirely (no TLS on
+freestanding), atomics become plain reads/writes, and the task manager compiles
+to a single-worker scheduler instead of a concurrent one. The task system itself
+is **not** removed — Lean's elaborator uses tasks for parallel proof checking —
+it just runs them inline on the single thread. This keeps the runtime's task API
+intact while shedding the concurrency machinery a single-threaded VM cannot use.
+
+This is the same `comptime`-select pattern as the Allocator backend (2.5): one
+source tree, the profile picks the threading model, no per-target fork.
 
 ### F.3 `leanzigc` target / profile propagation
 
