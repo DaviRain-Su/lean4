@@ -15,8 +15,13 @@
       pkgs = import inputs.nixpkgs { inherit system; };
       # An old nixpkgs for creating releases with an old glibc
       pkgsDist-old = import inputs.nixpkgs-older { inherit system; };
-      # An old nixpkgs for creating releases with an old glibc
+      # Old-glibc target packages for native aarch64 Linux builders
       pkgsDist-old-aarch = import inputs.nixpkgs-old { localSystem.config = "aarch64-unknown-linux-gnu"; };
+      # Old-glibc target packages for x86_64-hosted cross builds targeting aarch64 Linux
+      pkgsDist-old-aarch-cross = if system == "x86_64-linux" then import inputs.nixpkgs-old {
+        localSystem = { inherit system; };
+        crossSystem = { config = "aarch64-unknown-linux-gnu"; };
+      } else null;
 
       llvmPackages = pkgs.llvmPackages_19;
 
@@ -87,6 +92,8 @@
         default = devShellWithDist pkgs;
         oldGlibc = devShellWithDist pkgsDist-old;
         oldGlibcAArch = devShellWithDist pkgsDist-old-aarch;
+      } // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+        oldGlibcAArchCross = devShellWithDist pkgsDist-old-aarch-cross;
       };
     }) ["x86_64-linux" "aarch64-linux" "aarch64-darwin"]);
 }

@@ -339,7 +339,7 @@ jobs:
                 "secondary": true,
                 "cross": true,
                 "cross_target": "aarch64-linux-gnu",
-                "shell": "nix develop .#oldGlibcAArch -c bash -euxo pipefail {0}",
+                "shell": "nix develop .#oldGlibcAArchCross -c bash -euxo pipefail {0}",
                 "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-aarch64-linux-gnu.tar.zst",
                 "llvm_host_url": "https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-x86_64-linux-gnu.tar.zst",
                 "prepare-llvm": "../script/prepare-llvm-linux.sh lean-llvm-aarch64-linux-gnu.tar.zst lean-llvm-x86_64-linux-gnu.tar.zst",
