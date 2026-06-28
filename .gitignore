@@ -38,3 +38,5 @@ wdOut.txt
 # zig cache
 .zig-cache
 src/runtime/zig/zig-out/
+lean_rt.o
+*.o
