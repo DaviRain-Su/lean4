@@ -1,0 +1,4 @@
+init=l_GuestBook_init
+add_message=l_GuestBook_addMessage
+latest=l_GuestBook_latest
+count=l_GuestBook_count

@@ -1,0 +1,4 @@
+init=l_ContextExample_init
+context=l_ContextExample_context
+owner=l_ContextExample_owner
+private_ping=l_ContextExample_privatePing

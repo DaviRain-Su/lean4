@@ -1,0 +1,4 @@
+init=l_CrossContract_init
+ping=l_CrossContract_ping
+call_ping=l_CrossContract_callPing
+on_ping=l_CrossContract_onPing
