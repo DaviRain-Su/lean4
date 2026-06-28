@@ -64,7 +64,25 @@ pub fn atomicLeanPtr(slot: *?*anyopaque) *AtomicLeanPtr {
     return @ptrCast(@alignCast(slot));
 }
 
-pub const Mutex = struct {
+pub const Mutex = if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) struct {
+    // Single-threaded WASM: locks are no-ops.
+    pub fn init() Mutex {
+        return .{};
+    }
+    pub fn deinit(self: *Mutex) void {
+        _ = self;
+    }
+    pub fn lock(self: *Mutex) void {
+        _ = self;
+    }
+    pub fn tryLock(self: *Mutex) bool {
+        _ = self;
+        return true;
+    }
+    pub fn unlock(self: *Mutex) void {
+        _ = self;
+    }
+} else struct {
     raw: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
 
     pub fn init() Mutex {
@@ -92,7 +110,25 @@ pub const Mutex = struct {
     }
 };
 
-pub const Condvar = struct {
+pub const Condvar = if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) struct {
+    // Single-threaded WASM: condition variables are no-ops (no other thread to signal).
+    pub fn init() Condvar {
+        return .{};
+    }
+    pub fn deinit(self: *Condvar) void {
+        _ = self;
+    }
+    pub fn wait(self: *Condvar, mutex: *Mutex) void {
+        _ = self;
+        _ = mutex;
+    }
+    pub fn signal(self: *Condvar) void {
+        _ = self;
+    }
+    pub fn broadcast(self: *Condvar) void {
+        _ = self;
+    }
+} else struct {
     raw: std.c.pthread_cond_t = std.c.PTHREAD_COND_INITIALIZER,
 
     pub fn init() Condvar {
@@ -116,7 +152,25 @@ pub const Condvar = struct {
     }
 };
 
-pub const RecursiveMutex = struct {
+pub const RecursiveMutex = if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) struct {
+    // Single-threaded WASM: recursive lock is a no-op.
+    pub fn init() RecursiveMutex {
+        return .{};
+    }
+    pub fn deinit(self: *RecursiveMutex) void {
+        _ = self;
+    }
+    pub fn lock(self: *RecursiveMutex) void {
+        _ = self;
+    }
+    pub fn tryLock(self: *RecursiveMutex) bool {
+        _ = self;
+        return true;
+    }
+    pub fn unlock(self: *RecursiveMutex) void {
+        _ = self;
+    }
+} else struct {
     raw: c.pthread_mutex_t,
 
     pub fn init() RecursiveMutex {
@@ -152,7 +206,35 @@ pub const RecursiveMutex = struct {
     }
 };
 
-pub const SharedMutex = struct {
+pub const SharedMutex = if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) struct {
+    // Single-threaded WASM: shared/exclusive lock is a no-op.
+    pub fn init() SharedMutex {
+        return .{};
+    }
+    pub fn deinit(self: *SharedMutex) void {
+        _ = self;
+    }
+    pub fn write(self: *SharedMutex) void {
+        _ = self;
+    }
+    pub fn tryWrite(self: *SharedMutex) bool {
+        _ = self;
+        return true;
+    }
+    pub fn unlockWrite(self: *SharedMutex) void {
+        _ = self;
+    }
+    pub fn read(self: *SharedMutex) void {
+        _ = self;
+    }
+    pub fn tryRead(self: *SharedMutex) bool {
+        _ = self;
+        return true;
+    }
+    pub fn unlockRead(self: *SharedMutex) void {
+        _ = self;
+    }
+} else struct {
     raw: c.pthread_rwlock_t,
 
     pub fn init() SharedMutex {

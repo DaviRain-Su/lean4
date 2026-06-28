@@ -1,5 +1,9 @@
 // Root module re-exporting all runtime submodules.
 
+const builtin = @import("builtin");
+
+const is_wasm = builtin.os.tag == .wasi or builtin.os.tag == .freestanding;
+
 pub const alloc = @import("alloc.zig");
 pub const apply = @import("apply.zig");
 pub const array = @import("array.zig");
@@ -16,7 +20,7 @@ pub const io_error = @import("io_error.zig");
 pub const io_errno = @import("io_errno.zig");
 pub const io_result = @import("io_result.zig");
 pub const io_min = @import("io_min.zig");
-pub const io_posix = @import("io_posix.zig");
+pub const io_posix = if (is_wasm) @import("io_wasm.zig") else @import("io_posix.zig");
 pub const list = @import("list.zig");
 pub const misc = @import("misc.zig");
 pub const nat = @import("nat.zig");

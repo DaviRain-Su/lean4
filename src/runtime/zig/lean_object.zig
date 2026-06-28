@@ -2,6 +2,7 @@
 // Released under Apache 2.0 license as described in the file LICENSE.
 
 const mpz_zig = @import("mpz_zig");
+const builtin = @import("builtin");
 
 pub const lean_object = extern struct {
     m_rc: i32,
@@ -111,6 +112,11 @@ pub const LeanExternal: u8 = 254;
 pub const LeanReserved: u8 = 255;
 
 comptime {
+    // These layout assertions encode the 64-bit Lean object ABI shared with
+    // the C++ runtime. On wasm32 (4-byte pointers) the layouts differ by
+    // design — the Zig extern struct still lays them out correctly; only the
+    // hard-coded 64-bit constants are skipped there.
+    if (@sizeOf(usize) == 8) {
     if (@sizeOf(lean_object) != 8) @compileError("lean_object must be 8 bytes");
     if (@sizeOf(lean_thunk_object) != 24) @compileError("lean_thunk_object must be 24 bytes");
     if (@offsetOf(lean_thunk_object, "m_header") != 0) @compileError("lean_thunk_object.m_header must be at offset 0");
@@ -133,4 +139,5 @@ comptime {
     if (@offsetOf(lean_promise_object, "m_result") != 8) @compileError("lean_promise_object.m_result must be at offset 8");
     if (@offsetOf(MpzObject, "m_header") != 0) @compileError("MpzObject header must start at offset 0");
     if (@offsetOf(MpzObject, "m_value") != @sizeOf(lean_object)) @compileError("MpzObject payload must follow lean_object header");
+    }
 }

@@ -2,6 +2,7 @@
 // Released under Apache 2.0 license as described in the file LICENSE.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const apply = @import("apply.zig");
@@ -573,6 +574,10 @@ pub const TaskManager = struct {
     }
 
     fn spawnStandardWorkerLocked(self: *TaskManager) !void {
+        if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+            // Single-threaded WASM: no worker thread; tasks run inline on the main thread.
+            return;
+        }
         const worker = try std.Thread.spawn(.{}, standardWorkerMain, .{self});
         try self.m_workers.append(self.allocator, worker);
     }
@@ -580,6 +585,10 @@ pub const TaskManager = struct {
     fn spawnDedicatedWorkerLocked(self: *TaskManager, task: *lean.lean_task_object) !void {
         self.m_num_dedicated_workers += 1;
         self.m_dedicated_started += 1;
+        if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+            // Single-threaded WASM: run inline, no dedicated thread.
+            return;
+        }
         const worker = try std.Thread.spawn(.{}, dedicatedWorkerMain, .{ self, task });
         worker.detach();
     }
@@ -950,6 +959,10 @@ pub export fn leanrt_test_task_manager_spawn_dedicated_task(prio: c_uint) callco
 }
 
 pub export fn leanrt_test_task_manager_contention_smoke(thread_count: c_uint) callconv(.c) bool {
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+        // Single-threaded WASM: contention smoke is meaningless; skip it.
+        return false;
+    }
     const manager = g_test_manager orelse return false;
     if (thread_count < 2) {
         return false;

@@ -163,6 +163,10 @@ pub fn spawn(config: SpawnConfig, comptime function: anytype, args: anytype) std
         .args = args,
     };
 
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+        // Single-threaded WASM: thread spawning is unavailable.
+        return error.ThreadQuotaExceeded; // no threads on single-threaded WASM
+    }
     return std.Thread.spawn(.{
         .stack_size = effectiveStackSize(config.stack_size),
         .allocator = config.allocator,

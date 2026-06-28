@@ -34,6 +34,11 @@ extern fn lean_zig_uv_initialize() callconv(.c) void;
 extern fn lean_zig_uv_event_loop_run() callconv(.c) void;
 
 fn initializeLibuv() void {
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+        // WASM: no libuv, no event-loop thread. IO is stubbed (io_wasm.zig).
+        g_libuv_initialized = true;
+        return;
+    }
     if (g_libuv_initialized) return;
     lean_zig_uv_initialize();
     _ = std.Thread.spawn(.{}, lean_zig_uv_event_loop_run, .{}) catch |err| {
