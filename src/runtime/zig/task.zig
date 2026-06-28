@@ -10,9 +10,7 @@ const object = @import("object.zig");
 const rc = @import("rc.zig");
 const task_manager = @import("task_manager.zig");
 const task_tls = @import("task_tls.zig");
-const libc_c = @cImport({
-    @cInclude("unistd.h");
-});
+const libc_c = @import("runtime_c");
 
 fn taskPtr(t: *anyopaque) *lean.lean_task_object {
     return @ptrCast(@alignCast(t));

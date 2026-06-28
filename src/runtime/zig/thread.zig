@@ -6,10 +6,7 @@ const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const sync = @import("sync.zig");
-const c = @cImport({
-    @cInclude("pthread.h");
-    @cInclude("unistd.h");
-});
+const c = @import("runtime_c");
 const libc = struct {
     extern "c" fn getenv(name: [*:0]const u8) ?[*:0]u8;
     extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;

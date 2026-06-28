@@ -1,10 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const builtin = @import("builtin");
-const c = @cImport({
-    @cInclude("pthread.h");
-    @cInclude("unistd.h");
-});
+const c = @import("runtime_c");
 const alloc = @import("alloc.zig");
 const io_errno = @import("io_errno.zig");
 const io_min = @import("io_min.zig");

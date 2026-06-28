@@ -10,6 +10,11 @@ pub fn build(b: *std.Build) void {
     const mpz_mod = b.addModule("mpz_zig", .{
         .root_source_file = b.path("mpz_zig.zig"),
     });
+    const runtime_c = b.addTranslateC(.{
+        .root_source_file = b.path("runtime_c.h"),
+        .target = target,
+        .optimize = optimize,
+    });
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
@@ -22,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     root_mod.addImport("mpz_zig", mpz_mod);
+    root_mod.addImport("runtime_c", runtime_c.createModule());
     root_mod.addImport("runtime_options", opts_mod);
     root_mod.linkSystemLibrary("gmp", .{});
     root_mod.linkSystemLibrary("c++", .{});

@@ -6,10 +6,7 @@ const std = @import("std");
 const testing = std.testing;
 const lean = @import("lean_object.zig");
 const rt_object = @import("object.zig");
-const c = @cImport({
-    @cInclude("pthread.h");
-    @cInclude("sys/time.h");
-});
+const c = @import("runtime_c");
 
 const gpa = std.heap.c_allocator;
 

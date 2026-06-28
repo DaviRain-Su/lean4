@@ -10,10 +10,7 @@ const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
 
-const c = @cImport({
-    @cInclude("arpa/inet.h");
-    @cInclude("netinet/in.h");
-});
+const c = @import("runtime_c");
 
 extern fn lean_mk_string(s: [*:0]const u8) callconv(.c) *anyopaque;
 
