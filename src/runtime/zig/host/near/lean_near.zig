@@ -21,7 +21,8 @@ const near_alloc = @import("allocator.zig");
 fn stringData(s: *anyopaque) []const u8 {
     const str: *lean.lean_string_object = @ptrCast(@alignCast(s));
     const ptr: [*]const u8 = @ptrCast(&str.m_data);
-    return ptr[0..str.m_size];
+    // m_length is the UTF-8 byte length WITHOUT null terminator; m_size includes it.
+    return ptr[0..str.m_length];
 }
 
 fn mkString(data: []const u8) ?*anyopaque {

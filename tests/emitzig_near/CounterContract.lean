@@ -24,11 +24,15 @@ end Near
 
 open Near Storage Env
 
+/-- Parse a natural number from a string (avoids stdlib extern dependency). -/
+def parseNat (s : String) : Nat :=
+  s.toList.foldl (fun acc c => acc * 10 + (c.toNat - '0'.toNat)) 0
+
 /-- Contract entry: read count from storage, increment, return new value. -/
 def main : IO UInt32 := do
   let current? ← Storage.read "count"
   let current := current?.getD "0"
-  let n := current.toNat?.getD 0
+  let n := parseNat current
   let next := n + 1
   let _ ← Storage.write "count" (toString next)
   Env.log s!"incremented to {next}"
