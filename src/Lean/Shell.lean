@@ -12,6 +12,7 @@ import Lean.Server.Watchdog
 import Lean.Server.FileWorker
 import Lean.Compiler.LCNF.EmitC
 import Lean.Compiler.LCNF.EmitZig
+import Lean.Compiler.LCNF.EmitYul
 
 import Init.System.Platform
 import Lean.Compiler.Options
@@ -57,6 +58,12 @@ Emits Zig code for the module from LCNF.
 def emitZig (mainModuleName : Name) (env : Environment) : IO String := do
   let data ← EmitZig.emitZig mainModuleName
     |>.toIO' { fileName := "<emitZig>", fileMap := default } { env }
+  return data
+
+/-- Emits Yul code (EVM target) for the module from LCNF. -/
+def emitYul (mainModuleName : Name) (env : Environment) : IO String := do
+  let data ← Lean.Compiler.LCNF.EmitYul.emitYul mainModuleName
+    |>.toIO' { fileName := "<emitYul>", fileMap := default } { env }
   return data
 
 /-- Whether Lean was built with an address sanitizer enabled. -/
@@ -161,6 +168,7 @@ def displayHelp (useStderr : Bool) : IO Unit := do
   out.putStrLn    "  -c, --c=fname          name of the C output file"
   out.putStrLn    "  -b, --bc=fname         name of the LLVM bitcode file"
   out.putStrLn    "  -z, --zig=fname        name of the Zig output file"
+  out.putStrLn    "  -y, --yul=fname        name of the Yul output file (EVM target)"
   out.putStrLn    "      --stdin            take input from stdin"
   out.putStrLn    "  -R, --root=dir         set package root directory from which the module name\n"
   out.putStrLn    "                         of the input file is calculated\n"
@@ -256,6 +264,7 @@ structure ShellOptions where
   cFileName? : Option System.FilePath := none
   bcFileName? : Option System.FilePath := none
   zigFileName? : Option System.FilePath := none
+  yulFileName? : Option System.FilePath := none
   jsonOutput : Bool := false
   errorOnKinds : Array Name := #[]
   printStats : Bool := false
@@ -343,6 +352,8 @@ def ShellOptions.process (opts : ShellOptions)
     return {opts with bcFileName? := ← checkOptArg "b" optArg?}
   | 'z' => -- `-z, --zig=fname`
     return {opts with zigFileName? := ← checkOptArg "z" optArg?}
+  | 'y' => -- `-y, --yul=fname`
+    return {opts with yulFileName? := ← checkOptArg "y" optArg?}
   | 's' => -- `-s, --tstack=num`
     let arg ← checkOptArg "s" optArg?
     let some stackSize := arg.toNat?
@@ -559,7 +570,7 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
       pure setup.name
     else if let some fileName := fileName? then
       try moduleNameOfFileName fileName opts.rootDir? catch e =>
-        if opts.oleanFileName?.isNone && opts.cFileName?.isNone && opts.zigFileName?.isNone then
+        if opts.oleanFileName?.isNone && opts.cFileName?.isNone && opts.zigFileName?.isNone && opts.yulFileName?.isNone then
           pure `_stdin
         else
           throw e
@@ -592,6 +603,13 @@ def shellMain (args : List String) (opts : ShellOptions) : IO UInt32 := do
           return 1
       profileitIO "Zig code generation" opts.leanOpts do
         let data ← emitZig mainModuleName env
+        out.write data.toUTF8
+    if let some y := opts.yulFileName? then
+      let .ok out ← IO.FS.Handle.mk y .write |>.toBaseIO
+        | IO.eprintln s!"failed to create '{y}'"
+          return 1
+      profileitIO "Yul code generation" opts.leanOpts do
+        let data ← emitYul mainModuleName env
         out.write data.toUTF8
   displayCumulativeProfilingTimes
   if Internal.hasAddressSanitizer () then

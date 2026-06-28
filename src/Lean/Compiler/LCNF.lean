@@ -52,3 +52,5 @@ public import Lean.Compiler.LCNF.EmitZig.RuntimeExterns
 -- Orphan import to keep the Yul AST/printer from being dropped.
 public import Lean.Compiler.Yul.AST
 public import Lean.Compiler.Yul.Printer
+-- EmitYul: LCNF → Yul (EVM target).
+public import Lean.Compiler.LCNF.EmitYul
