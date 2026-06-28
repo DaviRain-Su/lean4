@@ -104,36 +104,17 @@ def parseAmount (raw : String) : Option Spec.Amount := do
 
 namespace StorageState
 
-def reservesHi : String := "vault:reserves:hi"
-def reservesLo : String := "vault:reserves:lo"
-def sharesHi : String := "vault:shares:hi"
-def sharesLo : String := "vault:shares:lo"
-
-def readLimb (key : String) : IO UInt64 := do
-  match (← Storage.rawRead key) with
-  | none => pure 0
-  | some raw =>
-    match parseUInt64? raw with
-    | some value => pure value
-    | none => pure 0
-
-def writeLimb (key : String) (value : UInt64) : IO Bool :=
-  Storage.rawWrite key (toString value)
+def reserves : Storage.U128Key := Storage.U128Key.make "vault:reserves"
+def shares : Storage.U128Key := Storage.U128Key.make "vault:shares"
 
 def read : IO Spec.State := do
-  let rHi ← readLimb reservesHi
-  let rLo ← readLimb reservesLo
-  let sHi ← readLimb sharesHi
-  let sLo ← readLimb sharesLo
-  let reserves : Spec.Amount := ⟨rHi, rLo⟩
-  let shares : Spec.Amount := ⟨sHi, sLo⟩
-  pure { reserves, shares }
+  let r ← reserves.read
+  let s ← shares.read
+  pure { reserves := r, shares := s }
 
 def write (s : Spec.State) : IO Unit := do
-  let _ ← writeLimb reservesHi s.reserves.hi
-  let _ ← writeLimb reservesLo s.reserves.lo
-  let _ ← writeLimb sharesHi s.shares.hi
-  let _ ← writeLimb sharesLo s.shares.lo
+  reserves.write s.reserves
+  shares.write s.shares
 
 end StorageState
 
@@ -154,21 +135,21 @@ def status : Contract.Method .view := Contract.view "status" do
 
 def deposit : Contract.Method .update := Contract.update "deposit" do
   let _ ← Contract.requireInitialized
-  let ctx ← Env.context
-  let amount := ctx.attachedDeposit.yoctoNear
+  let amount ← Env.attachedDepositAmount
   let _ ← Contract.require (!amount.isZero) "deposit requires attached NEAR"
   let current ← StorageState.read
   match Spec.deposit? current amount with
   | none => Contract.panic "vault deposit overflow"
   | some next =>
     StorageState.write next
-    Env.log ("deposit " ++ toString amount)
+    Event.emit "near-lean-vault" "1.0.0" "deposit"
+      ("[{\"amount\":\"" ++ toString amount ++ "\"}]")
     returnStateJson next
 
 def withdraw : Contract.Method .update := Contract.update "withdraw" do
   let _ ← Contract.requireInitialized
-  let attachedDeposit ← Env.attachedDeposit
-  let _ ← Contract.require (attachedDeposit.yoctoNear == Near.Amount.U128.zero) "Method is not payable"
+  let attachedDeposit ← Env.attachedDepositAmount
+  let _ ← Contract.require (attachedDeposit == Near.Amount.U128.zero) "Method is not payable"
   let raw ← Env.inputString
   match parseAmount raw with
   | none => Contract.panic "withdraw amount must be a decimal yoctoNEAR string"
@@ -179,6 +160,8 @@ def withdraw : Contract.Method .update := Contract.update "withdraw" do
     | none => Contract.panic "vault withdraw underflow"
     | some next =>
       StorageState.write next
+      Event.emit "near-lean-vault" "1.0.0" "withdraw"
+        ("[{\"amount\":\"" ++ toString amount ++ "\"}]")
       let receiver ← Env.predecessorAccount
       let promise ← Promise.new receiver
       let promise ← promise.transfer (NearToken.fromU128 amount)

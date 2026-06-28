@@ -37,11 +37,6 @@ for TEST in "${TESTS[@]}"; do
       NEAR_METHOD_EXPORTS+=("${line%%=*}")
     done < "$METHODS_FILE"
   fi
-  NEAR_METHODS_ENV=""
-  if [[ "${#NEAR_METHODS[@]}" -gt 0 ]]; then
-    NEAR_METHODS_ENV="$(IFS=,; echo "${NEAR_METHODS[*]}")"
-  fi
-
   # Step 1: Emit Zig code from Lean source.
   "$LEAN" "$TEST" -z "$ZIG_FILE"
 
@@ -53,9 +48,14 @@ for TEST in "${TESTS[@]}"; do
   fi
 
   # Step 3: Compile to NEAR-compatible WASM.
-  NEAR_CONTRACT_METHODS="$NEAR_METHODS_ENV" \
-  LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig" \
-    bash "$ZIGC_NEAR" "$ZIG_FILE" "$WASM_FILE"
+  if [[ -f "$METHODS_FILE" ]]; then
+    NEAR_METHODS_FILE="$METHODS_FILE" \
+    LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig" \
+      bash "$ZIGC_NEAR" "$ZIG_FILE" "$WASM_FILE"
+  else
+    LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig" \
+      bash "$ZIGC_NEAR" "$ZIG_FILE" "$WASM_FILE"
+  fi
 
   # Step 4: Verify it's a valid MVP WASM module.
   [[ -s "$WASM_FILE" ]] || { echo "WASM output is empty for $TEST"; exit 1; }

@@ -42,7 +42,9 @@ NEAR contract WASM
 
 - `Amount.U128`, `NearToken`, and `Gas` for bounded chain amounts.
 - `AccountId`, `Env.context`, storage usage, gas, balances, attached deposit, input, logging, panic, and value return.
-- Raw storage, typed keys/slots/maps, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- Raw storage, typed keys/slots/maps, U128 limb storage, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- NEP-297-style event logging helpers.
+- Reusable U128 equality-preservation lemmas for proof-carrying financial state machines.
 - `Contract.Method` wrappers for init/view/update methods, guards, state helpers, and return helpers.
 - `Promise` creation, batch calls/transfers, callbacks, joins, results, and promise return.
 
@@ -158,6 +160,38 @@ instance : ToString U128 := ⟨encode⟩
 end U128
 
 end Amount
+
+-- ============================================================================
+-- Verification helpers
+-- ============================================================================
+
+namespace Verify
+
+/-- Canonical 1:1 solvency predicate for vault-style examples. -/
+def solvent (reserves shares : Amount.U128) : Prop :=
+  reserves = shares
+
+/-- Equal U128 balances stay equal when the same checked amount is added to both. -/
+theorem checkedAdd_preserves_eq {a b delta nextA nextB : Amount.U128}
+    (h : a = b)
+    (ha : a.checkedAdd delta = some nextA)
+    (hb : b.checkedAdd delta = some nextB) : nextA = nextB := by
+  cases h
+  rw [ha] at hb
+  cases hb
+  rfl
+
+/-- Equal U128 balances stay equal when the same checked amount is subtracted from both. -/
+theorem checkedSub_preserves_eq {a b delta nextA nextB : Amount.U128}
+    (h : a = b)
+    (ha : a.checkedSub delta = some nextA)
+    (hb : b.checkedSub delta = some nextB) : nextA = nextB := by
+  cases h
+  rw [ha] at hb
+  cases hb
+  rfl
+
+end Verify
 
 -- ============================================================================
 -- Types (adapted from near-sdk-zig types/token.zig, types/gas.zig)
@@ -368,6 +402,50 @@ instance : Codec Gas where
 /-- Encode and write a typed value to storage. -/
 @[inline] def writeAs [Codec α] (key : String) (value : α) : IO Bool :=
   rawWrite key (Codec.encode value)
+
+/-- Read a UInt64 from storage, defaulting on missing or malformed values. -/
+@[inline] def readU64 (key : String) (default : UInt64 := 0) : IO UInt64 := do
+  match (← readAs? (α := UInt64) key) with
+  | some value => pure value
+  | none => pure default
+
+/-- Storage key for the high limb of a U128 amount. -/
+@[inline] def u128HiKey (key : String) : String := key ++ ":hi"
+
+/-- Storage key for the low limb of a U128 amount. -/
+@[inline] def u128LoKey (key : String) : String := key ++ ":lo"
+
+/-- Read a U128 amount stored as two UInt64 limbs. -/
+@[inline] def readU128 (key : String) (default : Amount.U128 := Amount.U128.zero) : IO Amount.U128 := do
+  let hi ← readU64 (u128HiKey key) default.hi
+  let lo ← readU64 (u128LoKey key) default.lo
+  pure ⟨hi, lo⟩
+
+/-- Write a U128 amount as two UInt64 limbs. -/
+@[inline] def writeU128 (key : String) (value : Amount.U128) : IO Unit := do
+  let _ ← writeAs (u128HiKey key) value.hi
+  let _ ← writeAs (u128LoKey key) value.lo
+
+/-- Typed storage key specialized for U128 amounts. -/
+structure U128Key where
+  name : String
+  deriving Repr
+
+namespace U128Key
+
+@[inline] def make (name : String) : U128Key := ⟨name⟩
+
+@[inline] def read (key : U128Key) (default : Amount.U128 := Amount.U128.zero) : IO Amount.U128 :=
+  Storage.readU128 key.name default
+
+@[inline] def write (key : U128Key) (value : Amount.U128) : IO Unit :=
+  Storage.writeU128 key.name value
+
+@[inline] def remove (key : U128Key) : IO Unit := do
+  let _ ← Storage.remove (u128HiKey key.name)
+  let _ ← Storage.remove (u128LoKey key.name)
+
+end U128Key
 
 /-- Alias for `hasKey` that reads naturally in typed storage code. -/
 @[inline] def contains (key : String) : IO Bool := hasKey key
@@ -728,11 +806,19 @@ opaque panicStr (msg : String) : IO Unit
   let hi ← accountBalanceHi
   pure (NearToken.fromU128 ⟨hi, lo⟩)
 
+/-- Get the current account balance as a raw U128 yoctoNEAR amount. -/
+@[inline] def accountBalanceAmount : IO Amount.U128 := do
+  pure (← accountBalance).yoctoNear
+
 /-- Get the deposit attached to this call. -/
 @[inline] def attachedDeposit : IO NearToken := do
   let lo ← attachedDepositLo
   let hi ← attachedDepositHi
   pure (NearToken.fromU128 ⟨hi, lo⟩)
+
+/-- Get the attached deposit as a raw U128 yoctoNEAR amount. -/
+@[inline] def attachedDepositAmount : IO Amount.U128 := do
+  pure (← attachedDeposit).yoctoNear
 
 /-- Alias for raw contract input as a UTF-8 string. -/
 @[inline] def inputString : IO String := input
@@ -787,6 +873,32 @@ structure Context where
   log (toString value)
 
 end Env
+
+-- ============================================================================
+-- Events
+-- ============================================================================
+
+namespace Event
+
+/-- NEP-297 event log prefix. -/
+def eventPrefix : String := "EVENT_JSON:"
+
+/-- Emit a pre-built NEP-297 JSON event object. -/
+@[inline] def emitJson (json : String) : IO Unit :=
+  Env.log (eventPrefix ++ json)
+
+/--
+Emit a NEP-297-style event. The `dataJson` argument must already be valid JSON,
+usually an array of event payload objects.
+-/
+@[inline] def emit (standard version event dataJson : String) : IO Unit :=
+  emitJson
+    ("{\"standard\":\"" ++ standard ++
+      "\",\"version\":\"" ++ version ++
+      "\",\"event\":\"" ++ event ++
+      "\",\"data\":" ++ dataJson ++ "}")
+
+end Event
 
 -- ============================================================================
 -- Contract framework (adapted from near-sdk-zig contract.zig)

@@ -5,6 +5,10 @@ set -euo pipefail
 #
 # Usage: zigc-near <input.zig> [output.wasm]
 #
+# Contract methods can be supplied with NEAR_CONTRACT_METHODS
+# (nearName=leanSymbol,...) or NEAR_METHODS_FILE. If neither is set, a
+# sidecar `<input>.near-methods` file is used when present.
+#
 # Produces a wasm32-wasi WASM module that can be executed by wasmtime and then
 # normalized for NEAR deployment (after import stripping). Links against the Lean Zig
 # runtime (libleanrt_zig) built with the NEAR host backend, plus the
@@ -45,6 +49,27 @@ fi
 
 NEAR_EXPORTS_ZIG="${NEAR_EXPORTS_ZIG:-$OUTPUT_DIR/near_exports.zig}"
 METHODS="${NEAR_CONTRACT_METHODS:-}"
+
+read_methods_file() {
+  awk 'NF && $1 !~ /^#/ {print}' "$1" | paste -sd, -
+}
+
+METHODS_FILE="${NEAR_METHODS_FILE:-}"
+if [[ -z "$METHODS" ]]; then
+  if [[ -n "$METHODS_FILE" ]]; then
+    if [[ ! -f "$METHODS_FILE" ]]; then
+      echo "zigc-near: NEAR_METHODS_FILE not found: $METHODS_FILE" >&2
+      exit 1
+    fi
+    METHODS="$(read_methods_file "$METHODS_FILE")"
+  else
+    INPUT_METHODS_FILE="${INPUT%.zig}.near-methods"
+    if [[ -f "$INPUT_METHODS_FILE" ]]; then
+      METHODS="$(read_methods_file "$INPUT_METHODS_FILE")"
+    fi
+  fi
+fi
+
 EXPORT_FLAGS=(--export=main --export=_lean_main)
 cat > "$NEAR_EXPORTS_ZIG" <<'ZIG'
 const lean_rt = @import("lean_rt");

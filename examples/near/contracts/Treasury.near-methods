@@ -1,0 +1,4 @@
+init=l_Treasury_init
+balance=l_Treasury_balance
+owner=l_Treasury_owner
+deposit=l_Treasury_deposit

@@ -9,24 +9,26 @@ It demonstrates the current Layer 3 SDK surface in `Lean.Near`:
 - `Context.lean` reads `Env.context` and shows `requireInitialized` / `requirePrivate` guards.
 - `CrossContract.lean` builds a promise, attaches a callback, and returns it.
 - `VerifiedVault.lean` shows the formal-verification pattern for DeFi-style contracts: define a pure financial state machine, prove invariants about it, then call the verified transitions from NEAR entrypoints.
+- `Treasury.lean` shows a payable contract that stores U128 totals and emits NEP-297-style events.
 
 ## Current NEAR support
 
 The current support is enough to write and deploy small Lean NEAR contracts through `lean -z` and `tools/zigc-near`:
 
 - Contract methods: `Contract.initializer`, `Contract.view`, `Contract.update`, conventional `STATE` initialization, return helpers, panic/require guards, private-method guard, payable/no-deposit helpers, one-yocto and minimum-deposit checks.
-- Runtime context: current/predecessor/signer account IDs, block height, timestamp, epoch height, storage usage, prepaid/used gas, input string, logging, panic, and value return.
+- Runtime context: current/predecessor/signer account IDs, block height, timestamp, epoch height, storage usage, prepaid/used gas, input string, typed account balance, typed attached deposit, logging, panic, and value return.
 - Amounts and gas: `Near.Amount.U128` for gas-bounded yoctoNEAR arithmetic, `NearToken` backed by `U128`, typed `Gas`, and checked add/sub/compare helpers for financial logic.
-- Storage: raw string storage, typed `Storage.Key`, `Storage.Slot`, `Storage.TypedMap`, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- Storage: raw string storage, typed `Storage.Key`, `Storage.Slot`, `Storage.TypedMap`, U128 limb storage through `Storage.U128Key`, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- Events: `Event.emit` and `Event.emitJson` for NEP-297-style `EVENT_JSON:` logs.
 - Promises: function-call promises, batch creation, transfer actions, callbacks with `thenCall` / `thenBatch`, `join`, promise result inspection, and `returnPromise`.
 - Testing/deploy: local compile checks, official `near-workspaces` + `near-sandbox` smoke tests, and testnet deployment for the counter runner with local `~/.near-credentials` keys.
 
 There are still important limits:
 
-- Method exports are declared in `*.near-methods` files; automatic method dispatch/macros are not implemented yet.
+- Method exports are declared in `*.near-methods` files or passed through `NEAR_METHODS_FILE` / `NEAR_CONTRACT_METHODS`; automatic method dispatch/macros are not implemented yet.
 - Storage codecs are string-backed, not Borsh-compatible. Complex data layouts should define an explicit storage boundary.
-- `Near.Amount.U128` has checked runtime arithmetic, but no general decimal parser/codec in the SDK hot path yet. `VerifiedVault.lean` stores U128 limbs explicitly and keeps user input parsing small and local.
-- Advanced NEAR host APIs such as cryptographic hashes, random seed, validator staking queries, and event-standard helpers are not exposed yet.
+- `Near.Amount.U128` has checked runtime arithmetic and limb storage helpers, but no general decimal parser/codec in the SDK hot path yet. Contracts should keep user input parsing explicit at the boundary.
+- Advanced NEAR host APIs such as cryptographic hashes, random seed, and validator staking queries are not exposed yet.
 - The testnet helper currently targets the counter scenario. Use sandbox for deterministic CI and add a dedicated script before treating a new scenario as testnet-supported.
 
 ## Formal verification pattern
@@ -42,7 +44,7 @@ namespace Spec
 end Spec
 
 namespace StorageState
-  -- Boundary layer: map verified model state to NEAR storage.
+  -- Boundary layer: map verified model state to NEAR storage helpers.
 end StorageState
 
 def deposit : Contract.Method .update := Contract.update "deposit" do
@@ -63,7 +65,13 @@ These proofs are checked before EmitZig produces WASM. They do not replace runti
 
 The executable vault path intentionally uses bounded `U128` arithmetic instead of unbounded `Nat` arithmetic. This keeps DeFi-style accounting closer to chain reality: overflow and underflow become explicit `Option` branches, while proofs can still reason over the pure transition functions.
 
-Run the verified vault against the official sandbox stack:
+Run the official sandbox smoke checks:
+
+```bash
+examples/near/scripts/sandbox-all.sh
+```
+
+Or run only the verified vault:
 
 ```bash
 examples/near/scripts/sandbox-verified-vault.sh
@@ -118,6 +126,7 @@ examples/near/scripts/testnet-counter.sh
 The runner reads credentials from `~/.near-credentials` by default. Set `NEAR_CREDENTIALS_DIR` if your key store lives somewhere else.
 
 For faucet-funded accounts, the runner keeps balances small by default: 4 NEAR for the temporary workspaces root account and 2 NEAR for the deployed contract account. Override these with `NEAR_WORKSPACES_ROOT_INITIAL_BALANCE_NEAR` and `NEAR_WORKSPACES_CONTRACT_INITIAL_BALANCE_NEAR` if needed.
+Do not set the deployed contract balance too low: current Lean-generated WASM still needs roughly 1.2 NEAR of testnet storage balance to deploy.
 
 Keep the master account name short. `near-workspaces` creates nested dev accounts on testnet, and long master account names can exceed NEAR's account-id length limit. The runner defaults the workspaces root prefix to `r`; set `NEAR_WORKSPACES_ROOT_ACCOUNT_ID` to reuse or override that root subaccount.
 
@@ -132,3 +141,4 @@ increment=l_Counter_increment
 ```
 
 `tools/zigc-near` turns each mapping into a WASM export that runs the corresponding `Near.Contract.Method`.
+The compiler wrapper also accepts `NEAR_METHODS_FILE=/path/to/file.near-methods` or `NEAR_CONTRACT_METHODS='name=symbol,...'` for generated or external build systems.

@@ -14,6 +14,13 @@ def flags : Storage.TypedMap Bool := Storage.TypedMap.make "flags"
 def scores : Store.LookupMap UInt64 := Store.LookupMap.new "scores"
 def history : Store.Vector UInt64 := Store.Vector.new "history"
 def lazyOwner : Store.LazyOption AccountId := Store.LazyOption.new "lazy-owner"
+def totalDepositKey : Storage.U128Key := Storage.U128Key.make "total-deposit"
+
+theorem checkedAdd_equal_amounts {a b delta nextA nextB : Amount.U128}
+    (h : a = b)
+    (ha : a.checkedAdd delta = some nextA)
+    (hb : b.checkedAdd delta = some nextB) : nextA = nextB :=
+  Verify.checkedAdd_preserves_eq h ha hb
 
 def initBody : Contract.InitM Unit := do
   let ok ← Contract.requireNotInitialized
@@ -31,12 +38,17 @@ def viewBody : Contract.ViewM Unit := do
 
 def incrementBody : Contract.UpdateM Unit := do
   let ctx ← Env.context
+  let attachedDeposit ← Env.attachedDepositAmount
   let n ← countKey.modify 0 (· + 1)
   let _ ← countSlot.write n
+  totalDepositKey.write attachedDeposit
+  let _storedDeposit ← totalDepositKey.read
   let _ ← owners.set "current" ctx.currentAccount
   let _ ← flags.set "initialized" (← Contract.isInitialized)
   let _ ← scores.insert "current" n
   let _ ← history.push n
+  Event.emit "lean-near-sdk" "1.0.0" "increment"
+    ("[{\"count\":\"" ++ toString n ++ "\"}]")
   Contract.returnJson ("{\"count\":\"" ++ toString n ++ "\"}")
 
 def initMethod : Contract.Method .init := Contract.initializer "init" initBody
