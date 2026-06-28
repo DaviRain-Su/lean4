@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const bigint = std.math.big.int;
+const Limb = std.math.big.Limb;
 
 /// Allocator used for all `Managed` limb storage. The GMP backend uses its own
 /// internal allocator; to keep the two interchangeable we hardcode libc here
@@ -89,15 +90,17 @@ pub const Mpz = extern struct {
     }
 
     pub fn cmp(self: *const Mpz, other: *const Mpz) i8 {
-        return @intFromEnum(self.managedConst().order(other.managedConst().*));
+        return switch (self.managedConst().order(other.managedConst().*)) {
+            .lt => -1,
+            .eq => 0,
+            .gt => 1,
+        };
     }
 
     pub fn sgn(self: *const Mpz) i8 {
         const m = self.managedConst();
-        if (m.isPositive()) {
-            return if (m.eqlZero()) 0 else 1;
-        }
-        return -1;
+        if (m.eqlZero()) return 0;
+        return if (m.isPositive()) 1 else -1;
     }
 
     pub fn add(self: *Mpz, a: *const Mpz, b: *const Mpz) error{OutOfMemory}!void {
@@ -196,10 +199,17 @@ pub const Mpz = extern struct {
     }
 
     pub fn pow(self: *Mpz, a: *const Mpz, exp: u32) error{OutOfMemory}!void {
-        // Managed.pow takes Const; go through Mutable.
-        var mut = self.managed().toMutable();
-        bigint.Mutable.pow(&mut, a.managedConst().toConst(), exp, &.{});
-        self.managed().* = mut.toManaged(alloc);
+        const a_const = a.managedConst().toConst();
+        // pow requires r and a scratch buffer, both sized to the result.
+        const needed = bigint.calcPowLimbsBufferLen(a_const.bitCountAbs(), exp);
+        const rbuf = try alloc.alloc(Limb, needed);
+        defer alloc.free(rbuf);
+        const scratch = try alloc.alloc(Limb, needed);
+        defer alloc.free(scratch);
+        var mut = bigint.Mutable.init(rbuf, 0);
+        bigint.Mutable.pow(&mut, a_const, exp, scratch);
+        // copy() allocates fresh limbs owned by self, so rbuf can be freed.
+        try self.managed().copy(mut.toConst());
     }
 
     pub fn gcd(self: *Mpz, a: *const Mpz, b: *const Mpz) error{OutOfMemory}!void {

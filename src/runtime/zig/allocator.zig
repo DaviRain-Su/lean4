@@ -27,8 +27,9 @@ pub const Allocator = struct {
 
     /// Allocate `size` bytes with `alignment`, returning the byte slice.
     /// Panics on out-of-memory to match the existing runtime contract.
-    pub fn allocBytes(self: Allocator, size: usize, alignment: Alignment) [*]u8 {
-        return self.alloc(self.ctx, size, alignment) orelse @panic("out of memory");
+    pub fn allocBytes(_: Allocator, size: usize, alignment: Alignment) [*]u8 {
+        ensureResolved();
+        return allocator.alloc(allocator.ctx, size, alignment) orelse @panic("out of memory");
     }
 };
 
@@ -102,13 +103,20 @@ const ExternalCppBackend = struct {
     }
 };
 
-/// The process-global allocator, unresolved until `resolveBackend()` runs.
-/// Pointer so the var initializer needs no comptime function pointers.
+/// The process-global allocator, unresolved until first use (lazy resolve)
+/// or `resolveBackend()` runs. Lazy init lets any test file trigger allocation
+/// without each one needing a `test {}` setup block.
 pub var allocator: Allocator = .{
     .ctx = undefined,
     .alloc = &noopAlloc,
     .free = &noopFree,
 };
+
+var resolved: bool = false;
+
+fn ensureResolved() void {
+    if (!resolved) resolveBackend();
+}
 
 fn noopAlloc(_: *anyopaque, _: usize, _: Allocator.Alignment) ?[*]u8 {
     @panic("runtime allocator used before initializeRuntimeAllocator");
@@ -118,8 +126,9 @@ fn noopFree(_: *anyopaque, _: [*]u8, _: usize, _: Allocator.Alignment) void {
 }
 
 /// Resolve `allocator` from the build-time backend selector. Called once at
-/// runtime startup; reads the comptime source-file constant (not the
-/// addOptions-injected module, which Zig 0.16 cannot resolve at comptime).
+/// runtime startup, or lazily on first allocation. Reads the comptime
+/// source-file constant (not the addOptions-injected module, which Zig 0.16
+/// cannot resolve at comptime).
 pub fn resolveBackend() void {
     allocator = switch (runtime_options_src.allocator_backend) {
         0 => LibcBackend.instance,
@@ -127,4 +136,5 @@ pub fn resolveBackend() void {
         2 => ExternalCppBackend.instance,
         else => LibcBackend.instance,
     };
+    resolved = true;
 }
