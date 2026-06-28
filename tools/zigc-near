@@ -41,6 +41,7 @@ exec zig build-exe \
   -fno-entry \
   -O "$OPTIMIZE" \
   -mcpu "$NEAR_CPU" \
+  --export=main \
   --dep lean_rt \
   -Mroot="$INPUT" \
   -Mlean_rt="$LEAN_RT_ZIG" \

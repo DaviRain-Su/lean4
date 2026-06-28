@@ -320,6 +320,8 @@ add_test_dir(zig_native_verify)
 
 add_test_pile(emitzig *.lean)
 
+add_test_dir(emitzig_near)
+
 if(LEAN_ZIG_RUNTIME)
   find_program(ZIG zig REQUIRED)
   if(GMP_LIBRARIES)

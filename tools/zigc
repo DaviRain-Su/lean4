@@ -2,12 +2,26 @@
 set -euo pipefail
 
 # Wrapper for compiling Lean-generated Zig code into an executable.
-# Usage: zigc <input.zig> [output-name]
+# Usage: zigc [--profile=native|near] <input.zig> [output-name]
 #
-# The script uses BUILD_DIR / LEANC to locate the stage build outputs.
+# Profiles:
+#   native (default): host executable linking the C++ Lean runtime + GMP + libuv.
+#   near:             NEAR VM-compatible MVP WASM module (wasm32-freestanding).
+#
+# The native profile uses BUILD_DIR / LEANC to locate the stage build outputs.
 # It links against the C++ Lean runtime and standard library.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+PROFILE=native
+if [[ "${1:-}" == "--profile=near" ]]; then
+  PROFILE=near
+  shift
+fi
+
+if [[ "$PROFILE" == "near" ]]; then
+  exec "$ROOT/tools/zigc-near" "$@"
+fi
 BUILD_DIR="${BUILD_DIR:-$ROOT/build/release/stage1}"
 LEANC="${LEANC:-$BUILD_DIR/bin/leanc}"
 if [[ ! -x "$LEANC" ]]; then
