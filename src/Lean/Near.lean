@@ -35,7 +35,7 @@ EmitZig (.zig)                ← Compiler-generated
 wasm32-wasi WASM (.wasm)      ← Deployed to NEAR
 ```
 
-## Quick Example: Counter Contract
+## Quick Example: Storage-backed Counter Contract
 
 ```lean
 import Lean.Near
@@ -43,10 +43,11 @@ import Lean.Near
 open Near
 
 def main : IO UInt32 := do
-  let counter := Counter.make "count"
-  let n ← counter.increment
-  Env.log s!"incremented to {n}"
-  Contract.returnValue (toString n)
+  let current := (← Storage.read? "count").getD "0"
+  let next := current.toNat?.getD 0 + 1
+  let _ ← Storage.write "count" (toString next)
+  Env.log s!"incremented to {next}"
+  Contract.returnValue (toString next)
   pure 0
 ```
 -/
@@ -153,14 +154,6 @@ def read? (key : String) : IO (Option String) := rawRead key
 /-- Write a UInt64 to storage. -/
 def writeU64 (key : String) (value : UInt64) : IO Bool := rawWrite key (toString value)
 
-/-- Increment a numeric counter in storage, return new value. -/
-def increment (key : String) : IO UInt64 := do
-  let current := (← rawRead key).getD "0"
-  let n := current.toNat?.getD 0
-  let next := n + 1
-  let _ ← rawWrite key (toString next)
-  pure next.toUInt64
-
 end Storage
 
 -- ============================================================================
@@ -232,31 +225,6 @@ end Contract
 -- ============================================================================
 -- Persistent collections (adapted from near-sdk-zig collections/)
 -- ============================================================================
-
-/-- A persistent counter backed by NEAR storage. -/
-structure Counter where
-  key : String
-
-namespace Counter
-
-/-- Create a new counter at a given storage key. -/
-def make (key : String) : Counter := ⟨key⟩
-
-/-- Get the current count. -/
-def get (c : Counter) : IO UInt64 := do
-  let val := (← Storage.rawRead c.key).getD "0"
-  pure (val.toNat?.getD 0).toUInt64
-
-/-- Increment and return the new value. -/
-def increment (c : Counter) : IO UInt64 := Storage.increment c.key
-
-/-- Reset to 0. -/
-def reset (c : Counter) : IO Bool := Storage.write c.key "0"
-
-/-- Set to a specific value. -/
-def set (c : Counter) (n : UInt64) : IO Bool := Storage.write c.key (toString n)
-
-end Counter
 
 /-- A simple string-to-string persistent map using storage prefixes. -/
 structure StringMap where
