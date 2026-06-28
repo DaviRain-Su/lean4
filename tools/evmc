@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Compile a Lean EVM contract to EVM bytecode.
+#
+# Usage: evmc <contract.lean> [output.bin]
+#
+# Expects a sidecar <contract>.evm-methods file:
+#   get()=l_Counter_get[view]
+#   set(uint256)=l_Counter_set[update]
+#
+# [view] = returns U256; [update] = returns void.
+#
+# Pipeline: lean (EmitYulContract) → Yul → solc --strict-assembly → bytecode
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LEAN="${LEAN:-$ROOT/build/release/stage1/bin/lean}"
+LEAN_LIB="${LEAN_LIB:-$ROOT/build/release/stage1/lib/lean}"
+SOLC="${SOLC:-solc}"
+CAST="${CAST:-cast}"
+
+INPUT="$1"
+OUTPUT="${2:-$(basename "$INPUT" .lean).bin}"
+BASENAME="$(basename "$INPUT" .lean)"
+DIR="$(dirname "$INPUT")"
+METHODS_FILE="${EVM_METHODS_FILE:-$DIR/$BASENAME.evm-methods}"
+
+for tool in "$LEAN" "$SOLC"; do
+  command -v "$tool" > /dev/null 2>&1 || { echo "evmc: tool not found: $tool" >&2; exit 1; }
+done
+if ! command -v "$CAST" > /dev/null 2>&1; then
+  echo "evmc: cast (foundry) required to compute selectors" >&2; exit 1
+fi
+
+if [[ ! -f "$METHODS_FILE" ]]; then
+  echo "evmc: methods file not found: $METHODS_FILE" >&2
+  exit 1
+fi
+
+# Generate the Lean harness with inlined MethodSpec array.
+HARNESS="$DIR/.${BASENAME}_evmc_harness.lean"
+{
+  echo 'import Lean.Compiler.LCNF.EmitYul'
+  echo 'import Lean.Elab.Frontend'
+  echo 'open Lean Compiler LCNF'
+  echo ''
+  echo 'unsafe def main : IO UInt32 := do'
+  echo '  Lean.enableInitializersExecution'
+  echo "  let input ← IO.FS.readFile \"$INPUT\""
+  echo "  let some env ← Lean.Elab.runFrontend input {} \"$INPUT\" \`contract"
+  echo '    | IO.eprintln "elaboration failed"; return 1'
+  echo '  let methods : Array EmitYul.MethodSpec := #['
+} > "$HARNESS"
+
+while IFS= read -r LINE || [[ -n "${LINE:-}" ]]; do
+  [[ -z "${LINE:-}" || "${LINE:-}" == \#* ]] && continue
+  SIG="${LINE%%=*}"
+  REST="${LINE#*=}"
+  if [[ "$REST" == *"]"* ]]; then
+    RET="${REST##*[}"
+    RET="${RET%%]}"
+    SYM="${REST%%[*}"
+  else
+    RET="update"
+    SYM="$REST"
+  fi
+  # arg count from signature
+  if [[ "$SIG" == *"("*")"* ]]; then
+    INNER="${SIG#*(}"
+    INNER="${INNER%)*}"
+    if [[ -z "$INNER" ]]; then AC=0
+    else AC=$(printf '%s' "$INNER" | tr -cd ',' | wc -c); AC=$((AC + 1)); fi
+  else AC=0; fi
+  SEL=$("$CAST" sig "$SIG" | sed 's/^0x//')
+  FN="f_$(printf '%s' "$SYM" | sed 's/^l_//')"
+  RV="true"; [[ "$RET" == "update" ]] && RV="false"
+  echo "    { selector := \"$SEL\", fnName := \"$FN\", argCount := $AC, returnsValue := $RV }," >> "$HARNESS"
+done < "$METHODS_FILE"
+
+{
+  echo '  ]'
+  echo '  let data ← EmitYul.emitYulContract `contract methods'
+  echo "    |>.toIO' { fileName := \"<emitYul>\", fileMap := default } { env }"
+  echo '  IO.println data'
+  echo '  pure 0'
+} >> "$HARNESS"
+
+# Run the harness.
+YUL_FILE="$DIR/.${BASENAME}.yul"
+LEAN_PATH="$LEAN_LIB" "$LEAN" --run "$HARNESS" > "$YUL_FILE" 2>/tmp/evmc_lean_err.log || {
+  echo "evmc: Lean failed:" >&2; cat /tmp/evmc_lean_err.log >&2; exit 1
+}
+
+# solc → bytecode.
+"$SOLC" --strict-assembly "$YUL_FILE" --bin 2>/tmp/evmc_solc_err.log \
+  | grep -E '^[0-9a-f]+$' > "$OUTPUT" || {
+  echo "evmc: solc failed:" >&2; cat /tmp/evmc_solc_err.log >&2; exit 1
+}
+
+rm -f "$HARNESS"
+echo "evmc: $INPUT → $OUTPUT ($(wc -c < "$OUTPUT" | tr -d ' ') hex chars)"

@@ -505,6 +505,45 @@ def runtimeHelpers : Array YStmt :=
   ]
 
 -- ---------------------------------------------------------------------------
+-- Contract entry point: selector dispatch
+-- ---------------------------------------------------------------------------
+
+/-- A contract method spec for EVM selector dispatch.
+    `selector` is the 4-byte function selector as a hex string (e.g. "6d4ce63c").
+    `fnName` is the Yul function name (e.g. "f_get").
+    `argCount` is the number of U256 calldata args.
+    `returnsValue` is true if the function returns a Nat (returned via mstore+return). -/
+structure MethodSpec where
+  selector : String
+  fnName : String
+  argCount : Nat
+  returnsValue : Bool
+
+/-- Read calldata arg `i` (0-indexed, after the 4-byte selector), boxed. -/
+def calldataArgExpr (i : Nat) : YExpr :=
+  leanBoxExpr (yBuiltin "calldataload" #[yNum (4 + i * 32)])
+
+/-- Generate the dispatch switch statement for a list of methods. -/
+def dispatchBlock (methods : Array MethodSpec) : YStmt :=
+  let selExpr : YExpr := yBuiltin "shr" #[yNum 224, yBuiltin "calldataload" #[yNum 0]]
+  let cases := methods.map fun m =>
+    let argExprs := (List.range m.argCount).toArray.map calldataArgExpr
+    let callExpr : YExpr := yCall m.fnName argExprs
+    let bodyStmts := if m.returnsValue then
+      #[ sVarDecl #[tn "_r"] (some callExpr)
+       , sExprStmt (yBuiltin "mstore" #[yNum 0, leanUnboxExpr (yStr "_r")])
+       , sExprStmt (yBuiltin "return" #[yNum 0, yNum 32])
+       ]
+    else
+      #[ sVarDecl #[tn "_r"] (some callExpr)
+       , sExprStmt (yBuiltin "return" #[yNum 0, yNum 0])
+       ]
+    { value := some (Lean.Compiler.Yul.Literal.hex ("0x" ++ m.selector))
+      body := { statements := bodyStmts } : YCase }
+  let defaultCase : YCase := { value := none, body := { statements := #[sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])] } }
+  sSwitch selExpr (cases.push defaultCase)
+
+-- ---------------------------------------------------------------------------
 -- Entry points
 -- ---------------------------------------------------------------------------
 
@@ -516,6 +555,20 @@ def emitYulForDecls (modName : Lean.Name) (decls : Array Lean.Name) : CoreM Stri
     let (opt, _) ← (emitDecl decl).run { localDecls, otherModuleDecls, modName } |>.run { stmts := #[], fresh := 0 }
     pure opt
   let codeStmts := runtimeHelpers ++ fns.toArray
+  let obj : YObject := { name := "Contract", code := { statements := codeStmts } }
+  pure (Lean.Compiler.Yul.Printer.render obj)
+
+/-- Emit Yul with a contract entry point (selector dispatch). -/
+def emitYulContract (modName : Lean.Name) (methods : Array MethodSpec) : CoreM String := do
+  let (localDecls, otherModuleDecls) ← collectUsedDecls (← getLocalImpureDecls)
+  let indexMap := getImpureDeclIndices (← getEnv) (← getLocalImpureDecls)
+  let localDecls := localDecls.qsort fun l r => indexMap[l.name]! < indexMap[r.name]!
+  let fns ← localDecls.toList.filterMapM fun decl => do
+    let (opt, _) ← (emitDecl decl).run { localDecls, otherModuleDecls, modName } |>.run { stmts := #[], fresh := 0 }
+    pure opt
+  -- Dispatch code first (functions are hoisted in Yul), then free-mem init, then functions.
+  let initStmt := sExprStmt (yBuiltin "mstore" #[yNum freeMemPtrSlot, yNum 0x80])
+  let codeStmts := #[initStmt, dispatchBlock methods] ++ runtimeHelpers ++ fns.toArray
   let obj : YObject := { name := "Contract", code := { statements := codeStmts } }
   pure (Lean.Compiler.Yul.Printer.render obj)
 
