@@ -49,3 +49,6 @@ public import Lean.Compiler.LCNF.SplitSCC
 public import Lean.Compiler.LCNF.EmitZig
 public import Lean.Compiler.LCNF.EmitZig.InlineHelpers
 public import Lean.Compiler.LCNF.EmitZig.RuntimeExterns
+-- Orphan import to keep the Yul AST/printer from being dropped.
+public import Lean.Compiler.Yul.AST
+public import Lean.Compiler.Yul.Printer
