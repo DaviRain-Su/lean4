@@ -1,0 +1,953 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 Lean FRO, LLC. All rights reserved.
+# Released under Apache 2.0 license as described in the file LICENSE.
+
+"""
+Compile a Lean driver against the in-tree Zig runtime.
+
+By default the script recursively emits and compiles the transitive closure of
+stdlib modules imported by the driver and any modules supplied via --module.
+Undefined symbols are fatal by default so the executable is a real parity gate.
+Pass --allow-stubs only for exploratory debugging when you want panic stubs for
+unimplemented runtime functions.
+
+Usage:
+  zigc-stdlib <driver.lean> <output-executable> [--module M1] [--module M2] ...
+"""
+
+import argparse
+import concurrent.futures
+import functools
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+TOOL = pathlib.Path(__file__).resolve()
+ROOT = TOOL.parent.parent
+LEAN_RT_ZIG = ROOT / "src" / "runtime" / "zig" / "lean_rt.zig"
+
+# Bumped whenever the dependency-discovery heuristic changes so that stale
+# cached dependency graphs are invalidated.
+DEPENDENCY_DISCOVERY_VERSION = 2
+
+
+
+
+
+def path_to_module(path: pathlib.Path, src_root: pathlib.Path) -> str:
+    """Convert a source path under src_root to a Lean module name."""
+    rel = path.resolve().relative_to(src_root.resolve())
+    parts = rel.with_suffix("").parts
+    return ".".join(parts)
+
+
+def module_to_path(module: str, src_root: pathlib.Path) -> pathlib.Path:
+    parts = module.split(".")
+    return src_root / ("/".join(parts) + ".lean")
+
+
+def module_to_zig_file(module: str) -> str:
+    return module + ".zig"
+
+
+def run(cmd: list[str], *, cwd: pathlib.Path | None = None, check: bool = True,
+        capture: bool = False) -> subprocess.CompletedProcess:
+    if capture:
+        return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+    return subprocess.run(cmd, cwd=cwd, check=check)
+
+
+def acquire_cache_lock(cache_dir: pathlib.Path):
+    """Serialize writers that share a zigc-stdlib cache directory."""
+    if fcntl is None:
+        return None
+    lock_path = cache_dir / ".lock"
+    lock = lock_path.open("a+")
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"waiting for zigc-stdlib cache lock: {lock_path}", file=sys.stderr)
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    except Exception:
+        lock.close()
+        raise
+    return lock
+
+
+def release_cache_lock(lock) -> None:
+    if lock is None:
+        return
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock.close()
+
+
+def emit_zig(lean: pathlib.Path, src: pathlib.Path, cwd: pathlib.Path, out: pathlib.Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run([str(lean), "-z", str(out), str(src)], cwd=cwd)
+
+
+def compile_zig(zig: pathlib.Path, zig_file: pathlib.Path, out_obj: pathlib.Path) -> None:
+    result = subprocess.run(
+        [
+            str(zig), "build-obj",
+            "--dep", "lean_rt",
+            f"-Mroot={zig_file}",
+            f"-Mlean_rt={LEAN_RT_ZIG}",
+            "-O", "Debug",
+            "-fstrip", f"-femit-bin={out_obj}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode, result.args, result.stdout, result.stderr)
+
+
+def normalize_symbol(sym: str) -> str:
+    return sym[1:] if sym.startswith("_") else sym
+
+
+def extract_defined_symbols(path: pathlib.Path) -> set[str]:
+    """Return global defined symbols from an object file or static archive."""
+    # Use `nm -g` (not `-gU`, which is macOS-only) and filter by symbol type.
+    # Undefined symbols are marked 'U' and ignored.
+    result = subprocess.run(
+        ["nm", "-g", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    symbols: set[str] = set()
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[-2] in {"T", "D", "B", "S"}:
+            symbols.add(normalize_symbol(parts[-1]))
+    return symbols
+
+
+def strip_symbols_from_obj(obj: pathlib.Path, symbols: set[str], work_dir: pathlib.Path) -> pathlib.Path | None:
+    """Return a copy of `obj` with global symbols removed, or None if stripping failed."""
+    if not symbols:
+        return obj
+    out = work_dir / f"{obj.stem}.stripped.o"
+    shutil.copy2(obj, out)
+    for sym in sorted(symbols):
+        sym_name = sym if sym.startswith("_") else f"_{sym}"
+        if sys.platform == "darwin":
+            cmd = ["strip", "-N", sym_name, str(out)]
+        else:
+            cmd = ["llvm-objcopy", f"--strip-symbol={sym}", str(out)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            return None
+    remaining = extract_defined_symbols(out)
+    if remaining & symbols:
+        return None
+    return out
+
+
+def filter_conflicting_objs(
+    objs: list[pathlib.Path],
+    zigrt_lib: pathlib.Path,
+    work_dir: pathlib.Path,
+) -> list[pathlib.Path]:
+    """On Darwin rely on link-order + duplicate suppression; elsewhere strip overlaps."""
+    if sys.platform == "darwin":
+        return objs
+    zigrt_syms = extract_defined_symbols(zigrt_lib)
+    if not zigrt_syms:
+        return objs
+    kept: list[pathlib.Path] = []
+    stripped = 0
+    dropped = 0
+    for obj in objs:
+        obj_syms = extract_defined_symbols(obj)
+        overlap = obj_syms & zigrt_syms
+        if not overlap:
+            kept.append(obj)
+            continue
+        if obj_syms <= zigrt_syms:
+            dropped += 1
+            sample = sorted(overlap)[:3]
+            print(f"skip {obj.name}: runtime already provides {', '.join(sample)}", file=sys.stderr)
+            continue
+        stripped_obj = strip_symbols_from_obj(obj, overlap, work_dir)
+        if stripped_obj is None:
+            dropped += 1
+            sample = sorted(overlap)[:3]
+            print(f"skip {obj.name}: could not strip {', '.join(sample)}", file=sys.stderr)
+            continue
+        stripped += 1
+        sample = sorted(overlap)[:3]
+        print(f"strip {obj.name}: removed {', '.join(sample)}", file=sys.stderr)
+        kept.append(stripped_obj)
+    if stripped:
+        print(f"stripped runtime symbols from {stripped} object file(s)", file=sys.stderr)
+    if dropped:
+        print(f"filtered {dropped} object file(s) with runtime symbol overlap", file=sys.stderr)
+    return kept
+
+
+def extract_duplicate_symbol_objs(stderr: str) -> list[str]:
+    objs: list[str] = []
+    for line in stderr.splitlines():
+        m = re.search(r"defined by (/[^\s]+\.o)", line)
+        if m and m.group(1) not in objs:
+            objs.append(m.group(1))
+    return objs
+
+
+def discover_lib_dirs() -> list[str]:
+    """Return library search paths for gmp and libuv.
+
+    Environment variables GMP_LIB_DIR / LIBUV_LIB_DIR take precedence;
+    otherwise fall back to pkg-config and platform-specific defaults.
+    """
+    dirs: list[str] = []
+
+    def add_dir(env_var: str, pkg_name: str | None) -> None:
+        env_value = os.environ.get(env_var)
+        if env_value:
+            dirs.append(env_value)
+            return
+        if pkg_name and shutil.which("pkg-config"):
+            try:
+                libdir = subprocess.run(
+                    ["pkg-config", "--variable=libdir", pkg_name],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+                if libdir:
+                    dirs.append(libdir)
+                    return
+            except Exception:
+                pass
+
+    add_dir("GMP_LIB_DIR", "gmp")
+    add_dir("LIBUV_LIB_DIR", "libuv")
+
+    if sys.platform == "darwin":
+        for prefix in ("/opt/homebrew/lib", "/usr/local/lib"):
+            if os.path.isdir(prefix):
+                dirs.append(prefix)
+
+    return dirs
+
+
+def link(
+    zig: pathlib.Path,
+    objs: list[pathlib.Path],
+    zigrt_lib: pathlib.Path,
+    output: str,
+    include_dir: pathlib.Path,
+) -> subprocess.CompletedProcess:
+    cmd = [
+        str(zig), "build-exe", "-O", "Debug",
+    ] + [str(o) for o in objs] + [
+        "-I", str(include_dir),
+        str(zigrt_lib),
+    ]
+    for lib_dir in discover_lib_dirs():
+        cmd.extend(["-L", lib_dir])
+    cmd.extend(["-lgmp", "-luv", "-lc++", "-lpthread"])
+    if sys.platform == "darwin":
+        cmd.extend(["-framework", "CoreFoundation"])
+    cmd.append(f"-femit-bin={output}")
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+def runtime_fingerprint(zig: pathlib.Path, runtime_dir: pathlib.Path) -> dict:
+    h = hashlib.sha256()
+    for path in sorted(runtime_dir.rglob("*")):
+        if not path.is_file() or path.suffix not in {".zig", ".c", ".h", ".zon"}:
+            continue
+        rel = path.relative_to(runtime_dir).as_posix()
+        if any(part in {".zig-cache", ".zig-global-cache", "zig-out"} for part in rel.split("/")):
+            continue
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(path.read_bytes())
+        h.update(b"\0")
+    zig_version = subprocess.run(
+        [str(zig), "version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    return {
+        "runtime_sha256": h.hexdigest(),
+        "zig": str(zig),
+        "zig_version": zig_version,
+        "export_lean_helpers": False,
+        "optimize": "Debug",
+    }
+
+
+def helperless_zigrt_meta_path(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt.meta"
+
+
+def helperless_zigrt_lib_path(cache_dir: pathlib.Path) -> pathlib.Path:
+    return cache_dir / "helperless-zigrt" / "lib" / "libleanrt_zig.a"
+
+
+def helperless_zigrt_cache_valid(cache_dir: pathlib.Path, expected_meta: dict) -> bool:
+    lib = helperless_zigrt_lib_path(cache_dir)
+    if not lib.exists() or lib.stat().st_size == 0:
+        return False
+    meta_path = helperless_zigrt_meta_path(cache_dir)
+    if not meta_path.exists():
+        return False
+    try:
+        return json.loads(meta_path.read_text()) == expected_meta
+    except Exception:
+        return False
+
+
+def save_helperless_zigrt_cache(cache_dir: pathlib.Path, lib: pathlib.Path, meta: dict) -> pathlib.Path:
+    cached_lib = helperless_zigrt_lib_path(cache_dir)
+    cached_lib.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(lib, cached_lib)
+    helperless_zigrt_meta_path(cache_dir).write_text(json.dumps(meta, indent=2))
+    return cached_lib
+
+
+def build_helperless_zigrt(
+    zig: pathlib.Path,
+    work_dir: pathlib.Path,
+    cache_dir: pathlib.Path,
+    build_dir: pathlib.Path,
+    *,
+    force: bool,
+) -> pathlib.Path:
+    runtime_dir = ROOT / "src" / "runtime" / "zig"
+    meta = runtime_fingerprint(zig, runtime_dir)
+    if not force and helperless_zigrt_cache_valid(cache_dir, meta):
+        print("[cache] helperless Zig runtime")
+        return helperless_zigrt_lib_path(cache_dir)
+
+    print("building helperless Zig runtime")
+    prefix = work_dir / "zigrt-nohelpers"
+    zig_cache_dir = work_dir / ".zig-runtime-cache"
+    global_cache_dir = work_dir / ".zig-runtime-global-cache"
+    cmd = [
+        str(zig),
+        "build",
+        "--prefix",
+        str(prefix),
+        "--cache-dir",
+        str(zig_cache_dir),
+        "--global-cache-dir",
+        str(global_cache_dir),
+        "-Dexport-lean-helpers=false",
+        f"-Dlean-include-dir={build_dir / 'include'}",
+    ]
+    result = subprocess.run(cmd, cwd=runtime_dir, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=result.stdout, stderr=result.stderr)
+    lib = prefix / "lib" / "libleanrt_zig.a"
+    if not lib.exists():
+        raise FileNotFoundError(lib)
+    return save_helperless_zigrt_cache(cache_dir, lib, meta)
+
+
+def extract_undefined_symbols(stderr: str) -> list[str]:
+    symbols = set()
+    for line in stderr.splitlines():
+        for pat in [r"Undefined symbol:\s*(_\w+|\w+)", r"undefined symbol:\s*(_\w+|\w+)"]:
+            m = re.search(pat, line, re.IGNORECASE)
+            if m:
+                sym = m.group(1)
+                if sym.startswith("_"):
+                    sym = sym[1:]
+                symbols.add(sym)
+    return sorted(symbols)
+
+
+def generate_stubs(symbols: list[str], out_zig: pathlib.Path) -> None:
+    lines = ['const std = @import("std");', '']
+    for sym in symbols:
+        if sym.startswith("runtime_initialize_"):
+            lines.append(f"export fn {sym}(_builtin: u8) callconv(.c) *anyopaque {{")
+            lines.append('    _ = _builtin;')
+            lines.append('    return @ptrFromInt(1);')
+            lines.append("}")
+        else:
+            lines.append(f"export fn {sym}() callconv(.c) *anyopaque {{")
+            lines.append(f'    std.log.warn("stub invoked: {sym}", .{{}});')
+            lines.append("    @panic(\"unimplemented stub\");")
+            lines.append("}")
+        lines.append("")
+    out_zig.write_text("\n".join(lines))
+
+
+def load_cache_meta(cache_dir: pathlib.Path, module: str) -> dict | None:
+    meta = cache_dir / f"{module}.meta"
+    if not meta.exists():
+        return None
+    try:
+        return json.loads(meta.read_text())
+    except Exception:
+        return None
+
+
+def save_cache_meta(cache_dir: pathlib.Path, module: str, meta: dict) -> None:
+    meta_path = cache_dir / f"{module}.meta"
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
+def expected_cache_meta(src: pathlib.Path, lean: pathlib.Path) -> dict:
+    return {
+        "src_mtime": src.stat().st_mtime,
+        "lean": lean_fingerprint(lean),
+    }
+
+
+def cache_valid(module: str, src: pathlib.Path, lean: pathlib.Path, cache_dir: pathlib.Path) -> bool:
+    zig = cache_dir / module_to_zig_file(module)
+    obj = cache_dir / f"{module}.o"
+    if not zig.exists() or not obj.exists() or obj.stat().st_size == 0:
+        return False
+    meta = load_cache_meta(cache_dir, module)
+    if meta is None:
+        return False
+    return meta == expected_cache_meta(src, lean)
+
+
+def file_stamp(path: pathlib.Path) -> dict:
+    resolved = path.resolve()
+    st = resolved.stat()
+    return {
+        "path": str(resolved),
+        "mtime_ns": st.st_mtime_ns,
+        "size": st.st_size,
+    }
+
+
+def normalize_lean_version(version: str) -> str:
+    return re.sub(r", commit [0-9a-f]+", ", commit <ignored>", version)
+
+
+@functools.lru_cache(maxsize=1)
+def emitzig_compiler_fingerprint() -> list[dict]:
+    compiler_root = ROOT / "src" / "Lean" / "Compiler"
+    paths = [ROOT / "src" / "Lean" / "Shell.lean"]
+    paths.extend(sorted(compiler_root.rglob("*.lean")))
+    return [file_stamp(path) for path in paths if path.exists()]
+
+
+@functools.lru_cache(maxsize=None)
+def lean_fingerprint(lean: pathlib.Path) -> dict:
+    result = subprocess.run(
+        [str(lean), "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    resolved = lean.resolve()
+    return {
+        "path": str(resolved),
+        "version": normalize_lean_version(result.stdout.strip()),
+        "emitzig_compiler": emitzig_compiler_fingerprint(),
+    }
+
+
+def dependency_cache_path(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+) -> pathlib.Path:
+    h = hashlib.sha256()
+    for value in [str(lean.resolve()), str(src_root.resolve())]:
+        h.update(value.encode())
+        h.update(b"\0")
+    for seed in seeds:
+        h.update(str(seed.resolve()).encode())
+        h.update(b"\0")
+    return cache_dir / f"deps-{h.hexdigest()[:16]}.json"
+
+
+def dependency_cache_meta(
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+    modules: list[str],
+) -> dict | None:
+    export_modules = collect_export_modules(src_root)
+    paths = seeds + [module_to_path(module, src_root) for module in modules]
+    paths += [module_to_path(module, src_root) for module in export_modules]
+    unique_paths = sorted({str(path.resolve()): path for path in paths}.values(), key=lambda p: str(p.resolve()))
+    try:
+        stamps = [file_stamp(path) for path in unique_paths]
+    except FileNotFoundError:
+        return None
+    return {
+        "dependency_discovery_version": DEPENDENCY_DISCOVERY_VERSION,
+        "tool": file_stamp(TOOL),
+        "lean": lean_fingerprint(lean),
+        "src_root": str(src_root.resolve()),
+        "seeds": [str(seed.resolve()) for seed in seeds],
+        "export_modules": export_modules,
+        "files": stamps,
+    }
+
+
+def load_cached_dependencies(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+) -> list[str] | None:
+    path = dependency_cache_path(cache_dir, lean, src_root, seeds)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        modules = data["modules"]
+        if not isinstance(modules, list) or not all(isinstance(module, str) for module in modules):
+            return None
+        meta = dependency_cache_meta(lean, src_root, seeds, modules)
+        if meta is not None and data.get("meta") == meta:
+            return modules
+    except Exception:
+        return None
+    return None
+
+
+def save_dependency_cache(
+    cache_dir: pathlib.Path,
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+    modules: list[str],
+) -> None:
+    meta = dependency_cache_meta(lean, src_root, seeds, modules)
+    if meta is None:
+        return
+    path = dependency_cache_path(cache_dir, lean, src_root, seeds)
+    path.write_text(json.dumps({"meta": meta, "modules": modules}, indent=2))
+
+
+def files_equal(a: pathlib.Path, b: pathlib.Path) -> bool:
+    if not a.exists() or not b.exists():
+        return False
+    if a.stat().st_size != b.stat().st_size:
+        return False
+    with a.open("rb") as fa, b.open("rb") as fb:
+        while True:
+            ca = fa.read(1024 * 1024)
+            cb = fb.read(1024 * 1024)
+            if ca != cb:
+                return False
+            if not ca:
+                return True
+
+
+def temp_zig_path(cache_dir: pathlib.Path, module: str) -> pathlib.Path:
+    fd, path = tempfile.mkstemp(prefix=f".{module}.", suffix=".zig", dir=cache_dir)
+    os.close(fd)
+    return pathlib.Path(path)
+
+
+def emit_cached_module(
+    lean: pathlib.Path,
+    src: pathlib.Path,
+    src_root: pathlib.Path,
+    module: str,
+    zig_file: pathlib.Path,
+    obj_file: pathlib.Path,
+    cache_dir: pathlib.Path,
+) -> bool:
+    """Emit a module and return true if the cached object can still be reused."""
+    if not zig_file.exists() or not obj_file.exists() or obj_file.stat().st_size == 0:
+        emit_zig(lean, src, src_root, zig_file)
+        return False
+
+    tmp_zig = temp_zig_path(cache_dir, module)
+    try:
+        emit_zig(lean, src, src_root, tmp_zig)
+        if files_equal(tmp_zig, zig_file):
+            return True
+        tmp_zig.replace(zig_file)
+        return False
+    finally:
+        tmp_zig.unlink(missing_ok=True)
+
+
+def collect_export_modules(src_root: pathlib.Path) -> list[str]:
+    """Return stdlib modules that define exported C symbols.
+
+    Functions marked with `@[export lean_name]` are compiled into the C runtime
+    and may be referenced by any stdlib module via `@[extern]` primitives. When
+    linking against the Zig runtime we must include the modules that provide
+    these symbols, even if no imported module directly depends on them.
+    """
+    export_re = re.compile(r"@\[export\s+([A-Za-z0-9_]+)\]")
+    seen: set[str] = set()
+    order: list[str] = []
+    for base in ("Init", "Std"):
+        base_dir = src_root / base
+        if not base_dir.is_dir():
+            continue
+        for path in sorted(base_dir.rglob("*.lean")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if not export_re.search(text):
+                continue
+            try:
+                module = path_to_module(path, src_root)
+            except ValueError:
+                continue
+            if module not in seen:
+                seen.add(module)
+                order.append(module)
+    return order
+
+
+def append_reachable_modules(
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+    seen: set[str],
+    order: list[str],
+) -> None:
+    """Append modules reachable from seeds to order, preserving first discovery."""
+    frontier = list(seeds)
+    while frontier:
+        cur_path = frontier.pop()
+        if not cur_path.exists():
+            continue
+        try:
+            module = path_to_module(cur_path, src_root)
+        except ValueError:
+            # Not under src_root (e.g. the driver file); still recurse on its deps.
+            module = None
+
+        if module is not None and module in seen:
+            continue
+        if module is not None:
+            seen.add(module)
+            order.append(module)
+
+        out = subprocess.run(
+            [str(lean), "--src-deps", str(cur_path)],
+            cwd=src_root,
+            capture_output=True,
+            text=True,
+        )
+        for line in out.stdout.strip().splitlines():
+            dep_path = pathlib.Path(line).resolve()
+            if not dep_path.exists():
+                continue
+            try:
+                dep_module = path_to_module(dep_path, src_root)
+            except ValueError:
+                continue
+            if dep_module not in seen:
+                frontier.append(dep_path)
+
+
+def discover_dependencies(
+    lean: pathlib.Path,
+    src_root: pathlib.Path,
+    seeds: list[pathlib.Path],
+) -> list[str]:
+    """Return a topologically flat list of stdlib module names reachable from seeds.
+
+    In addition to import reachability, include any stdlib module that exports a
+    C symbol. These exported symbols can be referenced by `@[extern]` primitives
+    in modules that do not import the defining module, so import discovery alone
+    is insufficient when linking against the Zig runtime.
+    """
+    seen: set[str] = set()
+    order: list[str] = []
+    append_reachable_modules(lean, src_root, seeds, seen, order)
+
+    # Exported-symbol modules may themselves import other modules; keep
+    # discovering imports until the fixed point is reached.
+    export_seeds = [module_to_path(m, src_root) for m in collect_export_modules(src_root)]
+    append_reachable_modules(lean, src_root, export_seeds, seen, order)
+
+    return order
+
+
+def build_stdlib_module(
+    module: str,
+    lean: pathlib.Path,
+    zig: pathlib.Path,
+    src_root: pathlib.Path,
+    cache_dir: pathlib.Path,
+    *,
+    force: bool,
+) -> tuple[str, pathlib.Path | None, str | None]:
+    src = module_to_path(module, src_root)
+    zig_file = cache_dir / module_to_zig_file(module)
+    obj_file = cache_dir / f"{module}.o"
+    meta = expected_cache_meta(src, lean)
+
+    if not force and cache_valid(module, src, lean, cache_dir):
+        print(f"[cache] {module}")
+        return (module, obj_file, None)
+
+    print(f"emitting {module}")
+    try:
+        unchanged = False if force else emit_cached_module(
+            lean, src, src_root, module, zig_file, obj_file, cache_dir
+        )
+        if force:
+            emit_zig(lean, src, src_root, zig_file)
+    except subprocess.CalledProcessError as e:
+        return (module, None, f"emit failed for {module}: {e}")
+
+    if unchanged:
+        print(f"[unchanged] {module}")
+        save_cache_meta(cache_dir, module, meta)
+        return (module, obj_file, None)
+
+    print(f"compiling {module}")
+    try:
+        compile_zig(zig, zig_file, obj_file)
+    except subprocess.CalledProcessError as e:
+        obj_file.unlink(missing_ok=True)
+        return (module, None, f"compile failed for {module}: {e}")
+
+    save_cache_meta(cache_dir, module, meta)
+    return (module, obj_file, None)
+
+
+def build_stdlib_modules(
+    modules: list[str],
+    lean: pathlib.Path,
+    zig: pathlib.Path,
+    src_root: pathlib.Path,
+    cache_dir: pathlib.Path,
+    *,
+    force: bool,
+    jobs: int,
+) -> tuple[list[pathlib.Path], list[str]]:
+    objs: list[pathlib.Path] = []
+    failed_modules: list[str] = []
+    results: list[tuple[str, pathlib.Path | None, str | None] | None] = [None] * len(modules)
+
+    if jobs <= 1 or len(modules) <= 1:
+        for i, module in enumerate(modules):
+            results[i] = build_stdlib_module(module, lean, zig, src_root, cache_dir, force=force)
+    else:
+        print(f"building stdlib modules with {jobs} job(s)")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+            future_to_index = {
+                executor.submit(build_stdlib_module, module, lean, zig, src_root, cache_dir, force=force): i
+                for i, module in enumerate(modules)
+            }
+            for future in concurrent.futures.as_completed(future_to_index):
+                results[future_to_index[future]] = future.result()
+
+    for result in results:
+        assert result is not None
+        module, obj_file, error = result
+        if error is not None:
+            print(f"  {error}", file=sys.stderr)
+            failed_modules.append(module)
+        elif obj_file is not None:
+            objs.append(obj_file)
+
+    return (objs, failed_modules)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Compile a Lean driver against the Zig runtime with recursive stdlib linking."
+    )
+    parser.add_argument("driver", help="Lean driver file")
+    parser.add_argument("output", help="Output executable name")
+    parser.add_argument(
+        "--lean",
+        default=None,
+        help="Path to the lean executable (default: BUILD_DIR/bin/lean)",
+    )
+    parser.add_argument("--zig", default="zig", help="Path to the zig executable")
+    parser.add_argument(
+        "--build-dir",
+        default=os.environ.get("BUILD_DIR", str(ROOT / "build" / "release" / "stage1")),
+        help="Active Lean stage build directory",
+    )
+    parser.add_argument(
+        "--lean-src-root",
+        default=str(ROOT / "src"),
+        help="Root directory containing Lean stdlib sources",
+    )
+    parser.add_argument(
+        "--module",
+        action="append",
+        default=[],
+        help="Stdlib module to compile (can be given multiple times)",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default=str(ROOT / ".zigc-stdlib-cache"),
+        help="Directory for cached emitted Zig and object files",
+    )
+    parser.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Only compile the driver and explicitly listed modules",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore cache and re-emit all modules",
+    )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=0,
+        help="Number of module emit/compile jobs (default: CPU count)",
+    )
+    parser.add_argument(
+        "--allow-stubs",
+        action="store_true",
+        help="Generate panic stubs for unresolved symbols instead of failing",
+    )
+    parser.add_argument(
+        "--max-stub-iterations",
+        type=int,
+        default=5,
+        help="Maximum stub-generation/link retries when --allow-stubs is set",
+    )
+    args = parser.parse_args()
+
+    build_dir = pathlib.Path(args.build_dir).resolve()
+    lean = pathlib.Path(args.lean).resolve() if args.lean is not None else build_dir / "bin" / "lean"
+    zig = pathlib.Path(args.zig)
+    driver = pathlib.Path(args.driver).resolve()
+    src_root = pathlib.Path(args.lean_src_root).resolve()
+    cache_dir = pathlib.Path(args.cache_dir).resolve()
+    base_zigrt_lib = build_dir / "runtime" / "zig" / "zig-out" / "lib" / "libleanrt_zig.a"
+
+    if not base_zigrt_lib.exists():
+        print(
+            f"zigc-stdlib: {base_zigrt_lib} not found; run "
+            f"'make -C {build_dir} leanrt_zig'",
+            file=sys.stderr,
+        )
+        return 1
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    work = pathlib.Path(tempfile.mkdtemp(prefix="zigc-stdlib-"))
+    lock = None
+
+    try:
+        lock = acquire_cache_lock(cache_dir)
+        zigrt_lib = build_helperless_zigrt(zig, work, cache_dir, build_dir, force=args.force)
+
+        # Determine the set of stdlib modules to compile.
+        if args.no_recursive:
+            modules = list(args.module)
+        else:
+            seeds = [driver] + [module_to_path(m, src_root) for m in args.module]
+            modules = None if args.force else load_cached_dependencies(cache_dir, lean, src_root, seeds)
+            if modules is None:
+                modules = discover_dependencies(lean, src_root, seeds)
+                save_dependency_cache(cache_dir, lean, src_root, seeds, modules)
+                print(f"discovered {len(modules)} stdlib module(s)")
+            else:
+                print(f"[cache] discovered {len(modules)} stdlib module(s)")
+
+
+        job_count = args.jobs if args.jobs > 0 else (os.cpu_count() or 1)
+        job_count = max(1, min(job_count, len(modules))) if modules else 1
+        objs, failed_modules = build_stdlib_modules(
+            modules, lean, zig, src_root, cache_dir, force=args.force, jobs=job_count
+        )
+
+        if failed_modules:
+            print(f"error: {len(failed_modules)} module(s) failed to emit/compile", file=sys.stderr)
+            for module in failed_modules[:20]:
+                print(f"  - {module}", file=sys.stderr)
+            if len(failed_modules) > 20:
+                print(f"  ... and {len(failed_modules) - 20} more", file=sys.stderr)
+            if not args.allow_stubs:
+                return 1
+            print("warning: continuing because --allow-stubs is set", file=sys.stderr)
+
+        # Driver.
+        print(f"emitting {driver.name} -> {driver.stem}.zig")
+        driver_zig = work / f"{driver.stem}.zig"
+        emit_zig(lean, driver, driver.parent, driver_zig)
+        driver_obj = work / f"{driver.stem}.o"
+        compile_zig(zig, driver_zig, driver_obj)
+        objs.append(driver_obj)
+
+        # Link. By default this is a real parity gate: unresolved symbols are fatal.
+        # --allow-stubs preserves the old exploratory behavior for manual debugging.
+        stubs_zig = work / "stubs.zig"
+        stubs_obj = work / "stubs.o"
+        objs = filter_conflicting_objs(objs, zigrt_lib, work)
+        max_attempts = args.max_stub_iterations if args.allow_stubs else 1
+        for iteration in range(max_attempts):
+            print(f"linking (attempt {iteration + 1})...")
+            result = link(zig, objs, zigrt_lib, args.output, build_dir / "include")
+            if result.returncode == 0:
+                print(f"linked {args.output}")
+                return 0
+
+            dup_objs = extract_duplicate_symbol_objs(result.stderr)
+            if dup_objs:
+                dup_set = {pathlib.Path(p).resolve() for p in dup_objs}
+                before = len(objs)
+                objs = [o for o in objs if o.resolve() not in dup_set]
+                if len(objs) < before:
+                    print(f"removed {before - len(objs)} duplicate-defining object file(s); retrying", file=sys.stderr)
+                    continue
+
+            undefined = extract_undefined_symbols(result.stderr)
+            if not undefined:
+                print(result.stderr, file=sys.stderr)
+                return result.returncode
+
+            print(f"undefined symbols: {len(undefined)}", file=sys.stderr)
+            for sym in undefined[:50]:
+                print(f"  - {sym}", file=sys.stderr)
+            if len(undefined) > 50:
+                print(f"  ... and {len(undefined) - 50} more", file=sys.stderr)
+            if not args.allow_stubs:
+                print(result.stderr, file=sys.stderr)
+                return result.returncode
+
+            print("generating stubs because --allow-stubs is set...")
+            generate_stubs(undefined, stubs_zig)
+            compile_zig(zig, stubs_zig, stubs_obj)
+            if stubs_obj not in objs:
+                objs.append(stubs_obj)
+        else:
+            print("exceeded maximum stub iterations", file=sys.stderr)
+            print(result.stderr, file=sys.stderr)
+            return 1
+    finally:
+        release_cache_lock(lock)
+        shutil.rmtree(work, ignore_errors=True)
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

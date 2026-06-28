@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Wrapper for compiling Lean-generated Zig code into an executable.
+# Usage: zigc <input.zig> [output-name]
+#
+# The script derives include/library paths from the in-tree leanc wrapper.
+# It links against the C++ Lean runtime and standard library.
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LEANC="${LEANC:-$ROOT/build/release/stage1/bin/leanc}"
+
+if [[ ! -x "$LEANC" ]]; then
+  echo "zigc: leanc not found at $LEANC" >&2
+  exit 1
+fi
+
+INPUT="$1"
+OUTPUT="${2:-$(basename "$INPUT" .zig)}"
+
+EXTRA_FLAGS=()
+
+# Discover library search paths for gmp and libuv. Environment variables
+# GMP_LIB_DIR / LIBUV_LIB_DIR take precedence; otherwise fall back to
+# pkg-config and then platform-specific defaults.
+add_lib_dir() {
+  local dir="$1"
+  if [[ -d "$dir" ]]; then
+    EXTRA_FLAGS+=("-L$dir")
+  fi
+}
+
+if [[ -n "${GMP_LIB_DIR:-}" ]]; then
+  add_lib_dir "$GMP_LIB_DIR"
+elif command -v pkg-config &>/dev/null && pkg-config --exists gmp 2>/dev/null; then
+  add_lib_dir "$(pkg-config --variable=libdir gmp)"
+fi
+
+if [[ -n "${LIBUV_LIB_DIR:-}" ]]; then
+  add_lib_dir "$LIBUV_LIB_DIR"
+elif command -v pkg-config &>/dev/null && pkg-config --exists libuv 2>/dev/null; then
+  add_lib_dir "$(pkg-config --variable=libdir libuv)"
+fi
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # Homebrew on Apple Silicon vs Intel uses different prefixes.
+  add_lib_dir /opt/homebrew/lib
+  add_lib_dir /usr/local/lib
+  EXTRA_FLAGS+=(-framework CoreFoundation)
+fi
+LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig"
+if [[ ! -f "$LEAN_RT_ZIG" ]]; then
+  echo "zigc: shared runtime module not found at $LEAN_RT_ZIG" >&2
+  exit 1
+fi
+
+zig build-exe --dep lean_rt -Mroot="$INPUT" -Mlean_rt="$LEAN_RT_ZIG" -O Debug \
+  -I "$ROOT/build/release/stage1/include" \
+  -L "$ROOT/build/release/stage1/lib/lean" \
+  -lInit -lStd -lLean -lleanrt -lc++ -lgmp -luv -lpthread \
+  "${EXTRA_FLAGS[@]}" \
+  -femit-bin="$OUTPUT"

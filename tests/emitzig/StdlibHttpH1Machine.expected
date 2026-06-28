@@ -1,0 +1,48 @@
+read:events:end:GET:/hello:1,need-answer
+read:output:
+state:false:true:true:true
+write:events:close-body,next
+write:output:HTTP/1.1 200 OK|Server: lean-zig|Content-Length: 2||OK
+after-write:false:false:true
+next:events:need-more:none
+next:output:
+after-next:false:false:true
+head-read:end:HEAD:/meta:1,need-answer:true:true:true
+head-write:events:close-body,next
+head-write:output:HTTP/1.1 200 OK|Content-Length: 5||
+head-after-write:false:false:true
+fixed-step:end:POST:/upload:2,need-answer:true:true
+fixed-pull:chunk:hello:true:false:0:close-body:true:false
+chunk-step:end:POST:/chunk:2,need-answer:true
+chunk-pull1:chunk:lean:false:false:1::true
+chunk-pull2:chunk::true:false:0:close-body:true:false
+trailer-step:end:POST:/trail:2,need-answer:true:false
+trailer-pull1:chunk:abc:false:false:0::false:false:true
+trailer-pull2:chunk::true:false:0:close-body:false:true:false
+bad-trailer-step:end:POST:/trail:2,need-answer:true:false
+bad-trailer-pull1:chunk:abc:false:false:0::false:false:true
+bad-trailer-pull2:none:failed:Bad message:true:false:false
+client-initial:true:false:true
+client-write:events:need-more:none
+client-write:output:GET /client HTTP/1.1|User-Agent: lean-client|Content-Length: 0||
+client-after-write:false:false:true
+client-read:events:end:No Content:HTTP/1.1:0
+client-read:output:
+client-after-read:false:true:true:true
+client-pull:chunk::true:false:0:close-body:true:false
+client-close-write:need-more:none:GET /stream HTTP/1.1|User-Agent: lean-client|Content-Length: 0||:false:true
+client-close-read:end:OK:HTTP/1.1:0,close:true:true:false:false
+client-close-pull1:chunk:hello:false:false:0::false:true
+client-close-pull2:none:need-more:none:false:false
+client-close-eof:chunk::true:false:0:close-body:true:false:false
+expect-step:end:POST:/expect:3,continue,need-answer:true:false:true
+expect-accept-output:HTTP/1.1 100 Continue||:false:true
+expect-body:chunk:ping:true:false:0:close-body:true:false
+reject-step:end:POST:/expect:3,continue,need-answer:true
+reject-output:close:HTTP/1.1 417 Expectation Failed|Connection: close|Content-Length: 0||:true:false
+missing-host-step1:failed:Bad message,close:HTTP/1.1 400 Bad Request|Connection: close|Content-Length: 0||:false:true:false
+missing-host-step2:::false:true:false
+too-many-headers-step1:failed:Too many headers::true:false:true
+too-many-headers-step2:close:HTTP/1.1 431 Request Header Fields Too Large|Connection: close|Content-Length: 0||:false:true:false
+body-too-large-step1:failed:Entity too large,close:HTTP/1.1 413 Payload Too Large|Connection: close|Content-Length: 0||:false:true:false
+body-too-large-step2:::false:true:false

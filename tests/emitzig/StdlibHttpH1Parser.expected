@@ -1,0 +1,10 @@
+request:GET:/search?q=lean:HTTP/1.1
+raw-request:POST:/upload:none
+status:Not Found:HTTP/1.0
+header:Host:example.com
+header:end
+chunk-size:10:sig=lean zig,flag=none
+fixed:incomplete:abc:5
+chunk-data:complete:hello
+trailers:X-Trace=yes
+trailers:error

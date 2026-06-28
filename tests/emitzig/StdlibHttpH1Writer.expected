@@ -1,0 +1,9 @@
+mode-default:chunked
+mode-closed:fixed:3
+mode-sized:fixed:12
+state:true:false:true
+fixed:hello w:0:1:4
+chunked:4;sig="lean zig"|lean|3|zig|:0:0
+final:4|done|0||:true
+raw:raw-body:0:0
+keep:true:false
