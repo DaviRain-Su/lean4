@@ -6,6 +6,13 @@ pub fn build(b: *std.Build) void {
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
+    const gmp_include_dir = b.option([]const u8, "gmp-include-dir", "Resolved GMP include directory from CMake") orelse "";
+    const gmp_library_dir = b.option([]const u8, "gmp-library-dir", "Resolved GMP library directory from CMake") orelse "";
+    const gmp_library_name = b.option([]const u8, "gmp-library-name", "Resolved GMP library name from CMake") orelse "gmp";
+    const libuv_include_dirs = b.option([]const u8, "libuv-include-dirs", "Resolved libuv include directories from CMake, separated by |") orelse "";
+    const libuv_library_dirs = b.option([]const u8, "libuv-library-dirs", "Resolved libuv library directories from CMake, separated by |") orelse "";
+    const libuv_libraries = b.option([]const u8, "libuv-libraries", "Resolved libuv library names from CMake, separated by |") orelse "uv";
+
 
     const mpz_mod = b.addModule("mpz_zig", .{
         .root_source_file = b.path("mpz_zig.zig"),
@@ -29,8 +36,16 @@ pub fn build(b: *std.Build) void {
     root_mod.addImport("mpz_zig", mpz_mod);
     root_mod.addImport("runtime_c", runtime_c.createModule());
     root_mod.addImport("runtime_options", opts_mod);
-    root_mod.linkSystemLibrary("gmp", .{});
+    if (gmp_include_dir.len != 0) root_mod.addSystemIncludePath(.{ .cwd_relative = gmp_include_dir });
+    if (gmp_library_dir.len != 0) root_mod.addLibraryPath(.{ .cwd_relative = gmp_library_dir });
+    root_mod.linkSystemLibrary(gmp_library_name, .{ .use_pkg_config = .no });
     root_mod.linkSystemLibrary("c++", .{});
+    var libuv_include_it = std.mem.tokenizeScalar(u8, libuv_include_dirs, '|');
+    while (libuv_include_it.next()) |dir| root_mod.addSystemIncludePath(.{ .cwd_relative = dir });
+    var libuv_library_dir_it = std.mem.tokenizeScalar(u8, libuv_library_dirs, '|');
+    while (libuv_library_dir_it.next()) |dir| root_mod.addLibraryPath(.{ .cwd_relative = dir });
+
+
 
     // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
     // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
@@ -52,17 +67,19 @@ pub fn build(b: *std.Build) void {
         "uv_promise_bridge.cpp",
         "uv_version.cpp",
     };
-    const uv_cpp_flags = &.{
+    var uv_cpp_flags = std.ArrayList([]const u8).empty;
+    defer uv_cpp_flags.deinit(b.allocator);
+    uv_cpp_flags.appendSlice(b.allocator, &.{
         "-std=c++17",
         "-O2",
         "-include", "uv_compat.h",
         "-DLEAN_SMALL_ALLOCATOR",
         b.fmt("-I{s}", .{lean_include_dir}),
         "-I../..",
-    };
+    }) catch @panic("OOM");
     root_mod.addCSourceFiles(.{
         .files = uv_cpp_sources,
-        .flags = uv_cpp_flags,
+        .flags = uv_cpp_flags.items,
     });
 
     // Weak exports that let C++ code call lean_mk_io_error_* while the real
@@ -81,7 +98,8 @@ pub fn build(b: *std.Build) void {
         .flags = uv_c_flags,
     });
 
-    root_mod.linkSystemLibrary("uv", .{});
+    var libuv_library_it = std.mem.tokenizeScalar(u8, libuv_libraries, '|');
+    while (libuv_library_it.next()) |lib_name| root_mod.linkSystemLibrary(lib_name, .{ .use_pkg_config = .no });
 
     const lib = b.addLibrary(.{
         .name = "leanrt_zig",

@@ -34,3 +34,6 @@ wdErr.txt
 wdIn.txt
 wdOut.txt
 .claude/worktrees/
+
+# zig cache
+.zig-cache
