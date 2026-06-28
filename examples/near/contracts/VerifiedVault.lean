@@ -25,75 +25,117 @@ namespace VerifiedVault
 
 namespace Spec
 
+abbrev Amount := Near.Amount.U128
+
 /-- Pure model of the vault's financial state. -/
 structure State where
-  reserves : Nat
-  shares : Nat
-  deriving Repr, BEq
+  reserves : Amount
+  shares : Amount
+  deriving Repr
 
 /-- The vault is fully collateralized: every share is backed 1:1 by reserves. -/
 def solvent (s : State) : Prop :=
   s.reserves = s.shares
 
-def empty : State := { reserves := 0, shares := 0 }
+def empty : State := { reserves := Near.Amount.U128.zero, shares := Near.Amount.U128.zero }
 
 /-- Mint one share per deposited yoctoNEAR. -/
-def deposit (s : State) (amount : Nat) : State :=
-  { reserves := s.reserves + amount, shares := s.shares + amount }
+def deposit? (s : State) (amount : Amount) : Option State := do
+  let reserves ← s.reserves.checkedAdd amount
+  let shares ← s.shares.checkedAdd amount
+  pure { reserves, shares }
 
 /-- Burn one share per withdrawn yoctoNEAR. Callers must check affordability first. -/
-def withdraw (s : State) (amount : Nat) : State :=
-  { reserves := s.reserves - amount, shares := s.shares - amount }
+def withdraw? (s : State) (amount : Amount) : Option State := do
+  let reserves ← s.reserves.checkedSub amount
+  let shares ← s.shares.checkedSub amount
+  pure { reserves, shares }
 
 /-- Logical guard used before applying `withdraw`. -/
-def canWithdraw (s : State) (amount : Nat) : Prop :=
-  amount <= s.reserves ∧ amount <= s.shares
+def canWithdraw (s : State) (amount : Amount) : Prop :=
+  amount.le s.reserves = true ∧ amount.le s.shares = true
 
 /-- Runtime form of `canWithdraw`. -/
-def canWithdrawBool (s : State) (amount : Nat) : Bool :=
-  decide (amount <= s.reserves) && decide (amount <= s.shares)
+def canWithdrawBool (s : State) (amount : Amount) : Bool :=
+  amount.le s.reserves && amount.le s.shares
 
 theorem empty_solvent : solvent empty := by
   rfl
 
-theorem deposit_preserves_solvent {s : State} {amount : Nat}
-    (h : solvent s) : solvent (deposit s amount) := by
-  unfold solvent deposit
-  rw [h]
+theorem deposit_preserves_solvent {s next : State} {amount : Amount}
+    (h : solvent s) (hn : deposit? s amount = some next) : solvent next := by
+  cases s with
+  | mk reserves shares =>
+    unfold solvent at h
+    cases h
+    unfold deposit? at hn
+    cases hAdd : Near.Amount.U128.checkedAdd reserves amount <;> simp [hAdd] at hn
+    cases hn
+    rfl
 
-theorem withdraw_preserves_solvent {s : State} {amount : Nat}
-    (h : solvent s) : solvent (withdraw s amount) := by
-  unfold solvent withdraw
-  rw [h]
+theorem withdraw_preserves_solvent {s next : State} {amount : Amount}
+    (h : solvent s) (hn : withdraw? s amount = some next) : solvent next := by
+  cases s with
+  | mk reserves shares =>
+    unfold solvent at h
+    cases h
+    unfold withdraw? at hn
+    cases hSub : Near.Amount.U128.checkedSub reserves amount <;> simp [hSub] at hn
+    cases hn
+    rfl
 
-theorem canWithdraw_implies_reserve_bound {s : State} {amount : Nat}
-    (h : canWithdraw s amount) : amount <= s.reserves := by
+theorem canWithdraw_implies_reserve_bound {s : State} {amount : Amount}
+    (h : canWithdraw s amount) : amount.le s.reserves = true := by
   exact h.left
 
-theorem canWithdraw_implies_share_bound {s : State} {amount : Nat}
-    (h : canWithdraw s amount) : amount <= s.shares := by
+theorem canWithdraw_implies_share_bound {s : State} {amount : Amount}
+    (h : canWithdraw s amount) : amount.le s.shares = true := by
   exact h.right
 
 end Spec
 
+def parseUInt64? (raw : String) : Option UInt64 := do
+  let amount ← Storage.parseNat? raw
+  some amount.toUInt64
+
+def parseAmount (raw : String) : Option Spec.Amount := do
+  let amount ← parseUInt64? raw
+  some (Near.Amount.U128.ofUInt64 amount)
+
 namespace StorageState
 
-def reserves : Storage.Key Nat := Storage.Key.make "vault:reserves"
-def shares : Storage.Key Nat := Storage.Key.make "vault:shares"
+def reservesHi : String := "vault:reserves:hi"
+def reservesLo : String := "vault:reserves:lo"
+def sharesHi : String := "vault:shares:hi"
+def sharesLo : String := "vault:shares:lo"
+
+def readLimb (key : String) : IO UInt64 := do
+  match (← Storage.rawRead key) with
+  | none => pure 0
+  | some raw =>
+    match parseUInt64? raw with
+    | some value => pure value
+    | none => pure 0
+
+def writeLimb (key : String) (value : UInt64) : IO Bool :=
+  Storage.rawWrite key (toString value)
 
 def read : IO Spec.State := do
-  let reserves ← reserves.read 0
-  let shares ← shares.read 0
+  let rHi ← readLimb reservesHi
+  let rLo ← readLimb reservesLo
+  let sHi ← readLimb sharesHi
+  let sLo ← readLimb sharesLo
+  let reserves : Spec.Amount := ⟨rHi, rLo⟩
+  let shares : Spec.Amount := ⟨sHi, sLo⟩
   pure { reserves, shares }
 
 def write (s : Spec.State) : IO Unit := do
-  let _ ← reserves.write s.reserves
-  let _ ← shares.write s.shares
+  let _ ← writeLimb reservesHi s.reserves.hi
+  let _ ← writeLimb reservesLo s.reserves.lo
+  let _ ← writeLimb sharesHi s.shares.hi
+  let _ ← writeLimb sharesLo s.shares.lo
 
 end StorageState
-
-def parseAmount (raw : String) : Option Nat :=
-  Storage.parseNat? raw
 
 def returnStateJson (s : Spec.State) : IO Unit :=
   Contract.returnJson
@@ -114,29 +156,33 @@ def deposit : Contract.Method .update := Contract.update "deposit" do
   let _ ← Contract.requireInitialized
   let ctx ← Env.context
   let amount := ctx.attachedDeposit.yoctoNear
-  let _ ← Contract.require (0 < amount) "deposit requires attached NEAR"
+  let _ ← Contract.require (!amount.isZero) "deposit requires attached NEAR"
   let current ← StorageState.read
-  let next := Spec.deposit current amount
-  StorageState.write next
-  Env.log ("deposit " ++ toString amount)
-  returnStateJson next
+  match Spec.deposit? current amount with
+  | none => Contract.panic "vault deposit overflow"
+  | some next =>
+    StorageState.write next
+    Env.log ("deposit " ++ toString amount)
+    returnStateJson next
 
 def withdraw : Contract.Method .update := Contract.update "withdraw" do
   let _ ← Contract.requireInitialized
   let attachedDeposit ← Env.attachedDeposit
-  let _ ← Contract.require (attachedDeposit.yoctoNear == 0) "Method is not payable"
+  let _ ← Contract.require (attachedDeposit.yoctoNear == Near.Amount.U128.zero) "Method is not payable"
   let raw ← Env.inputString
   match parseAmount raw with
   | none => Contract.panic "withdraw amount must be a decimal yoctoNEAR string"
   | some amount =>
     let current ← StorageState.read
     let _ ← Contract.require (Spec.canWithdrawBool current amount) "insufficient vault shares"
-    let next := Spec.withdraw current amount
-    StorageState.write next
-    let receiver ← Env.predecessorAccount
-    let promise ← Promise.new receiver
-    Promise.batchActionTransferRaw promise.index.value (toString amount)
-    Promise.returnPromise promise
+    match Spec.withdraw? current amount with
+    | none => Contract.panic "vault withdraw underflow"
+    | some next =>
+      StorageState.write next
+      let receiver ← Env.predecessorAccount
+      let promise ← Promise.new receiver
+      let promise ← promise.transfer (NearToken.fromU128 amount)
+      Promise.returnPromise promise
 
 end VerifiedVault
 

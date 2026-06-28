@@ -659,24 +659,17 @@ where
     | .reference decl => return groundSlotLitOfValueName (← findValueDecl decl)
     | .rawReference decl => pure <| groundSlotLitOfValueName decl
 
-  packGroundScalarBytes (scalarArgs : Array UInt8) : List String := Id.run do
-    assert! scalarArgs.size % 8 == 0
-    let chunks := scalarArgs.size / 8
-    let mut packed := []
-    for idx in [0:chunks] do
-      let mut value : Nat := 0
-      for off in [0:8] do
-        let b := scalarArgs[idx * 8 + off]!.toNat
-        value := value + b * (2 ^ (8 * off))
-      packed := packed.concat s!"@as(usize, {value})"
-    packed
+  renderGroundScalarBytes (scalarArgs : Array UInt8) : List String :=
+    scalarArgs.toList.map (fun b => s!"@as(u8, {b.toNat})")
 
   emitCtorValue (name : String) (cidx : Nat) (objArgs : Array SimpleGroundArg)
       (usizeArgs : Array UInt64) (scalarArgs : Array UInt8) : GroundEmitM Unit := do
     let objLits ← objArgs.toList.mapM groundArgToLeanObjLit
     let usizeLits := usizeArgs.toList.map (fun u => s!"@as(usize, {u.toNat})")
-    let scalarLits := packGroundScalarBytes scalarArgs
-    let type := "extern struct { m_header: lean_object, m_objs: [" ++ toString objArgs.size ++ "]LeanObj, m_usize: [" ++ toString usizeArgs.size ++ "]usize, m_scalars: [" ++ toString scalarLits.length ++ "]usize }"
+    let scalarLits := renderGroundScalarBytes scalarArgs
+    -- The scalar payload is byte-addressed by `lean_ctor_get_uint*`; packing it into `usize`
+    -- slots corrupts 64-bit fields on wasm32.
+    let type := "extern struct { m_header: lean_object, m_objs: [" ++ toString objArgs.size ++ "]LeanObj, m_usize: [" ++ toString usizeArgs.size ++ "]usize, m_scalars: [" ++ toString scalarArgs.size ++ "]u8 }"
     let header := groundHeaderLit
       ("@sizeOf(lean_ctor_object) + @sizeOf(usize) * " ++ toString objArgs.size ++
         " + " ++ ctorScalarSizeExpressionZig usizeArgs.size scalarArgs.size)

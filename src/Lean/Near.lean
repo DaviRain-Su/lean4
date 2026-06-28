@@ -54,30 +54,147 @@ def main : IO UInt32 := do
 namespace Near
 
 -- ============================================================================
+-- Chain amounts
+-- ============================================================================
+
+namespace Amount
+
+/--
+Gas-bounded 128-bit unsigned amount.
+
+Use this in executable smart-contract paths instead of unbounded `Nat`. Proof
+models can still project it to `Nat` with `toNat`.
+-/
+structure U128 where
+  hi : UInt64
+  lo : UInt64
+  deriving Repr
+
+namespace U128
+
+@[inline] def beq (a b : U128) : Bool :=
+  a.hi == b.hi && a.lo == b.lo
+
+instance : BEq U128 := ⟨beq⟩
+
+@[inline] def zero : U128 := ⟨0, 0⟩
+@[inline] def one : U128 := ⟨0, 1⟩
+@[inline] def ofUInt64 (lo : UInt64) : U128 := ⟨0, lo⟩
+
+@[inline] def limbBase : Nat := 18446744073709551616
+
+@[inline] def ofNat? (n : Nat) : Option U128 :=
+  let hi := n / limbBase
+  let lo := n % limbBase
+  if hi < limbBase then
+    some ⟨hi.toUInt64, lo.toUInt64⟩
+  else
+    none
+
+/-- Mathematical view used for specifications and theorems. Avoid using this on hot runtime paths. -/
+def toNat (n : U128) : Nat :=
+  n.hi.toNat * limbBase + n.lo.toNat
+
+@[inline] def isZero (n : U128) : Bool :=
+  n.hi == 0 && n.lo == 0
+
+@[inline] def lt (a b : U128) : Bool :=
+  if a.hi < b.hi then true
+  else if b.hi < a.hi then false
+  else decide (a.lo < b.lo)
+
+@[inline] def le (a b : U128) : Bool :=
+  if a.hi < b.hi then true
+  else if b.hi < a.hi then false
+  else decide (a.lo <= b.lo)
+
+@[inline] def checkedAdd (a b : U128) : Option U128 :=
+  let lo := a.lo + b.lo
+  let carry : UInt64 := if lo < a.lo then 1 else 0
+  let hiSum := a.hi + b.hi
+  if hiSum < a.hi then
+    none
+  else
+    let hi := hiSum + carry
+    if carry == 1 && hi < hiSum then
+      none
+    else
+      some ⟨hi, lo⟩
+
+@[inline] def checkedSub (a b : U128) : Option U128 :=
+  if lt a b then
+    none
+  else
+    let borrow : UInt64 := if a.lo < b.lo then 1 else 0
+    some ⟨a.hi - b.hi - borrow, a.lo - b.lo⟩
+
+def checkedMulNat (value : U128) : Nat → Option U128
+  | 0 => some zero
+  | n + 1 =>
+    match checkedMulNat value n with
+    | some acc => acc.checkedAdd value
+    | none => none
+
+/-- Debug encoding. Values with a zero high limb use ordinary decimal notation. -/
+@[inline] def encode (n : U128) : String :=
+  if n.hi == 0 then
+    toString n.lo
+  else
+    toString n.hi ++ ":" ++ toString n.lo
+
+instance : ToString U128 := ⟨encode⟩
+
+end U128
+
+end Amount
+
+-- ============================================================================
 -- Types (adapted from near-sdk-zig types/token.zig, types/gas.zig)
 -- ============================================================================
 
 /-- Token amount in yoctoNEAR (10^-24 NEAR). -/
 structure NearToken where
-  yoctoNear : Nat
+  yoctoNear : Amount.U128
   deriving Repr
 
 namespace NearToken
 
-def yoctoPerNear : Nat := 1000000000000000000000000
-def yoctoPerMilliNear : Nat := 1000000000000000000000
-def yoctoPerMicroNear : Nat := 1000000000000000000
+@[inline] def yoctoPerNear : Amount.U128 := ⟨54210, 2003764205206896640⟩
+@[inline] def yoctoPerMilliNear : Amount.U128 := ⟨54, 3875820019684212736⟩
+@[inline] def yoctoPerMicroNear : Amount.U128 := ⟨0, 1000000000000000000⟩
 
-def zero : NearToken := ⟨0⟩
-def oneYocto : NearToken := ⟨1⟩
-def fromYocto (amount : Nat) : NearToken := ⟨amount⟩
-def fromNear (amount : Nat) : NearToken := ⟨amount * yoctoPerNear⟩
-def fromMilliNear (amount : Nat) : NearToken := ⟨amount * yoctoPerMilliNear⟩
-def fromMicroNear (amount : Nat) : NearToken := ⟨amount * yoctoPerMicroNear⟩
-def add (a b : NearToken) : NearToken := ⟨a.yoctoNear + b.yoctoNear⟩
-def isZero (t : NearToken) : Bool := t.yoctoNear == 0
+@[inline] def zero : NearToken := ⟨Amount.U128.zero⟩
+@[inline] def oneYocto : NearToken := ⟨Amount.U128.one⟩
+@[inline] def fromU128 (amount : Amount.U128) : NearToken := ⟨amount⟩
+@[inline] def fromUInt64 (amount : UInt64) : NearToken := ⟨Amount.U128.ofUInt64 amount⟩
+@[inline] def fromYocto? (amount : Nat) : Option NearToken := do
+  pure ⟨← Amount.U128.ofNat? amount⟩
+@[inline] def fromYocto (amount : Nat) : NearToken :=
+  match fromYocto? amount with
+  | some value => value
+  | none => zero
+@[inline] def fromNear? (amount : Nat) : Option NearToken := do
+  pure ⟨← Amount.U128.checkedMulNat yoctoPerNear amount⟩
+@[inline] def fromNear (amount : Nat) : NearToken :=
+  match fromNear? amount with
+  | some value => value
+  | none => zero
+@[inline] def fromMilliNear? (amount : Nat) : Option NearToken := do
+  pure ⟨← Amount.U128.checkedMulNat yoctoPerMilliNear amount⟩
+@[inline] def fromMilliNear (amount : Nat) : NearToken :=
+  match fromMilliNear? amount with
+  | some value => value
+  | none => zero
+@[inline] def fromMicroNear? (amount : Nat) : Option NearToken := do
+  pure ⟨← Amount.U128.checkedMulNat yoctoPerMicroNear amount⟩
+@[inline] def fromMicroNear (amount : Nat) : NearToken :=
+  match fromMicroNear? amount with
+  | some value => value
+  | none => zero
+@[inline] def isZero (t : NearToken) : Bool := t.yoctoNear.isZero
+@[inline] def checkedAdd (a b : NearToken) : Option NearToken := do
+  pure ⟨← a.yoctoNear.checkedAdd b.yoctoNear⟩
 
-instance : Add NearToken := ⟨add⟩
 instance : ToString NearToken := ⟨fun t => toString t.yoctoNear⟩
 instance : Repr NearToken := ⟨fun t _ => toString t.yoctoNear ++ " yoctoNEAR"⟩
 
@@ -215,7 +332,7 @@ instance : Codec NearToken where
   encode t := toString t.yoctoNear
   decode s :=
     match parseNat? s with
-    | some n => some (NearToken.fromYocto n)
+    | some n => NearToken.fromYocto? n
     | none => none
 
 instance : Codec Gas where
@@ -540,6 +657,18 @@ opaque accountBalanceYocto : IO String
 @[extern "lean_near_attached_deposit"]
 opaque attachedDepositYocto : IO String
 
+@[extern "lean_near_account_balance_lo"]
+opaque accountBalanceLo : IO UInt64
+
+@[extern "lean_near_account_balance_hi"]
+opaque accountBalanceHi : IO UInt64
+
+@[extern "lean_near_attached_deposit_lo"]
+opaque attachedDepositLo : IO UInt64
+
+@[extern "lean_near_attached_deposit_hi"]
+opaque attachedDepositHi : IO UInt64
+
 /-- Read the raw input of the contract call. -/
 @[extern "lean_near_input"]
 opaque input : IO String
@@ -576,7 +705,7 @@ opaque panicStr (msg : String) : IO Unit
 @[inline] def usedGas : IO Gas := do
   pure (Gas.fromGas (← usedGasRaw))
 
-/-- Parse a decimal yoctoNEAR string returned by the bridge. -/
+/-- Parse a decimal yoctoNEAR string. Prefer fixed-width bridge accessors on hot runtime paths. -/
 @[inline] def parseNearToken (raw : String) : NearToken :=
   match Storage.parseNat? raw with
   | some n => NearToken.fromYocto n
@@ -584,11 +713,15 @@ opaque panicStr (msg : String) : IO Unit
 
 /-- Get the current account balance. -/
 @[inline] def accountBalance : IO NearToken := do
-  pure (parseNearToken (← accountBalanceYocto))
+  let lo ← accountBalanceLo
+  let hi ← accountBalanceHi
+  pure (NearToken.fromU128 ⟨hi, lo⟩)
 
 /-- Get the deposit attached to this call. -/
 @[inline] def attachedDeposit : IO NearToken := do
-  pure (parseNearToken (← attachedDepositYocto))
+  let lo ← attachedDepositLo
+  let hi ← attachedDepositHi
+  pure (NearToken.fromU128 ⟨hi, lo⟩)
 
 /-- Alias for raw contract input as a UTF-8 string. -/
 @[inline] def inputString : IO String := input
@@ -760,7 +893,7 @@ structure Method (mode : Mode) where
 /-- Require at least a caller-provided deposit. -/
 @[inline] def requireMinDeposit (minDeposit : NearToken) : IO Bool := do
   let deposit ← Env.attachedDeposit
-  require (minDeposit.yoctoNear <= deposit.yoctoNear) ("Requires attached deposit of at least " ++ toString minDeposit)
+  require (minDeposit.yoctoNear.le deposit.yoctoNear) ("Requires attached deposit of at least " ++ toString minDeposit)
 
 /-- Initialize the contract state. -/
 @[inline] def initState (value : String) : IO Bool := Storage.write "STATE" value
@@ -804,8 +937,14 @@ namespace Promise
 @[extern "lean_near_promise_create"]
 opaque createRaw (accountId : String) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO UInt64
 
+@[extern "lean_near_promise_create_u128"]
+opaque createRawU128 (accountId : String) (methodName : String) (args : String) (amountLo : UInt64) (amountHi : UInt64) (gas : UInt64) : IO UInt64
+
 @[extern "lean_near_promise_then"]
 opaque thenRaw (promiseIndex : UInt64) (accountId : String) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO UInt64
+
+@[extern "lean_near_promise_then_u128"]
+opaque thenRawU128 (promiseIndex : UInt64) (accountId : String) (methodName : String) (args : String) (amountLo : UInt64) (amountHi : UInt64) (gas : UInt64) : IO UInt64
 
 @[extern "lean_near_promise_and2"]
 opaque and2Raw (left : UInt64) (right : UInt64) : IO UInt64
@@ -819,8 +958,14 @@ opaque batchThenRaw (promiseIndex : UInt64) (accountId : String) : IO UInt64
 @[extern "lean_near_promise_batch_action_function_call"]
 opaque batchActionFunctionCallRaw (promiseIndex : UInt64) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO Unit
 
+@[extern "lean_near_promise_batch_action_function_call_u128"]
+opaque batchActionFunctionCallRawU128 (promiseIndex : UInt64) (methodName : String) (args : String) (amountLo : UInt64) (amountHi : UInt64) (gas : UInt64) : IO Unit
+
 @[extern "lean_near_promise_batch_action_transfer"]
 opaque batchActionTransferRaw (promiseIndex : UInt64) (amountYocto : String) : IO Unit
+
+@[extern "lean_near_promise_batch_action_transfer_u128"]
+opaque batchActionTransferRawU128 (promiseIndex : UInt64) (amountLo : UInt64) (amountHi : UInt64) : IO Unit
 
 @[extern "lean_near_promise_results_count"]
 opaque resultsCount : IO UInt64
@@ -839,7 +984,7 @@ opaque returnRaw (promiseIndex : UInt64) : IO Unit
 
 /-- Schedule one function-call promise, analogous to `env::promise_create`. -/
 @[inline] def create (receiver : AccountId) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
-  pure (ofIndex (← createRaw receiver.id methodName args (toString deposit.yoctoNear) gas.inner))
+  pure (ofIndex (← createRawU128 receiver.id methodName args deposit.yoctoNear.lo deposit.yoctoNear.hi gas.inner))
 
 /-- Create an empty promise batch for a receiver account. -/
 @[inline] def new (receiver : AccountId) : IO Promise := do
@@ -847,12 +992,12 @@ opaque returnRaw (promiseIndex : UInt64) : IO Unit
 
 /-- Add a function-call action to a promise batch. Returns the same promise for chaining. -/
 @[inline] def functionCall (promise : Promise) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
-  batchActionFunctionCallRaw promise.index.value methodName args (toString deposit.yoctoNear) gas.inner
+  batchActionFunctionCallRawU128 promise.index.value methodName args deposit.yoctoNear.lo deposit.yoctoNear.hi gas.inner
   pure promise
 
 /-- Add a transfer action to a promise batch. Returns the same promise for chaining. -/
 @[inline] def transfer (promise : Promise) (amount : NearToken) : IO Promise := do
-  batchActionTransferRaw promise.index.value (toString amount.yoctoNear)
+  batchActionTransferRawU128 promise.index.value amount.yoctoNear.lo amount.yoctoNear.hi
   pure promise
 
 /-- Attach a callback batch to an existing promise. -/
@@ -861,7 +1006,7 @@ opaque returnRaw (promiseIndex : UInt64) : IO Unit
 
 /-- Attach a callback function call to an existing promise. -/
 @[inline] def thenCall (promise : Promise) (receiver : AccountId) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
-  pure (ofIndex (← thenRaw promise.index.value receiver.id methodName args (toString deposit.yoctoNear) gas.inner))
+  pure (ofIndex (← thenRawU128 promise.index.value receiver.id methodName args deposit.yoctoNear.lo deposit.yoctoNear.hi gas.inner))
 
 /-- Join two promises so a callback can wait on both. -/
 @[inline] def join (left right : Promise) : IO Promise := do

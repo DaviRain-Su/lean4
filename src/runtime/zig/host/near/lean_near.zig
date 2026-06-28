@@ -141,6 +141,13 @@ fn amountBytes(amount: *anyopaque) [16]u8 {
     return bytes;
 }
 
+fn amountBytesU128(lo: u64, hi: u64) [16]u8 {
+    var bytes: [16]u8 = undefined;
+    std.mem.writeInt(u64, bytes[0..8], lo, .little);
+    std.mem.writeInt(u64, bytes[8..16], hi, .little);
+    return bytes;
+}
+
 fn mkU128String(value: u128) ?*anyopaque {
     var buf: [39]u8 = undefined;
     const text = std.fmt.bufPrint(&buf, "{}", .{value}) catch "";
@@ -149,6 +156,14 @@ fn mkU128String(value: u128) ?*anyopaque {
 
 fn readU128(bytes: *[16]u8) u128 {
     return std.mem.readInt(u128, bytes, .little);
+}
+
+fn readU128Lo(bytes: *[16]u8) u64 {
+    return std.mem.readInt(u64, bytes[0..8], .little);
+}
+
+fn readU128Hi(bytes: *[16]u8) u64 {
+    return std.mem.readInt(u64, bytes[8..16], .little);
 }
 
 // --- Storage (Lean String key → host KV) -----------------------------------
@@ -223,10 +238,34 @@ export fn lean_near_account_balance() callconv(.c) ?*anyopaque {
     return mkOk(mkU128String(readU128(&bytes)));
 }
 
+export fn lean_near_account_balance_lo() callconv(.c) ?*anyopaque {
+    var bytes: [16]u8 = undefined;
+    sys.account_balance(@intFromPtr(&bytes));
+    return mkOk(mkU64(readU128Lo(&bytes)));
+}
+
+export fn lean_near_account_balance_hi() callconv(.c) ?*anyopaque {
+    var bytes: [16]u8 = undefined;
+    sys.account_balance(@intFromPtr(&bytes));
+    return mkOk(mkU64(readU128Hi(&bytes)));
+}
+
 export fn lean_near_attached_deposit() callconv(.c) ?*anyopaque {
     var bytes: [16]u8 = undefined;
     sys.attached_deposit(@intFromPtr(&bytes));
     return mkOk(mkU128String(readU128(&bytes)));
+}
+
+export fn lean_near_attached_deposit_lo() callconv(.c) ?*anyopaque {
+    var bytes: [16]u8 = undefined;
+    sys.attached_deposit(@intFromPtr(&bytes));
+    return mkOk(mkU64(readU128Lo(&bytes)));
+}
+
+export fn lean_near_attached_deposit_hi() callconv(.c) ?*anyopaque {
+    var bytes: [16]u8 = undefined;
+    sys.attached_deposit(@intFromPtr(&bytes));
+    return mkOk(mkU64(readU128Hi(&bytes)));
 }
 
 // --- Input / Output --------------------------------------------------------
@@ -279,6 +318,31 @@ export fn lean_near_promise_create(
     return mkOk(mkU64(idx));
 }
 
+export fn lean_near_promise_create_u128(
+    account_id: *anyopaque,
+    method_name: *anyopaque,
+    args: *anyopaque,
+    amount_lo: u64,
+    amount_hi: u64,
+    gas: u64,
+) callconv(.c) ?*anyopaque {
+    const account = stringData(account_id);
+    const method = stringData(method_name);
+    const arguments = stringData(args);
+    var amount = amountBytesU128(amount_lo, amount_hi);
+    const idx = sys.promise_create(
+        account.len,
+        @intFromPtr(account.ptr),
+        method.len,
+        @intFromPtr(method.ptr),
+        arguments.len,
+        @intFromPtr(arguments.ptr),
+        @intFromPtr(&amount),
+        gas,
+    );
+    return mkOk(mkU64(idx));
+}
+
 export fn lean_near_promise_then(
     promise_index: u64,
     account_id: *anyopaque,
@@ -291,6 +355,33 @@ export fn lean_near_promise_then(
     const method = stringData(method_name);
     const arguments = stringData(args);
     var amount = amountBytes(amount_yocto);
+    const idx = sys.promise_then(
+        promise_index,
+        account.len,
+        @intFromPtr(account.ptr),
+        method.len,
+        @intFromPtr(method.ptr),
+        arguments.len,
+        @intFromPtr(arguments.ptr),
+        @intFromPtr(&amount),
+        gas,
+    );
+    return mkOk(mkU64(idx));
+}
+
+export fn lean_near_promise_then_u128(
+    promise_index: u64,
+    account_id: *anyopaque,
+    method_name: *anyopaque,
+    args: *anyopaque,
+    amount_lo: u64,
+    amount_hi: u64,
+    gas: u64,
+) callconv(.c) ?*anyopaque {
+    const account = stringData(account_id);
+    const method = stringData(method_name);
+    const arguments = stringData(args);
+    var amount = amountBytesU128(amount_lo, amount_hi);
     const idx = sys.promise_then(
         promise_index,
         account.len,
@@ -342,8 +433,37 @@ export fn lean_near_promise_batch_action_function_call(
     return mkOk(lean_box(0));
 }
 
+export fn lean_near_promise_batch_action_function_call_u128(
+    promise_index: u64,
+    method_name: *anyopaque,
+    args: *anyopaque,
+    amount_lo: u64,
+    amount_hi: u64,
+    gas: u64,
+) callconv(.c) ?*anyopaque {
+    const method = stringData(method_name);
+    const arguments = stringData(args);
+    var amount = amountBytesU128(amount_lo, amount_hi);
+    sys.promise_batch_action_function_call(
+        promise_index,
+        method.len,
+        @intFromPtr(method.ptr),
+        arguments.len,
+        @intFromPtr(arguments.ptr),
+        @intFromPtr(&amount),
+        gas,
+    );
+    return mkOk(lean_box(0));
+}
+
 export fn lean_near_promise_batch_action_transfer(promise_index: u64, amount_yocto: *anyopaque) callconv(.c) ?*anyopaque {
     var amount = amountBytes(amount_yocto);
+    sys.promise_batch_action_transfer(promise_index, @intFromPtr(&amount));
+    return mkOk(lean_box(0));
+}
+
+export fn lean_near_promise_batch_action_transfer_u128(promise_index: u64, amount_lo: u64, amount_hi: u64) callconv(.c) ?*anyopaque {
+    var amount = amountBytesU128(amount_lo, amount_hi);
     sys.promise_batch_action_transfer(promise_index, @intFromPtr(&amount));
     return mkOk(lean_box(0));
 }
