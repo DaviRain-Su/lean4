@@ -163,6 +163,18 @@ def getStoredType (fvarId : FVarId) : EmitYulM Lean.Expr := do
 def findJoinDecl? (fvarId : FVarId) : EmitYulM (Option (FunDecl .impure)) :=
   return (← read).joinDecls.find? fvarId.name
 
+/-- Filter args to match runtime params (drop void/erased), like EmitZig.runtimeArgs. -/
+def runtimeArgs (ps : Array (Param .impure)) (args : Array (Arg .impure)) : Array (Arg .impure) :=
+  Id.run do
+    let mut filtered := #[]
+    for h : i in [0:args.size] do
+      let arg := args[i]
+      if h : i < ps.size then
+        let p := ps[i]
+        if p.type.isVoid || p.type.isErased then continue
+      filtered := filtered.push arg
+    filtered
+
 /-- Run an emitter in a fresh statement buffer and return the statements.
     The captured statements are NOT appended to the outer buffer; the fresh-name
     counter is preserved across the capture. -/
@@ -266,8 +278,35 @@ mutual
 
   partial def emitFap (lhsId : String) (fn : Lean.Name) (args : Array (Arg .impure)) :
       EmitYulM Unit := do
-    let argExprs := args.map argToExpr
-    emit <| sVarDecl #[tn lhsId] (some (yCall (yulFnName fn) argExprs))
+    let env ← getEnv
+    -- Filter out void/erased args using the callee signature (like EmitZig's runtimeArgs).
+    let sig ← getImpureSignature? fn
+    let argExprs := match sig with
+      | some s => (runtimeArgs s.params args).map argToExpr
+      | none => args.map argToExpr
+    -- Check for `lean_evm_*` extern: lower directly to the EVM opcode.
+    match getExternAttrData? env fn |>.bind (getExternEntryFor · `c) with
+    | some (.standard _ externName) =>
+      if externName.startsWith "lean_evm_" then
+        let opcode : String := externName.drop "lean_evm_".length |>.toString
+        -- EVM externs take/return raw U256; unbox args, box the result.
+        let unboxedArgs := argExprs.map leanUnboxExpr
+        if opcode == "returnMem" || opcode == "revertMem" then
+          -- Terminating builtins: control never returns.
+          emit <| sExprStmt (yBuiltin opcode unboxedArgs)
+          emit <| sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])
+          emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
+        else if opcode == "mstore" || opcode == "sstore" then
+          -- Void builtins: emit as statement, lhs = boxed 0.
+          emit <| sExprStmt (yBuiltin opcode unboxedArgs)
+          emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
+        else
+          -- Value builtins: box the result.
+          emit <| sVarDecl #[tn lhsId] (some (leanBoxExpr (yBuiltin opcode unboxedArgs)))
+      else
+        emit <| sVarDecl #[tn lhsId] (some (yCall (yulFnName fn) argExprs))
+    | _ =>
+      emit <| sVarDecl #[tn lhsId] (some (yCall (yulFnName fn) argExprs))
 
   partial def emitApply (lhsId : String) (fvarId : FVarId) (args : Array (Arg .impure)) :
       EmitYulM Unit := do
@@ -425,7 +464,44 @@ def runtimeHelpers : Array YStmt :=
       { statements := #[sExprStmt (yBuiltin "mstore" #[
           yBuiltin "add" #[yStr "obj", yBuiltin "mul" #[yBuiltin "add" #[yStr "i", yNum 1], yNum 32]], yStr "v"])] },
     sFuncDef "lean_obj_tag" #[tn "o"] #[tn "t"]
-      { statements := #[sAssignment #["t"] (yBuiltin "and" #[yBuiltin "mload" #[yStr "o"], yNum 0xff])] }
+      { statements := #[sAssignment #["t"] (yBuiltin "and" #[yBuiltin "mload" #[yStr "o"], yNum 0xff])] },
+    -- -----------------------------------------------------------------------
+    -- Nat arithmetic (U256-capped scalar domain).
+    -- Lean boxed scalars encode n as (n << 1) | 1; unbox is n >> 1.
+    -- These are named to match the LCNF-emitted call sites (f_<mangled>).
+    -- decEq/decLe/decLt return a Decidable ctor object: isTrue=tag 1, isFalse=tag 0.
+    -- -----------------------------------------------------------------------
+    sFuncDef "f_Nat_add" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "add" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
+    sFuncDef "f_Nat_sub" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sVarDecl #[tn "va"] (some (leanUnboxExpr (yStr "a"))),
+          sVarDecl #[tn "vb"] (some (leanUnboxExpr (yStr "b"))),
+          sIfStmt (yBuiltin "lt" #[yStr "va", yStr "vb"])
+            { statements := #[sAssignment #["r"] leanBoxZero] },
+          sAssignment #["r"] (leanBoxExpr (yBuiltin "sub" #[yStr "va", yStr "vb"]))
+        ] },
+    sFuncDef "f_Nat_mul" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "mul" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
+    sFuncDef "f_Nat_decEq" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sIfStmt (yBuiltin "eq" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")])
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))  -- isTrue (tag 1)
+              ] },
+          sAssignment #["r"] leanBoxZero  -- isFalse (tag 0)
+        ] },
+    sFuncDef "f_Nat_decLe" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sIfStmt (yBuiltin "iszero" #[yBuiltin "gt" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]])
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] },
+          sAssignment #["r"] leanBoxZero
+        ] },
+    sFuncDef "f_Nat_decLt" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sIfStmt (yBuiltin "lt" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")])
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] },
+          sAssignment #["r"] leanBoxZero
+        ] }
   ]
 
 -- ---------------------------------------------------------------------------

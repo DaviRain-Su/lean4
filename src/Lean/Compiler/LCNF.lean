@@ -54,3 +54,5 @@ public import Lean.Compiler.Yul.AST
 public import Lean.Compiler.Yul.Printer
 -- EmitYul: LCNF → Yul (EVM target).
 public import Lean.Compiler.LCNF.EmitYul
+-- Lean.Evm SDK: EVM smart contract surface.
+public import Lean.Evm
