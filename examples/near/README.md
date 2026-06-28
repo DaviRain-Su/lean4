@@ -8,6 +8,45 @@ It demonstrates the current Layer 3 SDK surface in `Lean.Near`:
 - `GuestBook.lean` uses `Store.Vector`, `Store.LookupMap`, and `Store.LazyOption`.
 - `Context.lean` reads `Env.context` and shows `requireInitialized` / `requirePrivate` guards.
 - `CrossContract.lean` builds a promise, attaches a callback, and returns it.
+- `VerifiedVault.lean` shows the formal-verification pattern for DeFi-style contracts: define a pure financial state machine, prove invariants about it, then call the verified transitions from NEAR entrypoints.
+
+## Formal verification pattern
+
+Lean lets us keep proof-carrying contract code in the same file as executable NEAR methods. The recommended split is:
+
+```lean
+namespace Spec
+  -- Pure model: no IO, no storage, no host calls.
+  def deposit (s : State) (amount : Nat) : State := ...
+  theorem deposit_preserves_solvent ... := by ...
+end Spec
+
+namespace StorageState
+  -- Boundary layer: map verified model state to NEAR storage.
+end StorageState
+
+def deposit : Contract.Method .update := Contract.update "deposit" do
+  -- Runtime guards + storage IO.
+  let next := Spec.deposit current amount
+  StorageState.write next
+```
+
+`VerifiedVault.lean` proves:
+
+- `empty_solvent`: the initialized vault starts fully collateralized.
+- `deposit_preserves_solvent`: minting 1:1 shares for deposits preserves reserves/shares equality.
+- `withdraw_preserves_solvent`: burning 1:1 shares for withdrawals preserves reserves/shares equality.
+- `canWithdraw_implies_reserve_bound` and `canWithdraw_implies_share_bound`: the runtime withdraw guard implies both reserve and share bounds.
+
+These proofs are checked before EmitZig produces WASM. They do not replace runtime guards, accounting tests, or adversarial integration tests, but they catch broken financial state transitions at compile time.
+
+Run the verified vault against the official sandbox stack:
+
+```bash
+examples/near/scripts/sandbox-verified-vault.sh
+```
+
+The smoke test deploys `VerifiedVault`, runs `init`, deposits 1000 yoctoNEAR, withdraws 250 yoctoNEAR, and checks that `reserves == shares` after every step. Override `NEAR_VAULT_SMOKE_DEPOSIT_YOCTO` and `NEAR_VAULT_SMOKE_WITHDRAW_YOCTO` to test other amounts.
 
 ## Build all examples
 

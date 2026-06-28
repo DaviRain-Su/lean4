@@ -45,6 +45,7 @@ function rootAccountPrefix(value, masterAccount) {
 
 async function main() {
   const network = process.env.NEAR_WORKSPACES_NETWORK || "sandbox";
+  const scenario = process.env.NEAR_WORKSPACES_SCENARIO || "counter";
   const options = {};
   const deployOptions = {};
   if (network === "testnet") {
@@ -95,21 +96,60 @@ async function main() {
       }
     }
 
-    await root.call(contract, "init", {});
-    const initial = await contract.view("get", {});
-    assert.equal(numberResult(initial), 0);
+    if (scenario === "counter") {
+      await root.call(contract, "init", {});
+      const initial = await contract.view("get", {});
+      assert.equal(numberResult(initial), 0);
 
-    await root.call(contract, "increment", {});
-    const afterIncrement = await contract.view("get", {});
-    assert.equal(numberResult(afterIncrement), 1);
+      await root.call(contract, "increment", {});
+      const afterIncrement = await contract.view("get", {});
+      assert.equal(numberResult(afterIncrement), 1);
 
-    console.log(JSON.stringify({
-      ok: true,
-      network,
-      contractId: contract.accountId,
-      initial: numberResult(initial),
-      afterIncrement: numberResult(afterIncrement),
-    }));
+      console.log(JSON.stringify({
+        ok: true,
+        scenario,
+        network,
+        contractId: contract.accountId,
+        initial: numberResult(initial),
+        afterIncrement: numberResult(afterIncrement),
+      }));
+    } else if (scenario === "vault") {
+      const depositAmount = BigInt(process.env.NEAR_VAULT_SMOKE_DEPOSIT_YOCTO || "1000");
+      const withdrawAmount = BigInt(process.env.NEAR_VAULT_SMOKE_WITHDRAW_YOCTO || "250");
+
+      assert(withdrawAmount <= depositAmount, "withdraw amount must not exceed deposit amount");
+
+      await root.call(contract, "init", {});
+      const initial = await contract.view("status", {});
+      assert.deepEqual(initial, { reserves: "0", shares: "0" });
+
+      await root.call(contract, "deposit", {}, { attachedDeposit: depositAmount });
+      const afterDeposit = await contract.view("status", {});
+      assert.deepEqual(afterDeposit, {
+        reserves: depositAmount.toString(),
+        shares: depositAmount.toString(),
+      });
+
+      await root.call(contract, "withdraw", Buffer.from(withdrawAmount.toString(), "utf8"));
+      const afterWithdraw = await contract.view("status", {});
+      const expected = depositAmount - withdrawAmount;
+      assert.deepEqual(afterWithdraw, {
+        reserves: expected.toString(),
+        shares: expected.toString(),
+      });
+
+      console.log(JSON.stringify({
+        ok: true,
+        scenario,
+        network,
+        contractId: contract.accountId,
+        initial,
+        afterDeposit,
+        afterWithdraw,
+      }));
+    } else {
+      throw new Error(`Unknown NEAR_WORKSPACES_SCENARIO: ${scenario}`);
+    }
   } finally {
     await worker.tearDown();
   }

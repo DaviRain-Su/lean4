@@ -1,0 +1,4 @@
+init=l_VerifiedVault_init
+status=l_VerifiedVault_status
+deposit=l_VerifiedVault_deposit
+withdraw=l_VerifiedVault_withdraw
