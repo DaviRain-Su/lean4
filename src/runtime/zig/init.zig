@@ -147,6 +147,10 @@ fn runMainWorker(context: *RunMainContext) void {
 }
 
 pub export fn lean_run_main(main_fn: MainFn, argc: c_int, argv: [*c][*c]u8) callconv(.c) ?*anyopaque {
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) {
+        // Single-threaded WASM: run main inline, no worker thread.
+        return main_fn(argc, argv);
+    }
     if (leanMainUseThreadDisabled()) {
         return main_fn(argc, argv);
     }

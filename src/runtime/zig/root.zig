@@ -63,7 +63,11 @@ comptime {
     _ = io_result;
     _ = io_min;
     _ = io_posix.force_link;
-    if (is_wasm) _ = @import("host/near/mod.zig").libc_shim;
+    if (is_wasm) {
+        // libc_shim is only needed on freestanding (no libc). On WASI libc
+        // provides these symbols; linking the shim would duplicate them.
+        if (builtin.os.tag == .freestanding) _ = @import("host/near/mod.zig").libc_shim;
+    }
     _ = list;
     _ = misc;
     _ = nat;

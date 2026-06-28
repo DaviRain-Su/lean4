@@ -794,6 +794,7 @@ var g_last_runtime_finalize_summary = RuntimeFinalizeSummary{
 };
 
 pub fn defaultWorkerCount() c_uint {
+    if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding) return 1;
     return @intCast(std.Thread.getCpuCount() catch 1);
 }
 
