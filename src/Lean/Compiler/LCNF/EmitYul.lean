@@ -163,14 +163,17 @@ def getStoredType (fvarId : FVarId) : EmitYulM Lean.Expr := do
 def findJoinDecl? (fvarId : FVarId) : EmitYulM (Option (FunDecl .impure)) :=
   return (← read).joinDecls.find? fvarId.name
 
-/-- Run an emitter in a fresh statement buffer and return the statements. -/
+/-- Run an emitter in a fresh statement buffer and return the statements.
+    The captured statements are NOT appended to the outer buffer; the fresh-name
+    counter is preserved across the capture. -/
 def captureStmts (act : EmitYulM Unit) : EmitYulM (Array YStmt) := do
   let saved ← get
-  modify fun _ => { stmts := #[], fresh := saved.fresh }
+  modify fun _ => { saved with stmts := #[] }
   act
-  let out := (← get).stmts
-  modify fun _ => { saved with }
-  pure out
+  let st ← get
+  -- Restore the outer statement buffer but keep the advanced fresh counter.
+  modify fun _ => { saved with fresh := st.fresh }
+  pure st.stmts
 
 -- ---------------------------------------------------------------------------
 -- Collect join point declarations from a Code tree
