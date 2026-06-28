@@ -32,8 +32,19 @@ Lean contract (.lean)         ← User writes this
 EmitZig (.zig)                ← Compiler-generated
     │  extern fn lean_near_* → host/near/lean_near.zig
     ▼
-wasm32-wasi WASM (.wasm)      ← Deployed to NEAR
+wasm32-wasi WASM (.wasm)
+    │  strip WASI imports for the NEAR VM
+    ▼
+NEAR contract WASM
 ```
+
+## Current Surface
+
+- `Amount.U128`, `NearToken`, and `Gas` for bounded chain amounts.
+- `AccountId`, `Env.context`, storage usage, gas, balances, attached deposit, input, logging, panic, and value return.
+- Raw storage, typed keys/slots/maps, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- `Contract.Method` wrappers for init/view/update methods, guards, state helpers, and return helpers.
+- `Promise` creation, batch calls/transfers, callbacks, joins, results, and promise return.
 
 ## Quick Example: Storage-backed Counter Contract
 

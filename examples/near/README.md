@@ -10,6 +10,25 @@ It demonstrates the current Layer 3 SDK surface in `Lean.Near`:
 - `CrossContract.lean` builds a promise, attaches a callback, and returns it.
 - `VerifiedVault.lean` shows the formal-verification pattern for DeFi-style contracts: define a pure financial state machine, prove invariants about it, then call the verified transitions from NEAR entrypoints.
 
+## Current NEAR support
+
+The current support is enough to write and deploy small Lean NEAR contracts through `lean -z` and `tools/zigc-near`:
+
+- Contract methods: `Contract.initializer`, `Contract.view`, `Contract.update`, conventional `STATE` initialization, return helpers, panic/require guards, private-method guard, payable/no-deposit helpers, one-yocto and minimum-deposit checks.
+- Runtime context: current/predecessor/signer account IDs, block height, timestamp, epoch height, storage usage, prepaid/used gas, input string, logging, panic, and value return.
+- Amounts and gas: `Near.Amount.U128` for gas-bounded yoctoNEAR arithmetic, `NearToken` backed by `U128`, typed `Gas`, and checked add/sub/compare helpers for financial logic.
+- Storage: raw string storage, typed `Storage.Key`, `Storage.Slot`, `Storage.TypedMap`, and Rust-SDK-shaped `Store.LookupMap`, `Store.Vector`, and `Store.LazyOption`.
+- Promises: function-call promises, batch creation, transfer actions, callbacks with `thenCall` / `thenBatch`, `join`, promise result inspection, and `returnPromise`.
+- Testing/deploy: local compile checks, official `near-workspaces` + `near-sandbox` smoke tests, and testnet deployment for the counter runner with local `~/.near-credentials` keys.
+
+There are still important limits:
+
+- Method exports are declared in `*.near-methods` files; automatic method dispatch/macros are not implemented yet.
+- Storage codecs are string-backed, not Borsh-compatible. Complex data layouts should define an explicit storage boundary.
+- `Near.Amount.U128` has checked runtime arithmetic, but no general decimal parser/codec in the SDK hot path yet. `VerifiedVault.lean` stores U128 limbs explicitly and keeps user input parsing small and local.
+- Advanced NEAR host APIs such as cryptographic hashes, random seed, validator staking queries, and event-standard helpers are not exposed yet.
+- The testnet helper currently targets the counter scenario. Use sandbox for deterministic CI and add a dedicated script before treating a new scenario as testnet-supported.
+
 ## Formal verification pattern
 
 Lean lets us keep proof-carrying contract code in the same file as executable NEAR methods. The recommended split is:
@@ -17,8 +36,9 @@ Lean lets us keep proof-carrying contract code in the same file as executable NE
 ```lean
 namespace Spec
   -- Pure model: no IO, no storage, no host calls.
-  def deposit (s : State) (amount : Nat) : State := ...
-  theorem deposit_preserves_solvent ... := by ...
+  abbrev Amount := Near.Amount.U128
+  def deposit? (s : State) (amount : Amount) : Option State := ...
+  theorem deposit_preserves_solvent ... : solvent next := by ...
 end Spec
 
 namespace StorageState
@@ -27,18 +47,21 @@ end StorageState
 
 def deposit : Contract.Method .update := Contract.update "deposit" do
   -- Runtime guards + storage IO.
-  let next := Spec.deposit current amount
-  StorageState.write next
+  match Spec.deposit? current amount with
+  | some next => StorageState.write next
+  | none => Contract.panic "vault deposit overflow"
 ```
 
 `VerifiedVault.lean` proves:
 
 - `empty_solvent`: the initialized vault starts fully collateralized.
-- `deposit_preserves_solvent`: minting 1:1 shares for deposits preserves reserves/shares equality.
-- `withdraw_preserves_solvent`: burning 1:1 shares for withdrawals preserves reserves/shares equality.
+- `deposit_preserves_solvent`: checked minting of 1:1 shares for deposits preserves reserves/shares equality.
+- `withdraw_preserves_solvent`: checked burning of 1:1 shares for withdrawals preserves reserves/shares equality.
 - `canWithdraw_implies_reserve_bound` and `canWithdraw_implies_share_bound`: the runtime withdraw guard implies both reserve and share bounds.
 
 These proofs are checked before EmitZig produces WASM. They do not replace runtime guards, accounting tests, or adversarial integration tests, but they catch broken financial state transitions at compile time.
+
+The executable vault path intentionally uses bounded `U128` arithmetic instead of unbounded `Nat` arithmetic. This keeps DeFi-style accounting closer to chain reality: overflow and underflow become explicit `Option` branches, while proofs can still reason over the pure transition functions.
 
 Run the verified vault against the official sandbox stack:
 
