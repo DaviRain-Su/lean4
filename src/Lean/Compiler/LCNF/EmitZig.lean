@@ -1548,7 +1548,7 @@ def emitMainFnIfNeeded : EmitM Unit := do
     emitLns ["  _ = argc;", "  _ = argv;", s!"  return {mainFn}();"]
   emitLns [
     "}",
-    "pub fn main(argc: c_int, argv0: [*c][*c]u8) callconv(.c) c_int {",
+    "export fn main(argc: c_int, argv0: [*c][*c]u8) callconv(.c) c_int {",
     "  const argv = lean_setup_args(argc, argv0);",
     if usesLeanAPI then "  lean_initialize();" else "  lean_initialize_runtime_module();",
     "  var res: LeanObj = " ++ initDefFn ++ "(@as(u8, 1));",
@@ -1567,10 +1567,12 @@ def emitMainFnIfNeeded : EmitM Unit := do
     "  lean_io_result_show_error(res);",
     "  lean_dec_ref(res);",
     "  return 1;",
-    "}",
-    "comptime {",
-    "  @export(\u0026main, .{ .name = \"main\" });",
     "}"
+    -- Note: we emit `export fn main` directly (via the `export` keyword on the
+    -- fn declaration above) rather than `pub fn main + comptime @export`,
+    -- because the latter triggers Zig's `std.start` analysis on
+    -- wasm32-freestanding, which pulls in `std.Io.Threaded` and fails on MVP
+    -- WASM targets (NEAR). The `export` keyword form avoids the start path.
   ]
   emitLn ""
 where
