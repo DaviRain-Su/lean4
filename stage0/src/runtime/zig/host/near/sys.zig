@@ -82,3 +82,47 @@ pub extern "env" fn panic_utf8(len: u64, ptr: u64) noreturn;
 pub extern "env" fn log_utf8(len: u64, ptr: u64) void;
 pub extern "env" fn log_utf16(len: u64, ptr: u64) void;
 pub extern "env" fn abort(msg_ptr: u32, filename_ptr: u32, line: u32, col: u32) noreturn;
+
+// Promises ------------------------------------------------------------------
+
+pub extern "env" fn promise_create(
+    account_id_len: u64,
+    account_id_ptr: u64,
+    function_name_len: u64,
+    function_name_ptr: u64,
+    arguments_len: u64,
+    arguments_ptr: u64,
+    amount_ptr: u64,
+    gas: u64,
+) u64;
+
+pub extern "env" fn promise_then(
+    promise_index: u64,
+    account_id_len: u64,
+    account_id_ptr: u64,
+    function_name_len: u64,
+    function_name_ptr: u64,
+    arguments_len: u64,
+    arguments_ptr: u64,
+    amount_ptr: u64,
+    gas: u64,
+) u64;
+
+pub extern "env" fn promise_and(promise_idx_ptr: u64, promise_idx_count: u64) u64;
+pub extern "env" fn promise_batch_create(account_id_len: u64, account_id_ptr: u64) u64;
+pub extern "env" fn promise_batch_then(promise_index: u64, account_id_len: u64, account_id_ptr: u64) u64;
+
+pub extern "env" fn promise_batch_action_function_call(
+    promise_index: u64,
+    function_name_len: u64,
+    function_name_ptr: u64,
+    arguments_len: u64,
+    arguments_ptr: u64,
+    amount_ptr: u64,
+    gas: u64,
+) void;
+
+pub extern "env" fn promise_batch_action_transfer(promise_index: u64, amount_ptr: u64) void;
+pub extern "env" fn promise_results_count() u64;
+pub extern "env" fn promise_result(result_idx: u64, register_id: u64) u64;
+pub extern "env" fn promise_return(promise_id: u64) void;

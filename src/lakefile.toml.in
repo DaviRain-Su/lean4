@@ -68,6 +68,8 @@ globs = [
   "Lean.Compiler.IR.EmitLLVM",
   # New compiler orphan file used in tests
   "Lean.Compiler.LCNF.Probing",
+  # NEAR smart contract SDK surface
+  "Lean.Near",
 ]
 
 [[lean_lib]]

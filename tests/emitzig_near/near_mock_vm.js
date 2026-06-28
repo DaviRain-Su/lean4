@@ -1,9 +1,11 @@
 const fs = require("fs");
 const wasmPath = process.argv[2] ?? "/tmp/emitzig_near/CounterContractSDK.wasm";
 const initialCount = process.argv[3] ?? "5";
+const attachedDeposit = BigInt(process.argv[4] ?? "0");
 let instance;
 const storage = new Map();
 const registers = new Map();
+const promises = [];
 storage.set("count", Buffer.from(initialCount));
 
 function dv() { return new DataView(instance.exports.memory.buffer); }
@@ -16,6 +18,22 @@ function writeMem(ptr, data) {
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
   const dst = new Uint8Array(instance.exports.memory.buffer, Number(ptr), buf.length);
   for (let i = 0; i < buf.length; i++) dst[i] = buf[i];
+}
+function readU128(ptr) {
+  const view = dv();
+  const lo = view.getBigUint64(Number(ptr), true);
+  const hi = view.getBigUint64(Number(ptr) + 8, true);
+  return lo + (hi << 64n);
+}
+function writeU128(ptr, value) {
+  const view = dv();
+  view.setBigUint64(Number(ptr), value & ((1n << 64n) - 1n), true);
+  view.setBigUint64(Number(ptr) + 8, value >> 64n, true);
+}
+function nextPromise(kind, data) {
+  const idx = BigInt(promises.length);
+  promises.push({ kind, ...data });
+  return idx;
 }
 const env = {
   storage_read: (key_len, key_ptr, register_id) => {
@@ -58,20 +76,66 @@ const env = {
   signer_account_pk: (r) => { registers.set(regId(r), Buffer.alloc(32)); },
   input: (r) => { registers.set(regId(r), Buffer.alloc(0)); },
   block_index: () => BigInt(42), block_timestamp: () => BigInt(0), epoch_height: () => BigInt(1),
-  storage_usage: () => BigInt(0), account_balance: (p) => { writeMem(p, Buffer.alloc(16)); },
-  account_locked_balance: (p) => { writeMem(p, Buffer.alloc(16)); }, attached_deposit: (p) => { writeMem(p, Buffer.alloc(16)); },
+  storage_usage: () => BigInt(0), account_balance: (p) => { writeU128(p, 0n); },
+  account_locked_balance: (p) => { writeU128(p, 0n); }, attached_deposit: (p) => { writeU128(p, attachedDeposit); },
   prepaid_gas: () => BigInt(0), used_gas: () => BigInt(0), random_seed: (r) => { registers.set(regId(r), Buffer.alloc(32)); },
   sha256: (vl,vp,r) => { registers.set(regId(r), Buffer.alloc(32)); }, keccak256: (vl,vp,r) => { registers.set(regId(r), Buffer.alloc(32)); },
   keccak512: (vl,vp,r) => { registers.set(regId(r), Buffer.alloc(64)); }, ripemd160: (vl,vp,r) => { registers.set(regId(r), Buffer.alloc(20)); },
   ed25519_verify: () => 0n, ecrecover: (hl,hp,sl,sp,v,r) => { registers.set(regId(r), Buffer.alloc(0)); return 0n; },
   storage_has_key: (kl,kp) => { return storage.has(readMem(kp,kl)) ? 1n : 0n; },
   storage_remove: (kl,kp,r) => { const k=readMem(kp,kl); const h=storage.has(k); storage.delete(k); return h?1n:0n; },
-  promise_create: () => 0n, promise_then: () => 0n, promise_and: () => 0n, promise_batch_create: () => 0n,
-  promise_batch_then: () => {}, promise_batch_action_create_account: () => {}, promise_batch_action_deploy_contract: () => {},
-  promise_batch_action_function_call: () => {}, promise_batch_action_function_call_weight: () => {}, promise_batch_action_transfer: () => {},
+  promise_create: (al,ap,ml,mp,argsl,argsp,amountp,gas) => {
+    const idx = nextPromise("call", {
+      account: readMem(ap, al),
+      method: readMem(mp, ml),
+      args: readMem(argsp, argsl),
+      amount: readU128(amountp).toString(),
+      gas: gas.toString(),
+    });
+    console.error(`[promise_create] #${idx} ${promises[Number(idx)].account}.${promises[Number(idx)].method}`);
+    return idx;
+  },
+  promise_then: (base,al,ap,ml,mp,argsl,argsp,amountp,gas) => {
+    const idx = nextPromise("then", {
+      base: base.toString(),
+      account: readMem(ap, al),
+      method: readMem(mp, ml),
+      args: readMem(argsp, argsl),
+      amount: readU128(amountp).toString(),
+      gas: gas.toString(),
+    });
+    console.error(`[promise_then] #${idx} after #${base}`);
+    return idx;
+  },
+  promise_and: (ptr,count) => {
+    const ids = [];
+    for (let i = 0; i < Number(count); i++) ids.push(dv().getBigUint64(Number(ptr) + i * 8, true).toString());
+    const idx = nextPromise("and", { ids });
+    console.error(`[promise_and] #${idx} [${ids.join(",")}]`);
+    return idx;
+  },
+  promise_batch_create: (al,ap) => {
+    const idx = nextPromise("batch", { account: readMem(ap, al), actions: [] });
+    console.error(`[promise_batch_create] #${idx} ${promises[Number(idx)].account}`);
+    return idx;
+  },
+  promise_batch_then: (base,al,ap) => {
+    const idx = nextPromise("batch_then", { base: base.toString(), account: readMem(ap, al), actions: [] });
+    console.error(`[promise_batch_then] #${idx} after #${base}`);
+    return idx;
+  },
+  promise_batch_action_create_account: () => {}, promise_batch_action_deploy_contract: () => {},
+  promise_batch_action_function_call: (idx,ml,mp,argsl,argsp,amountp,gas) => {
+    console.error(`[promise_action_function_call] #${idx} ${readMem(mp, ml)} amount=${readU128(amountp)} gas=${gas}`);
+  },
+  promise_batch_action_function_call_weight: () => {}, promise_batch_action_transfer: (idx,amountp) => {
+    console.error(`[promise_action_transfer] #${idx} amount=${readU128(amountp)}`);
+  },
   promise_batch_action_stake: () => {}, promise_batch_action_add_key_with_full_access: () => {},
   promise_batch_action_add_key_with_function_call: () => {}, promise_batch_action_delete_key: () => {},
-  promise_batch_action_delete_account: () => {}, promise_results_count: () => 0n, promise_result: () => 1n, promise_return: () => {},
+  promise_batch_action_delete_account: () => {}, promise_results_count: () => 1n, promise_result: (idx,r) => { registers.set(regId(r), Buffer.from("ok")); return 1n; }, promise_return: (idx) => {
+    console.error(`[promise_return] #${idx}`);
+  },
 };
 const wasi = new Proxy({}, { get: (t,p) => (...a) => {
   if(p==="fd_write"){const[fd,iovs,n,nw]=a;let w=0;for(let i=0;i<n;i++){const ptr=dv().getUint32(iovs+i*8,true),len=dv().getUint32(iovs+i*8+4,true);const s=Buffer.from(instance.exports.memory.buffer,ptr,len).toString();process.stderr.write(s);w+=len}dv().setUint32(nw,w,true);return 0}

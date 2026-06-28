@@ -59,18 +59,26 @@ namespace Near
 
 /-- Token amount in yoctoNEAR (10^-24 NEAR). -/
 structure NearToken where
-  yoctoNear : UInt64
+  yoctoNear : Nat
   deriving Repr
 
 namespace NearToken
 
+def yoctoPerNear : Nat := 1000000000000000000000000
+def yoctoPerMilliNear : Nat := 1000000000000000000000
+def yoctoPerMicroNear : Nat := 1000000000000000000
+
 def zero : NearToken := ⟨0⟩
-def fromYocto (amount : UInt64) : NearToken := ⟨amount⟩
-def fromNear (amount : UInt64) : NearToken := ⟨amount * 1000000000000⟩
+def oneYocto : NearToken := ⟨1⟩
+def fromYocto (amount : Nat) : NearToken := ⟨amount⟩
+def fromNear (amount : Nat) : NearToken := ⟨amount * yoctoPerNear⟩
+def fromMilliNear (amount : Nat) : NearToken := ⟨amount * yoctoPerMilliNear⟩
+def fromMicroNear (amount : Nat) : NearToken := ⟨amount * yoctoPerMicroNear⟩
 def add (a b : NearToken) : NearToken := ⟨a.yoctoNear + b.yoctoNear⟩
 def isZero (t : NearToken) : Bool := t.yoctoNear == 0
 
 instance : Add NearToken := ⟨add⟩
+instance : ToString NearToken := ⟨fun t => toString t.yoctoNear⟩
 instance : Repr NearToken := ⟨fun t _ => toString t.yoctoNear ++ " yoctoNEAR"⟩
 
 end NearToken
@@ -82,9 +90,9 @@ structure Gas where
 
 namespace Gas
 
-def zero : Gas := ⟨0⟩
-def fromGas (gas : UInt64) : Gas := ⟨gas⟩
-def fromTgas (tgas : UInt64) : Gas := ⟨tgas * 1000000000000⟩
+@[inline] def zero : Gas := ⟨0⟩
+@[inline] def fromGas (gas : UInt64) : Gas := ⟨gas⟩
+@[inline] def fromTgas (tgas : UInt64) : Gas := ⟨tgas * 1000000000000⟩
 
 end Gas
 
@@ -207,7 +215,7 @@ instance : Codec NearToken where
   encode t := toString t.yoctoNear
   decode s :=
     match parseNat? s with
-    | some n => some (NearToken.fromYocto n.toUInt64)
+    | some n => some (NearToken.fromYocto n)
     | none => none
 
 instance : Codec Gas where
@@ -352,6 +360,137 @@ end TypedMap
 end Storage
 
 -- ============================================================================
+-- Store collections (adapted from near-sdk-rs `near_sdk::store`)
+-- ============================================================================
+
+namespace Store
+
+/-- Non-iterable persistent key/value map, analogous to `near_sdk::store::LookupMap`. -/
+structure LookupMap (α : Type) where
+  storagePrefix : String
+  deriving Repr
+
+namespace LookupMap
+
+@[inline] def new (storagePrefix : String) : LookupMap α := ⟨storagePrefix⟩
+@[inline] def make (storagePrefix : String) : LookupMap α := new storagePrefix
+
+@[inline] def storageKey (m : LookupMap α) (key : String) : String :=
+  m.storagePrefix ++ ":" ++ key
+
+@[inline] def get [Storage.Codec α] (m : LookupMap α) (key : String) : IO (Option α) :=
+  Storage.readAs? (α := α) (m.storageKey key)
+
+@[inline] def getOr [Storage.Codec α] (m : LookupMap α) (key : String) (default : α) : IO α :=
+  Storage.readAs (α := α) (m.storageKey key) default
+
+@[inline] def insert [Storage.Codec α] (m : LookupMap α) (key : String) (value : α) : IO Bool :=
+  Storage.writeAs (m.storageKey key) value
+
+@[inline] def set [Storage.Codec α] (m : LookupMap α) (key : String) (value : α) : IO Bool :=
+  m.insert key value
+
+@[inline] def containsKey (m : LookupMap α) (key : String) : IO Bool :=
+  Storage.contains (m.storageKey key)
+
+@[inline] def remove (m : LookupMap α) (key : String) : IO Bool :=
+  Storage.remove (m.storageKey key)
+
+@[inline] def modify [Storage.Codec α] (m : LookupMap α) (key : String) (default : α) (f : α → α) : IO α := do
+  let current ← m.getOr key default
+  let next := f current
+  let _ ← m.insert key next
+  pure next
+
+end LookupMap
+
+/-- Lazily loaded optional value backed by a single storage key. -/
+structure LazyOption (α : Type) where
+  key : Storage.Key α
+  deriving Repr
+
+namespace LazyOption
+
+@[inline] def new (key : String) : LazyOption α := ⟨Storage.Key.make key⟩
+@[inline] def make (key : String) : LazyOption α := new key
+
+@[inline] def get [Storage.Codec α] (slot : LazyOption α) : IO (Option α) :=
+  slot.key.read?
+
+@[inline] def getOr [Storage.Codec α] (slot : LazyOption α) (default : α) : IO α :=
+  slot.key.read default
+
+@[inline] def set [Storage.Codec α] (slot : LazyOption α) (value : α) : IO Bool :=
+  slot.key.write value
+
+@[inline] def isSome (slot : LazyOption α) : IO Bool :=
+  slot.key.contains
+
+@[inline] def remove (slot : LazyOption α) : IO Bool :=
+  slot.key.remove
+
+end LazyOption
+
+/-- Growable persistent vector. Values are stored under `{storagePrefix}:item:{idx}` and length under `{storagePrefix}:len`. -/
+structure Vector (α : Type) where
+  storagePrefix : String
+  deriving Repr
+
+namespace Vector
+
+@[inline] def new (storagePrefix : String) : Vector α := ⟨storagePrefix⟩
+@[inline] def make (storagePrefix : String) : Vector α := new storagePrefix
+
+@[inline] def lenKey (v : Vector α) : String := v.storagePrefix ++ ":len"
+@[inline] def itemKey (v : Vector α) (idx : Nat) : String := v.storagePrefix ++ ":item:" ++ toString idx
+
+@[inline] def len (v : Vector α) : IO Nat :=
+  Storage.readAs (α := Nat) v.lenKey 0
+
+@[inline] def isEmpty (v : Vector α) : IO Bool := do
+  pure ((← v.len) == 0)
+
+@[inline] def get [Storage.Codec α] (v : Vector α) (idx : Nat) : IO (Option α) := do
+  let n ← v.len
+  if idx < n then
+    Storage.readAs? (α := α) (v.itemKey idx)
+  else
+    pure none
+
+@[inline] def get! [Storage.Codec α] (v : Vector α) (idx : Nat) (default : α) : IO α := do
+  match (← v.get idx) with
+  | some value => pure value
+  | none => pure default
+
+@[inline] def set [Storage.Codec α] (v : Vector α) (idx : Nat) (value : α) : IO Bool := do
+  let n ← v.len
+  if idx < n then
+    Storage.writeAs (v.itemKey idx) value
+  else
+    pure false
+
+@[inline] def push [Storage.Codec α] (v : Vector α) (value : α) : IO Nat := do
+  let n ← v.len
+  let _ ← Storage.writeAs (v.itemKey n) value
+  let _ ← Storage.writeAs v.lenKey (n + 1)
+  pure n
+
+@[inline] def pop [Storage.Codec α] (v : Vector α) : IO (Option α) := do
+  let n ← v.len
+  if n == 0 then
+    pure none
+  else
+    let idx := n - 1
+    let value ← Storage.readAs? (α := α) (v.itemKey idx)
+    let _ ← Storage.remove (v.itemKey idx)
+    let _ ← Storage.writeAs v.lenKey idx
+    pure value
+
+end Vector
+
+end Store
+
+-- ============================================================================
 -- Environment (adapted from near-sdk-zig env.zig)
 -- ============================================================================
 
@@ -365,6 +504,10 @@ opaque currentAccountId : IO String
 @[extern "lean_near_predecessor_account_id"]
 opaque predecessorAccountId : IO String
 
+/-- Get the signer account ID. -/
+@[extern "lean_near_signer_account_id"]
+opaque signerAccountId : IO String
+
 /-- Get the current block timestamp (nanoseconds since epoch). -/
 @[extern "lean_near_block_timestamp"]
 opaque blockTimestamp : IO UInt64
@@ -372,6 +515,30 @@ opaque blockTimestamp : IO UInt64
 /-- Get the current block height. -/
 @[extern "lean_near_block_height"]
 opaque blockHeight : IO UInt64
+
+/-- Get the current epoch height. -/
+@[extern "lean_near_epoch_height"]
+opaque epochHeight : IO UInt64
+
+/-- Get storage currently used by the contract, in bytes. -/
+@[extern "lean_near_storage_usage"]
+opaque storageUsage : IO UInt64
+
+/-- Get raw prepaid gas. -/
+@[extern "lean_near_prepaid_gas"]
+opaque prepaidGasRaw : IO UInt64
+
+/-- Get raw gas already burnt by this execution. -/
+@[extern "lean_near_used_gas"]
+opaque usedGasRaw : IO UInt64
+
+/-- Get account balance as a decimal yoctoNEAR string. -/
+@[extern "lean_near_account_balance"]
+opaque accountBalanceYocto : IO String
+
+/-- Get attached deposit as a decimal yoctoNEAR string. -/
+@[extern "lean_near_attached_deposit"]
+opaque attachedDepositYocto : IO String
 
 /-- Read the raw input of the contract call. -/
 @[extern "lean_near_input"]
@@ -385,6 +552,10 @@ opaque valueReturn (data : String) : IO Unit
 @[extern "lean_near_log"]
 opaque log (msg : String) : IO Unit
 
+/-- Abort execution with a UTF-8 panic message. -/
+@[extern "lean_near_panic_str"]
+opaque panicStr (msg : String) : IO Unit
+
 /-- Get the current contract account as an `AccountId`. -/
 @[inline] def currentAccount : IO AccountId := do
   pure (AccountId.unchecked (← currentAccountId))
@@ -393,6 +564,32 @@ opaque log (msg : String) : IO Unit
 @[inline] def predecessorAccount : IO AccountId := do
   pure (AccountId.unchecked (← predecessorAccountId))
 
+/-- Get the signer account as an `AccountId`. -/
+@[inline] def signerAccount : IO AccountId := do
+  pure (AccountId.unchecked (← signerAccountId))
+
+/-- Get prepaid gas as a typed `Gas` value. -/
+@[inline] def prepaidGas : IO Gas := do
+  pure (Gas.fromGas (← prepaidGasRaw))
+
+/-- Get used gas as a typed `Gas` value. -/
+@[inline] def usedGas : IO Gas := do
+  pure (Gas.fromGas (← usedGasRaw))
+
+/-- Parse a decimal yoctoNEAR string returned by the bridge. -/
+@[inline] def parseNearToken (raw : String) : NearToken :=
+  match Storage.parseNat? raw with
+  | some n => NearToken.fromYocto n
+  | none => NearToken.zero
+
+/-- Get the current account balance. -/
+@[inline] def accountBalance : IO NearToken := do
+  pure (parseNearToken (← accountBalanceYocto))
+
+/-- Get the deposit attached to this call. -/
+@[inline] def attachedDeposit : IO NearToken := do
+  pure (parseNearToken (← attachedDepositYocto))
+
 /-- Alias for raw contract input as a UTF-8 string. -/
 @[inline] def inputString : IO String := input
 
@@ -400,8 +597,15 @@ opaque log (msg : String) : IO Unit
 structure Context where
   currentAccount : AccountId
   predecessorAccount : AccountId
+  signerAccount : AccountId
   blockHeight : UInt64
   blockTimestamp : UInt64
+  epochHeight : UInt64
+  storageUsage : UInt64
+  prepaidGas : Gas
+  usedGas : Gas
+  accountBalance : NearToken
+  attachedDeposit : NearToken
   input : String
   deriving Repr
 
@@ -409,10 +613,30 @@ structure Context where
 @[inline] def context : IO Context := do
   let currentAccount ← currentAccount
   let predecessorAccount ← predecessorAccount
+  let signerAccount ← signerAccount
   let blockHeight ← blockHeight
   let blockTimestamp ← blockTimestamp
+  let epochHeight ← epochHeight
+  let storageUsage ← storageUsage
+  let prepaidGas ← prepaidGas
+  let usedGas ← usedGas
+  let accountBalance ← accountBalance
+  let attachedDeposit ← attachedDeposit
   let input ← input
-  pure { currentAccount, predecessorAccount, blockHeight, blockTimestamp, input }
+  pure {
+    currentAccount,
+    predecessorAccount,
+    signerAccount,
+    blockHeight,
+    blockTimestamp,
+    epochHeight,
+    storageUsage,
+    prepaidGas,
+    usedGas,
+    accountBalance,
+    attachedDeposit,
+    input
+  }
 
 /-- Log any value with a `ToString` instance. -/
 @[inline] def logValue [ToString α] (value : α) : IO Unit :=
@@ -490,12 +714,15 @@ structure Method (mode : Mode) where
 @[inline] def returnEncoded [Storage.Codec α] (value : α) : IO Unit :=
   returnValue (Storage.Codec.encode value)
 
-/-- Require a condition. Until the bridge exposes NEAR panic, failures log and return false. -/
+/-- Abort contract execution with a NEAR panic message. -/
+@[inline] def panic (msg : String) : IO Unit := Env.panicStr msg
+
+/-- Require a condition. Failures panic, matching the Rust SDK guard semantics. -/
 @[inline] def require (condition : Bool) (msg : String) : IO Bool := do
   if condition then
     pure true
   else
-    Env.log msg
+    panic msg
     pure false
 
 /-- Require that the contract is already initialized. -/
@@ -514,6 +741,26 @@ structure Method (mode : Mode) where
 /-- Require the predecessor to match an expected account. -/
 @[inline] def requirePredecessor (account : AccountId) : IO Bool := do
   require (← isPredecessor account) ("expected predecessor " ++ toString account)
+
+/-- Rust SDK `#[private]` equivalent: only the contract account can call this path. -/
+@[inline] def requirePrivate (methodName : String := "method") : IO Bool := do
+  let current ← Env.currentAccount
+  let predecessor ← Env.predecessorAccount
+  require (current == predecessor) ("Method " ++ methodName ++ " is private")
+
+/-- Require that no NEAR tokens were attached. This is the default Rust SDK behavior without `#[payable]`. -/
+@[inline] def requireNoDeposit : IO Bool := do
+  require ((← Env.attachedDeposit).isZero) "Method is not payable"
+
+/-- Require exactly one yoctoNEAR. Commonly used to prove full-access-key intent. -/
+@[inline] def requireOneYocto : IO Bool := do
+  let deposit ← Env.attachedDeposit
+  require (deposit.yoctoNear == NearToken.oneYocto.yoctoNear) "Requires attached deposit of exactly 1 yoctoNEAR"
+
+/-- Require at least a caller-provided deposit. -/
+@[inline] def requireMinDeposit (minDeposit : NearToken) : IO Bool := do
+  let deposit ← Env.attachedDeposit
+  require (minDeposit.yoctoNear <= deposit.yoctoNear) ("Requires attached deposit of at least " ++ toString minDeposit)
 
 /-- Initialize the contract state. -/
 @[inline] def initState (value : String) : IO Bool := Storage.write "STATE" value
@@ -537,6 +784,112 @@ structure Method (mode : Mode) where
   Storage.readAs (α := α) "STATE" default
 
 end Contract
+
+-- ============================================================================
+-- Promises (adapted from near-sdk-rs `Promise` and `env::promise_*`)
+-- ============================================================================
+
+/-- Raw NEAR promise index returned by the host. -/
+structure PromiseIndex where
+  value : UInt64
+  deriving BEq, Repr
+
+/-- A scheduled NEAR promise. -/
+structure Promise where
+  index : PromiseIndex
+  deriving Repr
+
+namespace Promise
+
+@[extern "lean_near_promise_create"]
+opaque createRaw (accountId : String) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO UInt64
+
+@[extern "lean_near_promise_then"]
+opaque thenRaw (promiseIndex : UInt64) (accountId : String) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO UInt64
+
+@[extern "lean_near_promise_and2"]
+opaque and2Raw (left : UInt64) (right : UInt64) : IO UInt64
+
+@[extern "lean_near_promise_batch_create"]
+opaque batchCreateRaw (accountId : String) : IO UInt64
+
+@[extern "lean_near_promise_batch_then"]
+opaque batchThenRaw (promiseIndex : UInt64) (accountId : String) : IO UInt64
+
+@[extern "lean_near_promise_batch_action_function_call"]
+opaque batchActionFunctionCallRaw (promiseIndex : UInt64) (methodName : String) (args : String) (amountYocto : String) (gas : UInt64) : IO Unit
+
+@[extern "lean_near_promise_batch_action_transfer"]
+opaque batchActionTransferRaw (promiseIndex : UInt64) (amountYocto : String) : IO Unit
+
+@[extern "lean_near_promise_results_count"]
+opaque resultsCount : IO UInt64
+
+@[extern "lean_near_promise_result_status"]
+opaque resultStatusRaw (resultIdx : UInt64) : IO UInt64
+
+@[extern "lean_near_promise_result"]
+opaque resultRaw (resultIdx : UInt64) : IO (Option String)
+
+@[extern "lean_near_promise_return"]
+opaque returnRaw (promiseIndex : UInt64) : IO Unit
+
+@[inline] def ofIndex (idx : UInt64) : Promise :=
+  ⟨⟨idx⟩⟩
+
+/-- Schedule one function-call promise, analogous to `env::promise_create`. -/
+@[inline] def create (receiver : AccountId) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
+  pure (ofIndex (← createRaw receiver.id methodName args (toString deposit.yoctoNear) gas.inner))
+
+/-- Create an empty promise batch for a receiver account. -/
+@[inline] def new (receiver : AccountId) : IO Promise := do
+  pure (ofIndex (← batchCreateRaw receiver.id))
+
+/-- Add a function-call action to a promise batch. Returns the same promise for chaining. -/
+@[inline] def functionCall (promise : Promise) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
+  batchActionFunctionCallRaw promise.index.value methodName args (toString deposit.yoctoNear) gas.inner
+  pure promise
+
+/-- Add a transfer action to a promise batch. Returns the same promise for chaining. -/
+@[inline] def transfer (promise : Promise) (amount : NearToken) : IO Promise := do
+  batchActionTransferRaw promise.index.value (toString amount.yoctoNear)
+  pure promise
+
+/-- Attach a callback batch to an existing promise. -/
+@[inline] def thenBatch (promise : Promise) (receiver : AccountId) : IO Promise := do
+  pure (ofIndex (← batchThenRaw promise.index.value receiver.id))
+
+/-- Attach a callback function call to an existing promise. -/
+@[inline] def thenCall (promise : Promise) (receiver : AccountId) (methodName : String) (args : String) (deposit : NearToken) (gas : Gas) : IO Promise := do
+  pure (ofIndex (← thenRaw promise.index.value receiver.id methodName args (toString deposit.yoctoNear) gas.inner))
+
+/-- Join two promises so a callback can wait on both. -/
+@[inline] def join (left right : Promise) : IO Promise := do
+  pure (ofIndex (← and2Raw left.index.value right.index.value))
+
+/-- Return this promise as the current method result. -/
+@[inline] def returnPromise (promise : Promise) : IO Unit :=
+  returnRaw promise.index.value
+
+inductive Result where
+  | notReady
+  | successful (data : String)
+  | failed
+  deriving Repr
+
+/-- Read a callback result. Successful data is returned as a UTF-8 string. -/
+@[inline] def result (resultIdx : UInt64) : IO Result := do
+  let status ← resultStatusRaw resultIdx
+  if status == 1 then
+    match (← resultRaw resultIdx) with
+    | some data => pure (.successful data)
+    | none => pure .notReady
+  else if status == 2 then
+    pure .failed
+  else
+    pure .notReady
+
+end Promise
 
 -- ============================================================================
 -- Persistent collections (adapted from near-sdk-zig collections/)

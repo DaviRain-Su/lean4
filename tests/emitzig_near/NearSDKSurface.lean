@@ -11,6 +11,9 @@ def countKey : Storage.Key UInt64 := Storage.Key.make "count"
 def countSlot : Storage.Slot UInt64 := Storage.Slot.make "last-count"
 def owners : Storage.TypedMap AccountId := Storage.TypedMap.make "owners"
 def flags : Storage.TypedMap Bool := Storage.TypedMap.make "flags"
+def scores : Store.LookupMap UInt64 := Store.LookupMap.new "scores"
+def history : Store.Vector UInt64 := Store.Vector.new "history"
+def lazyOwner : Store.LazyOption AccountId := Store.LazyOption.new "lazy-owner"
 
 def initBody : Contract.InitM Unit := do
   let ok ← Contract.requireNotInitialized
@@ -18,6 +21,7 @@ def initBody : Contract.InitM Unit := do
     let owner := AccountId.unchecked "owner.testnet"
     let _ ← Contract.initStateAs owner
     let _ ← owners.set "owner" owner
+    let _ ← lazyOwner.set owner
     pure ()
 
 def viewBody : Contract.ViewM Unit := do
@@ -31,6 +35,8 @@ def incrementBody : Contract.UpdateM Unit := do
   let _ ← countSlot.write n
   let _ ← owners.set "current" ctx.currentAccount
   let _ ← flags.set "initialized" (← Contract.isInitialized)
+  let _ ← scores.insert "current" n
+  let _ ← history.push n
   Contract.returnJson ("{\"count\":\"" ++ toString n ++ "\"}")
 
 def initMethod : Contract.Method .init := Contract.initializer "init" initBody
