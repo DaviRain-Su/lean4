@@ -1495,6 +1495,39 @@ intact while shedding the concurrency machinery a single-threaded VM cannot use.
 This is the same `comptime`-select pattern as the Allocator backend (2.5): one
 source tree, the profile picks the threading model, no per-target fork.
 
+#### 5. WASM probe: concrete blockers (measured)
+
+Running `zig build -Dtarget=wasm32-wasi` against the current runtime (with
+the zig-bigint mpz backend and the `is_wasm` build guard) cleared the GMP /
+libuv / pthread link blockers and surfaced the remaining adaptation work as
+concrete compile errors. The still-open items, each mapping to a design above:
+
+- **`io_posix.zig` is WASI-incompatible** (~11 errors: `void` fd types,
+  missing `CLOEXEC`, `whence_t` mismatch). It is a set of `pub export fn`
+  Lean IO primitives (`lean_io_prim_handle_*`, `lean_io_getenv`, ...). On
+  WASM these must be provided as stubs returning IO-unsupported, equivalent
+  to the `HostIo.none` backend in F.2.1 — a parallel `io_wasm.zig` selected
+  by the profile.
+- **`sync.zig` uses pthread directly** (`pthread_mutex_t` / `pthread_cond_t`).
+  With pthreads excluded from `runtime_c.h` on WASM, these types vanish. The
+  Mutex/Condvar need a single-threaded degenerate implementation (no-op lock /
+  signal), matching F.2.4.
+- **`lean_object.zig` ABI assertions assume 64-bit pointers**
+  (`lean_thunk_object must be 24 bytes`). On wasm32 the struct is 16 bytes.
+  These comptime checks need per-target expected sizes (the layout itself is
+  correct; only the assertion constants are 64-bit-only).
+- **`std.Thread` spawn residual** in `task_manager` — the `single_threaded =
+  true` module flag removed most, but the task scheduler still references spawn
+  paths that need an inline single-worker fallback (F.2.4).
+- **`std.c` wasm-mvp calling-convention warnings** — a handful of libc
+  bindings translate to `void`-parameter errors under the `wasm_mvp` CC;
+  these are upstream Zig 0.16 translate-c rough edges worked around by the
+  same stubbing as io_posix.
+
+None of these are design unknowns — each is named in F.2.1/F.2.4 already. The
+probe confirms the order: HostIo stubs (io_posix) and single-threaded sync are
+the next concrete slice, after which a wasm32 link should succeed.
+
 ### F.3 `leanzigc` target / profile propagation
 
 The Phase 1 target selection lives in the `zig-cc` / `zig-cxx` wrapper scripts
