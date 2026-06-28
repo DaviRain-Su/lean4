@@ -19,3 +19,7 @@ pub const export_allocator_symbols: bool = true;
 /// (see allocator.resolveBackend) because Zig 0.16 addOptions values are
 /// not comptime-known at container scope.
 pub const allocator_backend: u8 = 0;
+
+/// Big-integer (mpz) backend selector (source-file constant; comptime).
+/// 0 = gmp (native default), 1 = zig-bigint (std.math.big.int, WASM-safe).
+pub const mpz_backend: u8 = 0;
