@@ -322,15 +322,38 @@ add_test_pile(emitzig *.lean)
 
 if(LEAN_ZIG_RUNTIME)
   find_program(ZIG zig REQUIRED)
+  if(GMP_LIBRARIES)
+    get_filename_component(EMITZIG_GMP_LIBRARY_DIR "${GMP_LIBRARIES}" DIRECTORY)
+    get_filename_component(EMITZIG_GMP_LIBRARY_NAME "${GMP_LIBRARIES}" NAME_WE)
+    if(EMITZIG_GMP_LIBRARY_NAME MATCHES "^lib(.+)$")
+      set(EMITZIG_GMP_LIBRARY_NAME "${CMAKE_MATCH_1}")
+    endif()
+  else()
+    set(EMITZIG_GMP_LIBRARY_DIR "")
+    set(EMITZIG_GMP_LIBRARY_NAME "gmp")
+  endif()
+  string(JOIN "|" EMITZIG_LIBUV_INCLUDE_DIRS ${LIBUV_INCLUDE_DIRS})
+  string(JOIN "|" EMITZIG_LIBUV_LIBRARY_DIRS ${LIBUV_LIBRARY_DIRS})
+  string(JOIN "|" EMITZIG_LIBUV_LIBRARIES ${LIBUV_LIBRARIES})
+  set(
+    EMITZIG_RUNTIME_ZIG_ARGS
+    --prefix "${MANGLED_BINARY_DIR}/runtime/zig/zig-out"
+    --cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-cache"
+    --global-cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-global-cache"
+    -Dlean-include-dir=${MANGLED_BINARY_DIR}/include
+    -Dgmp-include-dir=${GMP_INCLUDE_DIR}
+    -Dgmp-library-dir=${EMITZIG_GMP_LIBRARY_DIR}
+    -Dgmp-library-name=${EMITZIG_GMP_LIBRARY_NAME}
+    -Dlibuv-include-dirs=${EMITZIG_LIBUV_INCLUDE_DIRS}
+    -Dlibuv-library-dirs=${EMITZIG_LIBUV_LIBRARY_DIRS}
+    -Dlibuv-libraries=${EMITZIG_LIBUV_LIBRARIES}
+  )
   add_test(
     NAME runtime/zig
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/runtime/zig"
     COMMAND
       "${ZIG}" build test --test-timeout 60s
-      --prefix "${MANGLED_BINARY_DIR}/runtime/zig/zig-out"
-      --cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-cache"
-      --global-cache-dir "${MANGLED_BINARY_DIR}/runtime/zig/.zig-global-cache"
-      -Dlean-include-dir=${MANGLED_BINARY_DIR}/include
+      ${EMITZIG_RUNTIME_ZIG_ARGS}
   )
   set(EMITZIG_ZIGRT_TESTS
     Array.lean
