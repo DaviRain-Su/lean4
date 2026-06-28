@@ -15,9 +15,9 @@
 pub const export_allocator_symbols: bool = true;
 
 /// Raw-memory backend selector, injected by build.zig addOptions.
-/// 0 = libc, 1 = page, 2 = external_cpp. Resolved at runtime startup
-/// (see allocator.resolveBackend) because Zig 0.16 addOptions values are
-/// not comptime-known at container scope.
+/// 0 = libc, 1 = page, 2 = external_cpp, 3 = near (NEAR bump allocator).
+/// Resolved at runtime startup (see allocator.resolveBackend) because Zig
+/// 0.16 addOptions values are not comptime-known at container scope.
 pub const allocator_backend: u8 = 0;
 
 /// Big-integer (mpz) backend selector (source-file constant; comptime).

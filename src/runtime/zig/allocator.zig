@@ -103,6 +103,27 @@ const ExternalCppBackend = struct {
     }
 };
 
+/// `near` backend: NEAR host bump allocator over the WASM linear-memory heap.
+/// Allocations are bumped and never individually freed (the host reclaims the
+/// whole memory at end of call). This is the `wasi-arena` backend (doc F.2.1).
+const NearBackend = struct {
+    const near_alloc = @import("host/near/mod.zig").allocator;
+
+    var instance: Allocator = .{
+        .ctx = undefined,
+        .alloc = &nearAlloc,
+        .free = &nearFree,
+    };
+
+    fn nearAlloc(_: *anyopaque, size: usize, alignment: Allocator.Alignment) ?[*]u8 {
+        return near_alloc.bytesAligned(size, alignment.toByteUnits());
+    }
+
+    fn nearFree(_: *anyopaque, _: [*]u8, _: usize, _: Allocator.Alignment) void {
+        // Bump allocator: free is a no-op.
+    }
+};
+
 /// The process-global allocator, unresolved until first use (lazy resolve)
 /// or `resolveBackend()` runs. Lazy init lets any test file trigger allocation
 /// without each one needing a `test {}` setup block.
@@ -134,6 +155,7 @@ pub fn resolveBackend() void {
         0 => LibcBackend.instance,
         1 => PageBackend.instance,
         2 => ExternalCppBackend.instance,
+        3 => NearBackend.instance,
         else => LibcBackend.instance,
     };
     resolved = true;
