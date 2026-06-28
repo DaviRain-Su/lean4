@@ -1,22 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Compile Lean-generated Zig code into a NEAR-compatible WASM module.
+# Compile Lean-generated Zig code into a WASM module with full runtime.
 #
 # Usage: zigc-near <input.zig> [output.wasm]
 #
-# This wrapper produces a wasm32-freestanding MVP WASM module compatible with
-# the NEAR VM. It disables all post-MVP features (bulk_memory, sign_ext, simd,
-# multivalue, reference_types, atomics) and links against the Lean Zig runtime
-# (libleanrt_zig) built with the NEAR host backend.
-#
-# Prerequisites:
-#   - zig on PATH
-#   - lean_rt.zig at src/runtime/zig/lean_rt.zig (the runtime entry)
-#
-# Environment:
-#   LEAN_RT_ZIG   path to lean_rt.zig (default: <root>/src/runtime/zig/lean_rt.zig)
-#   NEAR_OPTIMIZE optimization level (default: ReleaseSmall for minimal size)
+# Produces a wasm32-wasi WASM module that can be executed by wasmtime or
+# deployed to NEAR (after import stripping). Links against the Lean Zig
+# runtime (libleanrt_zig) built with the NEAR host backend, plus the
+# lean_near bridge (storage/context/IO wrappers).
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -24,25 +16,31 @@ INPUT="$1"
 OUTPUT="${2:-$(basename "$INPUT" .zig).wasm}"
 
 LEAN_RT_ZIG="${LEAN_RT_ZIG:-$ROOT/src/runtime/zig/lean_rt.zig}"
-OPTIMIZE="${NEAR_OPTIMIZE:-ReleaseSmall}"
+LEAN_NEAR_ZIG="${LEAN_NEAR_ZIG:-$ROOT/src/runtime/zig/host/near/lean_near.zig}"
+LEANRT_LIB="${LEANRT_LIB:-$ROOT/src/runtime/zig/zig-out/lib/libleanrt_zig.a}"
+OPTIMIZE="${NEAR_OPTIMIZE:-ReleaseFast}"
+WASM_TARGET="${WASM_TARGET:-wasm32-wasi}"
+WASM_CPU="${WASM_CPU:-baseline+atomics}"
 
-if [[ ! -f "$LEAN_RT_ZIG" ]]; then
-  echo "zigc-near: lean_rt.zig not found at $LEAN_RT_ZIG" >&2
-  exit 1
-fi
-
-# NEAR VM only supports MVP WASM (WebAssembly 1.0).
-# Explicitly disable every post-MVP feature so the linker rejects any code
-# that would emit unsupported instructions.
-NEAR_CPU="baseline-bulk_memory-sign_ext-simd128-multivalue-reference_types-atomics"
+for f in "$LEAN_RT_ZIG" "$LEAN_NEAR_ZIG" "$LEANRT_LIB"; do
+  if [[ ! -f "$f" ]]; then
+    echo "zigc-near: required file not found: $f" >&2
+    echo "  Build the runtime first: cd src/runtime/zig && zig build -Dtarget=$WASM_TARGET --prefix zig-out" >&2
+    exit 1
+  fi
+done
 
 exec zig build-exe \
-  -target wasm32-freestanding \
+  -target "$WASM_TARGET" \
   -fno-entry \
   -O "$OPTIMIZE" \
-  -mcpu "$NEAR_CPU" \
+  -mcpu "$WASM_CPU" \
   --export=main \
+  "$LEANRT_LIB" \
   --dep lean_rt \
+  --dep lean_near \
   -Mroot="$INPUT" \
   -Mlean_rt="$LEAN_RT_ZIG" \
+  -Mlean_near="$LEAN_NEAR_ZIG" \
+  -lc \
   -femit-bin="$OUTPUT"

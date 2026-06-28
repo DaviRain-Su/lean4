@@ -34,6 +34,7 @@ set(
   uv/system.cpp
   uv/signal.cpp
   openssl.cpp
+  lean_near_stubs.c
 )
 if(USE_MIMALLOC)
   list(APPEND RUNTIME_OBJS ${LEAN_BINARY_DIR}/../mimalloc/src/mimalloc/src/static.c)

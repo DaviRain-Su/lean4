@@ -965,6 +965,17 @@ public def runtimeExternDeclsGenerated : List String := [
   "extern fn tanf(_0: f32) callconv(.c) f32;",
   "extern fn tanh(_0: f64) callconv(.c) f64;",
   "extern fn tanhf(_0: f32) callconv(.c) f32;",
+  "extern fn lean_near_storage_write(_0: LeanObj, _1: LeanObj) callconv(.c) LeanObj;",
+  "extern fn lean_near_storage_read(_0: LeanObj) callconv(.c) LeanObj;",
+  "extern fn lean_near_storage_has_key(_0: LeanObj) callconv(.c) LeanObj;",
+  "extern fn lean_near_storage_remove(_0: LeanObj) callconv(.c) LeanObj;",
+  "extern fn lean_near_current_account_id() callconv(.c) LeanObj;",
+  "extern fn lean_near_predecessor_account_id() callconv(.c) LeanObj;",
+  "extern fn lean_near_block_timestamp() callconv(.c) LeanObj;",
+  "extern fn lean_near_block_height() callconv(.c) LeanObj;",
+  "extern fn lean_near_input() callconv(.c) LeanObj;",
+  "extern fn lean_near_value_return(_0: LeanObj) callconv(.c) LeanObj;",
+  "extern fn lean_near_log(_0: LeanObj) callconv(.c) LeanObj;",
 ]
 
 end RuntimeExterns

@@ -64,6 +64,9 @@ comptime {
     _ = io_min;
     _ = io_posix.force_link;
     if (is_wasm) {
+        // Force-link the NEAR host bridge (lean_near exports) so they are
+        // available to Lean's @[extern] calls in the generated WASM.
+        _ = @import("host/near/mod.zig").lean_near;
         // libc_shim is only needed on freestanding (no libc). On WASI libc
         // provides these symbols; linking the shim would duplicate them.
         if (builtin.os.tag == .freestanding) _ = @import("host/near/mod.zig").libc_shim;
