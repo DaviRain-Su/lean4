@@ -45,6 +45,9 @@ pub const allocation_kind_mpz: u8 = 3;
 
 const AllocationMeta = extern struct {
     payload_size: usize,
+    // On 32-bit targets (wasm32) usize is 4 bytes; pad so the header is a
+    // uniform 16 bytes across native (usize=8) and wasm (usize=4).
+    payload_size_pad: [if (@sizeOf(usize) == 8) 0 else 4]u8 = .{0} ** (if (@sizeOf(usize) == 8) 0 else 4),
     slot_idx: u16,
     kind: u8,
     reserved: u8,

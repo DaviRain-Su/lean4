@@ -15,6 +15,12 @@ pub fn build(b: *std.Build) void {
     const libuv_library_dirs = b.option([]const u8, "libuv-library-dirs", "Resolved libuv library directories from CMake, separated by |") orelse "";
     const libuv_libraries = b.option([]const u8, "libuv-libraries", "Resolved libuv library names from CMake, separated by |") orelse "uv";
 
+    // WASM/freestanding targets have no GMP, libuv, pthreads, or POSIX networking.
+    // The runtime degrades to the zig-bigint mpz backend, host imports, and a
+    // single-threaded task scheduler there (see doc F.2). Native builds link
+    // the full C++ libuv subsystem and GMP as below.
+    const is_wasm = target.result.os.tag == .wasi or target.result.os.tag == .freestanding;
+
 
     const mpz_mod = b.addModule("mpz_zig", .{
         .root_source_file = b.path("mpz_zig.zig"),
@@ -35,18 +41,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .link_libc = true,
+        // WASM targets are single-threaded; std.Thread is unavailable there.
+        .single_threaded = is_wasm,
     });
     root_mod.addImport("mpz_zig", mpz_mod);
     root_mod.addImport("runtime_c", runtime_c.createModule());
     root_mod.addImport("runtime_options", opts_mod);
-    if (gmp_include_dir.len != 0) root_mod.addSystemIncludePath(.{ .cwd_relative = gmp_include_dir });
-    if (gmp_library_dir.len != 0) root_mod.addLibraryPath(.{ .cwd_relative = gmp_library_dir });
-    root_mod.linkSystemLibrary(gmp_library_name, .{ .use_pkg_config = .no });
-    root_mod.linkSystemLibrary("c++", .{});
-    var libuv_include_it = std.mem.tokenizeScalar(u8, libuv_include_dirs, '|');
-    while (libuv_include_it.next()) |dir| root_mod.addSystemIncludePath(.{ .cwd_relative = dir });
-    var libuv_library_dir_it = std.mem.tokenizeScalar(u8, libuv_library_dirs, '|');
-    while (libuv_library_dir_it.next()) |dir| root_mod.addLibraryPath(.{ .cwd_relative = dir });
+    if (!is_wasm) {
+        // Native: link GMP and libc++.
+        if (gmp_include_dir.len != 0) root_mod.addSystemIncludePath(.{ .cwd_relative = gmp_include_dir });
+        if (gmp_library_dir.len != 0) root_mod.addLibraryPath(.{ .cwd_relative = gmp_library_dir });
+        root_mod.linkSystemLibrary(gmp_library_name, .{ .use_pkg_config = .no });
+        root_mod.linkSystemLibrary("c++", .{});
+        var libuv_include_it = std.mem.tokenizeScalar(u8, libuv_include_dirs, '|');
+        while (libuv_include_it.next()) |dir| root_mod.addSystemIncludePath(.{ .cwd_relative = dir });
+        var libuv_library_dir_it = std.mem.tokenizeScalar(u8, libuv_library_dirs, '|');
+        while (libuv_library_dir_it.next()) |dir| root_mod.addLibraryPath(.{ .cwd_relative = dir });
+    }
 
 
 
@@ -55,7 +66,9 @@ pub fn build(b: *std.Build) void {
     // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
     // test-only). A few small helpers (uv_error.cpp, uv_loop_thread.cpp,
     // uv_version.cpp) live alongside the Zig sources.
-    const uv_cpp_sources = &.{
+    // Skipped on WASM: no libuv, no pthreads, no POSIX networking.
+    if (!is_wasm) {
+        const uv_cpp_sources = &.{
         "../uv/dns.cpp",
         "../uv/event_loop.cpp",
         "../uv/net_addr.cpp",
@@ -103,6 +116,7 @@ pub fn build(b: *std.Build) void {
 
     var libuv_library_it = std.mem.tokenizeScalar(u8, libuv_libraries, '|');
     while (libuv_library_it.next()) |lib_name| root_mod.linkSystemLibrary(lib_name, .{ .use_pkg_config = .no });
+    } // end if (!is_wasm)
 
     const lib = b.addLibrary(.{
         .name = "leanrt_zig",
