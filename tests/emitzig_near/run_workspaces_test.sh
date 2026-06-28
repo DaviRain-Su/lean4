@@ -82,5 +82,12 @@ if [[ "${NEAR_STRIP_WASI:-1}" != "0" ]]; then
   DEPLOY_WASM="$STRIPPED_WASM"
 fi
 
-NODE_PATH="$WORKSPACES_DIR/node_modules" \
+NODE_NETWORK_ENV=()
+if [[ -z "${NODE_USE_ENV_PROXY:-}" &&
+      -n "${HTTP_PROXY:-}${HTTPS_PROXY:-}${http_proxy:-}${https_proxy:-}" ]]; then
+  NODE_NETWORK_ENV+=("NODE_USE_ENV_PROXY=1")
+fi
+
+env "${NODE_NETWORK_ENV[@]}" \
+  NODE_PATH="$WORKSPACES_DIR/node_modules" \
   node "$ROOT/tests/emitzig_near/near_workspaces_smoke.cjs" "$DEPLOY_WASM"
