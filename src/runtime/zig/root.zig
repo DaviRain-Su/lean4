@@ -63,6 +63,7 @@ comptime {
     _ = io_result;
     _ = io_min;
     _ = io_posix.force_link;
+    if (is_wasm) _ = @import("host/near/mod.zig").libc_shim;
     _ = list;
     _ = misc;
     _ = nat;

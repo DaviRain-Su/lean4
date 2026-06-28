@@ -18,3 +18,4 @@ pub const sys = @import("sys.zig");
 pub const compat = @import("compat.zig");
 pub const allocator = @import("allocator.zig");
 pub const storage = @import("storage.zig");
+pub const libc_shim = @import("libc_shim.zig");
