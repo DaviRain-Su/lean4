@@ -5,6 +5,8 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const export_allocator_symbols = b.option(bool, "export-allocator-symbols", "Export allocator entrypoints") orelse true;
     const export_lean_helpers = b.option(bool, "export-lean-helpers", "Export higher-level Lean helper symbols") orelse true;
+    // NOTE: allocator_backend is a comptime constant in runtime_options.zig, not
+    // injected here, because Zig 0.16 addOptions exposes values as runtime.
     const lean_include_dir = b.option([]const u8, "lean-include-dir", "Path to directory containing lean/lean.h and generated lean/config.h") orelse "../../include";
     const gmp_include_dir = b.option([]const u8, "gmp-include-dir", "Resolved GMP include directory from CMake") orelse "";
     const gmp_library_dir = b.option([]const u8, "gmp-library-dir", "Resolved GMP library directory from CMake") orelse "";
@@ -25,6 +27,7 @@ pub fn build(b: *std.Build) void {
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
+    // allocator_backend lives in runtime_options.zig (comptime source const).
     const opts_mod = opts.createModule();
 
     const root_mod = b.createModule(.{

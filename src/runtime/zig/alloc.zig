@@ -4,6 +4,12 @@ const testing = std.testing;
 const lean = @import("lean_object.zig");
 const mpz_zig = @import("mpz_zig");
 const runtime_options = @import("runtime_options");
+const allocator_mod = @import("allocator.zig");
+
+/// The comptime-selected raw-memory backend (see `allocator.zig`).
+/// Every tracked allocation routes through this; legacy C++ objects keep
+/// using the libc free path directly since the Zig runtime did not allocate them.
+const backend = &allocator_mod.allocator;
 
 const export_allocator_symbols = runtime_options.export_allocator_symbols;
 const external_allocator = struct {
@@ -27,6 +33,8 @@ pub const LEAN_PAGE_SIZE: usize = 8192;
 pub const LEAN_SEGMENT_SIZE: usize = 8 * 1024 * 1024;
 pub const LEAN_MAX_SMALL_OBJECT_SIZE: usize = 4096;
 pub const LEAN_OBJECT_SIZE_DELTA: usize = 8;
+/// Alignment corresponding to LEAN_OBJECT_SIZE_DELTA (8 bytes).
+const LEAN_OBJECT_SIZE_DELTA_ALIGN: allocator_mod.Allocator.Alignment = .@"8";
 
 const small_slot_count = LEAN_MAX_SMALL_OBJECT_SIZE / LEAN_OBJECT_SIZE_DELTA;
 const allocation_magic: u32 = 0x4C45414E;
@@ -57,7 +65,9 @@ fn emptyFreeLists() [small_slot_count]?*anyopaque {
     return [_]?*anyopaque{null} ** small_slot_count;
 }
 
-pub fn initializeRuntimeAllocator() void {}
+pub fn initializeRuntimeAllocator() void {
+    allocator_mod.resolveBackend();
+}
 
 pub fn initializeThreadAllocator() void {
     g_small_free_lists = emptyFreeLists();
@@ -135,7 +145,7 @@ fn allocationKind(ptr: *anyopaque) ?u8 {
 
 pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const raw = backend.allocBytes(total_size, .@"16");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, 0, kind);
     const payload = payloadFromMeta(meta);
@@ -145,7 +155,9 @@ pub fn allocTrackedPayload(payload_size: usize, kind: u8) *anyopaque {
 }
 
 pub fn freeTrackedPayload(ptr: *anyopaque) void {
-    std.c.free(metaFromPayload(ptr));
+    const meta = metaFromPayload(ptr);
+    const total = @sizeOf(AllocationMeta) + meta.payload_size;
+    backend.free(backend.ctx, @ptrCast(meta), total, .@"16");
 }
 
 pub fn legacyPayloadSize(ptr: *anyopaque) usize {
@@ -180,9 +192,8 @@ fn setHeapHeader(hdr: *lean.lean_object, tag: u8, other: u8) void {
 
 fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), payload_size);
-    const word_count = total_size / @sizeOf(usize);
-    const words = std.heap.page_allocator.alloc(usize, word_count) catch @panic("out of memory");
-    const meta: *AllocationMeta = @ptrCast(words.ptr);
+    const raw = backend.allocBytes(total_size, LEAN_OBJECT_SIZE_DELTA_ALIGN);
+    const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(payload_size, slot_idx, allocation_kind_small);
     const payload = payloadFromMeta(meta);
     zeroPayload(payload, payload_size);
@@ -191,7 +202,7 @@ fn allocSmallFresh(payload_size: usize, slot_idx: usize) *anyopaque {
 
 fn allocLarge(sz: usize) *anyopaque {
     const total_size = checkedAdd(@sizeOf(AllocationMeta), sz);
-    const raw = std.c.malloc(total_size) orelse @panic("out of memory");
+    const raw = backend.allocBytes(total_size, .@"16");
     const meta: *AllocationMeta = @ptrCast(@alignCast(raw));
     meta.* = trackedMeta(sz, 0, allocation_kind_large);
     const payload = payloadFromMeta(meta);
@@ -215,9 +226,11 @@ fn freeSmall(ptr: *anyopaque) void {
 }
 
 fn freeLarge(ptr: *anyopaque) void {
-    if (metaFromPayload(ptr).magic != allocation_magic) @panic("missing allocation record for large object");
+    const meta = metaFromPayload(ptr);
+    if (meta.magic != allocation_magic) @panic("missing allocation record for large object");
     _ = g_test_free_count.fetchAdd(1, .acq_rel);
-    std.c.free(metaFromPayload(ptr));
+    const total = @sizeOf(AllocationMeta) + meta.payload_size;
+    backend.free(backend.ctx, @ptrCast(meta), total, .@"16");
 }
 
 fn freeLegacySmall(ptr: *anyopaque) void {
@@ -393,7 +406,9 @@ pub fn lean_free_object(o: *anyopaque) callconv(.c) void {
             const mpz_obj: *lean.MpzObject = @ptrCast(@alignCast(o));
             mpzValue(mpz_obj).deinit();
             _ = g_test_free_count.fetchAdd(1, .acq_rel);
-            std.c.free(metaFromPayload(o));
+            const meta = metaFromPayload(o);
+            const total = @sizeOf(AllocationMeta) + meta.payload_size;
+            backend.free(backend.ctx, @ptrCast(meta), total, .@"16");
         } else {
             freeDelegatedCppObject(o);
         }
@@ -518,6 +533,13 @@ comptime {
         @export(&lean_alloc_object, .{ .name = "lean_alloc_object" });
         @export(&lean_free_object, .{ .name = "lean_free_object" });
     }
+}
+
+test {
+    // Resolve the backend allocator before any alloc test runs. Production
+    // code calls initializeRuntimeAllocator() at startup; the test harness
+    // does not, so resolve here.
+    allocator_mod.resolveBackend();
 }
 
 test "lean_alloc_object returns aligned non-null pointers" {
