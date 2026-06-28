@@ -71,6 +71,15 @@ These map 1:1 to EVM opcodes via EmitYul. Arguments and return values use `Nat`
 /-- Compute keccak256 of memory `[offset, offset+len)`, returning the hash. -/
 @[extern "lean_evm_keccak256"] opaque keccak256 (offset : Nat) (len : Nat) : IO Nat
 
+/-- Emit a log with `len` bytes of data at memory `offset` (no topics). -/
+@[extern "lean_evm_log0"] opaque log0 (offset : Nat) (len : Nat) : IO Unit
+
+/-- Emit a log with 1 topic and `len` bytes of data. -/
+@[extern "lean_evm_log1"] opaque log1 (topic offset len : Nat) : IO Unit
+
+/-- Emit a log with 2 topics. -/
+@[extern "lean_evm_log2"] opaque log2 (t1 t2 offset len : Nat) : IO Unit
+
 /-! ## Typed aliases -/
 
 /-- A 256-bit unsigned integer, EVM's native word. -/
@@ -103,6 +112,23 @@ namespace Storage
 
   /-- Write a U256 `v` to storage key `k`. -/
   @[inline] def store (k : Nat) (v : Nat) : IO Unit := sstore k v
+
+  /-- Compute a mapping slot: keccak256(key || slot) packed in memory.
+      `key` is the mapping key, `slot` is the base storage slot of the mapping. -/
+  @[inline] def mapSlot (slot key : Nat) : IO Nat := do
+    mstore 0 key
+    mstore 32 slot
+    keccak256 0 64
+
+  /-- Read a U256 from a mapping at (`slot`, `key`). -/
+  @[inline] def mapLoad (slot key : Nat) : IO Nat := do
+    let k ← mapSlot slot key
+    sload k
+
+  /-- Write a U256 `v` to a mapping at (`slot`, `key`). -/
+  @[inline] def mapStore (slot key val : Nat) : IO Unit := do
+    let k ← mapSlot slot key
+    sstore k val
 
 end Storage
 

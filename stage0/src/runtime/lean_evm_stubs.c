@@ -31,3 +31,6 @@ lean_object* lean_evm_selfbalance(void) { return lean_box_nat(0); }
 lean_object* lean_evm_return(uintptr_t offset, uintptr_t len) { (void)offset; (void)len; return lean_box_unit(); }
 lean_object* lean_evm_revert(uintptr_t offset, uintptr_t len) { (void)offset; (void)len; return lean_box_unit(); }
 lean_object* lean_evm_keccak256(uintptr_t offset, uintptr_t len) { (void)offset; (void)len; return lean_box_nat(0); }
+lean_object* lean_evm_log0(uintptr_t offset, uintptr_t len) { (void)offset; (void)len; return lean_box_unit(); }
+lean_object* lean_evm_log1(uintptr_t t, uintptr_t offset, uintptr_t len) { (void)t; (void)offset; (void)len; return lean_box_unit(); }
+lean_object* lean_evm_log2(uintptr_t t1, uintptr_t t2, uintptr_t offset, uintptr_t len) { (void)t1; (void)t2; (void)offset; (void)len; return lean_box_unit(); }

@@ -38,6 +38,8 @@ public import Lean.Compiler.Yul.Printer
 
 public section
 
+set_option linter.unusedVariables false
+
 namespace Lean.Compiler.LCNF.EmitYul
 open Lean
 
@@ -244,10 +246,34 @@ mutual
         pure (leanBoxExpr (yNum v))
       else
         throwError "EmitYul: Nat literal {v} exceeds 32 bits; EVM Nat is U256-capped"
-    | .str _ =>
-      throwError "EmitYul: string literals not yet supported (need string runtime)"
+    | .str _ => pure leanBoxZero  -- handled directly in emitLetValue
 
   /-- Allocate a constructor object and set its fields. -/
+  partial def emitStringLit (lhsId : String) (s : String) : EmitYulM Unit := do
+    let bytes := s.toUTF8
+    let byteLen := bytes.size
+    let dataWords := (byteLen + 31) / 32
+    let nwords := 4 + dataWords
+    let (allocStmts, ptr) := allocN nwords
+    emitMany allocStmts
+    emit <| sExprStmt (yBuiltin "mstore" #[ptr, ctorHeaderExpr 249 0 0])
+    emit <| sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[ptr, yNum 32], yNum byteLen])
+    emit <| sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[ptr, yNum 64], yNum byteLen])
+    emit <| sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[ptr, yNum 96], yNum s.length])
+    let dataStart := yBuiltin "add" #[ptr, yNum 128]
+    -- Write each 32-byte word by packing bytes at compile time.
+    for h : wordIdx in [0:dataWords] do
+      let base := wordIdx * 32
+      let mut wordVal := 0
+      for h : j in [0:32] do
+        let pos := base + j
+        if pos < byteLen then
+          let b := (bytes.get! pos).toNat
+          let shift := (31 - j) * 8
+          wordVal := wordVal + (b * (2 ^ shift))
+      emit <| sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[dataStart, yNum (wordIdx * 32)], yNum wordVal])
+    emit <| sVarDecl #[tn lhsId] (some ptr)
+
   partial def emitCtor (lhsId : String) (info : CtorInfo) (args : Array (Arg .impure)) :
       EmitYulM Unit := do
     if info.size == 0 && info.usize == 0 && info.ssize == 0 then
@@ -291,12 +317,12 @@ mutual
         let opcode : String := externName.drop "lean_evm_".length |>.toString
         -- EVM externs take/return raw U256; unbox args, box the result.
         let unboxedArgs := argExprs.map leanUnboxExpr
-        if opcode == "returnMem" || opcode == "revertMem" then
+        if opcode == "returnMem" || opcode == "revertMem" || opcode == "mstore" || opcode == "sstore" || opcode == "log0" || opcode == "log1" || opcode == "log2" then
           -- Terminating builtins: control never returns.
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])
           emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
-        else if opcode == "mstore" || opcode == "sstore" then
+        else if opcode == "mstore" || opcode == "sstore" || opcode == "log0" || opcode == "log1" || opcode == "log2" then
           -- Void builtins: emit as statement, lhs = boxed 0.
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
@@ -321,8 +347,11 @@ mutual
     let lhsId := yulIdent lhs
     match value with
     | .lit lit =>
-      let e ← litToExpr lit
-      emit <| sVarDecl #[tn lhsId] (some e)
+      match lit with
+      | .str s => emitStringLit lhsId s
+      | _ =>
+        let e ← litToExpr lit
+        emit <| sVarDecl #[tn lhsId] (some e)
     | .erased =>
       emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
     | .box _ fvarId =>
@@ -464,7 +493,12 @@ def runtimeHelpers : Array YStmt :=
       { statements := #[sExprStmt (yBuiltin "mstore" #[
           yBuiltin "add" #[yStr "obj", yBuiltin "mul" #[yBuiltin "add" #[yStr "i", yNum 1], yNum 32]], yStr "v"])] },
     sFuncDef "lean_obj_tag" #[tn "o"] #[tn "t"]
-      { statements := #[sAssignment #["t"] (yBuiltin "and" #[yBuiltin "mload" #[yStr "o"], yNum 0xff])] },
+      { statements := #[
+          -- Heap ctor default; overwritten if o is a boxed scalar.
+          sAssignment #["t"] (yBuiltin "and" #[yBuiltin "mload" #[yStr "o"], yNum 0xff]),
+          sIfStmt (yBuiltin "and" #[yStr "o", yNum 1])
+            { statements := #[sAssignment #["t"] (leanUnboxExpr (yStr "o"))] }
+        ] },
     -- -----------------------------------------------------------------------
     -- Nat arithmetic (U256-capped scalar domain).
     -- Lean boxed scalars encode n as (n << 1) | 1; unbox is n >> 1.
@@ -475,33 +509,56 @@ def runtimeHelpers : Array YStmt :=
       { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "add" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
     sFuncDef "f_Nat_sub" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[
-          sVarDecl #[tn "va"] (some (leanUnboxExpr (yStr "a"))),
-          sVarDecl #[tn "vb"] (some (leanUnboxExpr (yStr "b"))),
-          sIfStmt (yBuiltin "lt" #[yStr "va", yStr "vb"])
-            { statements := #[sAssignment #["r"] leanBoxZero] },
-          sAssignment #["r"] (leanBoxExpr (yBuiltin "sub" #[yStr "va", yStr "vb"]))
+          sAssignment #["r"] leanBoxZero,  -- default for underflow
+          sIfStmt (yBuiltin "iszero" #[yBuiltin "lt" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]])
+            { statements := #[
+                sVarDecl #[tn "va"] (some (leanUnboxExpr (yStr "a"))),
+                sVarDecl #[tn "vb"] (some (leanUnboxExpr (yStr "b"))),
+                sAssignment #["r"] (leanBoxExpr (yBuiltin "sub" #[yStr "va", yStr "vb"]))
+              ] }
         ] },
     sFuncDef "f_Nat_mul" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "mul" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
     sFuncDef "f_Nat_decEq" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[
+          sAssignment #["r"] leanBoxZero,  -- default: isFalse (tag 0)
           sIfStmt (yBuiltin "eq" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")])
-            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))  -- isTrue (tag 1)
-              ] },
-          sAssignment #["r"] leanBoxZero  -- isFalse (tag 0)
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] }
         ] },
     sFuncDef "f_Nat_decLe" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[
+          sAssignment #["r"] leanBoxZero,
           sIfStmt (yBuiltin "iszero" #[yBuiltin "gt" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]])
-            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] },
-          sAssignment #["r"] leanBoxZero
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] }
         ] },
     sFuncDef "f_Nat_decLt" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[
+          sAssignment #["r"] leanBoxZero,
           sIfStmt (yBuiltin "lt" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")])
-            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] },
-          sAssignment #["r"] leanBoxZero
-        ] }
+            { statements := #[sAssignment #["r"] (leanBoxExpr (yNum 1))] }
+        ] },
+    sFuncDef "f_Nat_div" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sIfStmt (yBuiltin "iszero" #[yStr "b"])
+            { statements := #[sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])] },
+          sAssignment #["r"] (leanBoxExpr (yBuiltin "div" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))
+        ] },
+    sFuncDef "f_Nat_mod" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[
+          sIfStmt (yBuiltin "iszero" #[yStr "b"])
+            { statements := #[sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])] },
+          sAssignment #["r"] (leanBoxExpr (yBuiltin "mod" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))
+        ] },
+    sFuncDef "f_Nat_shiftRight" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "shr" #[leanUnboxExpr (yStr "b"), leanUnboxExpr (yStr "a")]))] },
+    sFuncDef "f_Nat_shiftLeft" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "shl" #[leanUnboxExpr (yStr "b"), leanUnboxExpr (yStr "a")]))] },
+    sFuncDef "f_Nat_land" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "and" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
+    sFuncDef "f_Nat_lor" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "or" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
+    sFuncDef "f_Nat_xor" #[tn "a", tn "b"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "xor" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] }
   ]
 
 -- ---------------------------------------------------------------------------
