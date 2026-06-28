@@ -1,0 +1,3 @@
+init=l_CounterContract_init
+get=l_CounterContract_get
+increment=l_CounterContract_increment

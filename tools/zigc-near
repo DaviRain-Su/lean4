@@ -5,8 +5,8 @@ set -euo pipefail
 #
 # Usage: zigc-near <input.zig> [output.wasm]
 #
-# Produces a wasm32-wasi WASM module that can be executed by wasmtime or
-# deployed to NEAR (after import stripping). Links against the Lean Zig
+# Produces a wasm32-wasi WASM module that can be executed by wasmtime and then
+# normalized for NEAR deployment (after import stripping). Links against the Lean Zig
 # runtime (libleanrt_zig) built with the NEAR host backend, plus the
 # lean_near bridge (storage/context/IO wrappers).
 
@@ -20,14 +20,14 @@ LEAN_NEAR_ZIG="${LEAN_NEAR_ZIG:-$ROOT/src/runtime/zig/host/near/lean_near.zig}"
 LEAN_NEAR_ROOT_ZIG="${LEAN_NEAR_ROOT_ZIG:-$ROOT/src/runtime/zig/near_contract_root.zig}"
 LEAN_MPZ_ZIG="${LEAN_MPZ_ZIG:-$ROOT/src/runtime/zig/mpz_zig.zig}"
 LEANRT_LIB="${LEANRT_LIB:-$ROOT/src/runtime/zig/zig-out/lib/libleanrt_zig.a}"
-OPTIMIZE="${NEAR_OPTIMIZE:-ReleaseFast}"
+OPTIMIZE="${NEAR_OPTIMIZE:-ReleaseSmall}"
 WASM_TARGET="${WASM_TARGET:-wasm32-wasi}"
-WASM_CPU="${WASM_CPU:-baseline+atomics}"
+WASM_CPU="${WASM_CPU:-mvp}"
 
 for f in "$LEAN_RT_ZIG" "$LEAN_NEAR_ZIG" "$LEAN_NEAR_ROOT_ZIG" "$LEAN_MPZ_ZIG" "$LEANRT_LIB"; do
   if [[ ! -f "$f" ]]; then
     echo "zigc-near: required file not found: $f" >&2
-    echo "  Build the runtime first: cd src/runtime/zig && zig build -Dtarget=$WASM_TARGET --prefix zig-out" >&2
+    echo "  Build the runtime first: cd src/runtime/zig && zig build -Dtarget=$WASM_TARGET -Dcpu=$WASM_CPU -Doptimize=$OPTIMIZE --prefix zig-out" >&2
     exit 1
   fi
 done
@@ -43,22 +43,101 @@ pub const mpz_backend: u8 = 0;
 ZIG
 fi
 
+NEAR_EXPORTS_ZIG="${NEAR_EXPORTS_ZIG:-$OUTPUT_DIR/near_exports.zig}"
+METHODS="${NEAR_CONTRACT_METHODS:-}"
+EXPORT_FLAGS=(--export=main --export=_lean_main)
+cat > "$NEAR_EXPORTS_ZIG" <<'ZIG'
+const lean_rt = @import("lean_rt");
+const LeanObj = lean_rt.LeanObj;
+
+fn runMethod(method: LeanObj) void {
+    const action = lean_rt.lean_ctor_get(method, 1);
+    lean_rt.lean_inc_ref(action);
+    const result = lean_rt.lean_apply_1(action, lean_rt.lean_box(0));
+    if (!lean_rt.lean_io_result_is_ok(result)) {
+        lean_rt.lean_io_result_show_error(result);
+        lean_rt.lean_dec_ref(result);
+        @panic("Lean NEAR method returned an IO error");
+    }
+    lean_rt.lean_dec_ref(result);
+}
+ZIG
+
+if [[ -n "$METHODS" ]]; then
+  IFS=',' read -ra METHOD_ENTRIES <<< "$METHODS"
+  NEAR_EXPORT_NAMES=()
+  NEAR_EXPORT_WRAPPERS=()
+  method_index=0
+  for entry in "${METHOD_ENTRIES[@]}"; do
+    [[ -n "$entry" ]] || continue
+    if [[ "$entry" != *=* ]]; then
+      echo "zigc-near: invalid NEAR_CONTRACT_METHODS entry '$entry' (expected nearName=leanSymbol)" >&2
+      exit 1
+    fi
+    near_name="${entry%%=*}"
+    lean_symbol="${entry#*=}"
+    if [[ -z "$near_name" || -z "$lean_symbol" ]]; then
+      echo "zigc-near: invalid NEAR_CONTRACT_METHODS entry '$entry' (empty name)" >&2
+      exit 1
+    fi
+    if [[ "$near_name" == *['"\']* || "$lean_symbol" == *['"\']* ]]; then
+      echo "zigc-near: method names may not contain quotes or backslashes: '$entry'" >&2
+      exit 1
+    fi
+    NEAR_EXPORT_NAMES+=("$near_name")
+    EXPORT_FLAGS+=("--export=$near_name")
+    wrapper_name="near_export_$method_index"
+    NEAR_EXPORT_WRAPPERS+=("$wrapper_name")
+    method_index=$((method_index + 1))
+    cat >> "$NEAR_EXPORTS_ZIG" <<ZIG
+
+extern fn @"$lean_symbol"() callconv(.c) LeanObj;
+
+fn $wrapper_name() callconv(.c) void {
+    runMethod(@"$lean_symbol"());
+}
+comptime { @export(&$wrapper_name, .{ .name = "$near_name" }); }
+ZIG
+  done
+else
+  NEAR_EXPORT_NAMES=()
+  NEAR_EXPORT_WRAPPERS=()
+fi
+
+cat >> "$NEAR_EXPORTS_ZIG" <<'ZIG'
+
+pub fn forceExports() void {
+ZIG
+if [[ -n "$METHODS" ]]; then
+  for wrapper_name in "${NEAR_EXPORT_WRAPPERS[@]}"; do
+    cat >> "$NEAR_EXPORTS_ZIG" <<ZIG
+    _ = $wrapper_name;
+ZIG
+  done
+fi
+cat >> "$NEAR_EXPORTS_ZIG" <<'ZIG'
+}
+ZIG
+
 exec zig build-exe \
   -target "$WASM_TARGET" \
   -fno-entry \
   -O "$OPTIMIZE" \
   -mcpu "$WASM_CPU" \
-  --export=main \
-  --export=_lean_main \
+  -fstrip \
+  "${EXPORT_FLAGS[@]}" \
   "$LEANRT_LIB" \
   --dep contract \
   --dep lean_rt \
   --dep mpz_zig \
+  --dep near_exports \
   --dep runtime_options \
   -Mroot="$LEAN_NEAR_ROOT_ZIG" \
   -Mcontract="$INPUT" \
   -Mlean_rt="$LEAN_RT_ZIG" \
   -Mmpz_zig="$LEAN_MPZ_ZIG" \
+  --dep lean_rt \
+  -Mnear_exports="$NEAR_EXPORTS_ZIG" \
   -Mruntime_options="$RUNTIME_OPTIONS_ZIG" \
   -lc \
   -femit-bin="$OUTPUT"

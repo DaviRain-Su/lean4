@@ -3,7 +3,10 @@ const testing = std.testing;
 const builtin = @import("builtin");
 const c = @import("runtime_c");
 const alloc = @import("alloc.zig");
-const io_errno = @import("io_errno.zig");
+const io_errno = if (builtin.os.tag == .wasi or builtin.os.tag == .freestanding)
+    @import("io_errno_wasm.zig")
+else
+    @import("io_errno.zig");
 const io_min = @import("io_min.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");

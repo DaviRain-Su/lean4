@@ -17,4 +17,5 @@ export fn initialize_Lean_Near(builtin: u8) callconv(.c) ?*anyopaque {
 
 comptime {
     _ = @import("contract");
+    @import("near_exports").forceExports();
 }

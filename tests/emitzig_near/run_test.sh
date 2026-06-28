@@ -26,6 +26,21 @@ for TEST in "${TESTS[@]}"; do
   BASENAME="$(basename "$TEST" .lean)"
   ZIG_FILE="$OUT_DIR/$BASENAME.zig"
   WASM_FILE="$OUT_DIR/$BASENAME.wasm"
+  METHODS_FILE="$(dirname "$TEST")/$BASENAME.near-methods"
+  NEAR_METHODS=()
+  NEAR_METHOD_EXPORTS=()
+  if [[ -f "$METHODS_FILE" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      [[ "$line" != \#* ]] || continue
+      NEAR_METHODS+=("$line")
+      NEAR_METHOD_EXPORTS+=("${line%%=*}")
+    done < "$METHODS_FILE"
+  fi
+  NEAR_METHODS_ENV=""
+  if [[ "${#NEAR_METHODS[@]}" -gt 0 ]]; then
+    NEAR_METHODS_ENV="$(IFS=,; echo "${NEAR_METHODS[*]}")"
+  fi
 
   # Step 1: Emit Zig code from Lean source.
   "$LEAN" "$TEST" -z "$ZIG_FILE"
@@ -38,6 +53,7 @@ for TEST in "${TESTS[@]}"; do
   fi
 
   # Step 3: Compile to NEAR-compatible WASM.
+  NEAR_CONTRACT_METHODS="$NEAR_METHODS_ENV" \
   LEAN_RT_ZIG="$ROOT/src/runtime/zig/lean_rt.zig" \
     bash "$ZIGC_NEAR" "$ZIG_FILE" "$WASM_FILE"
 
@@ -49,6 +65,20 @@ for TEST in "${TESTS[@]}"; do
   if [[ "$NON_MVP" -gt 0 ]]; then
     echo "Found $NON_MVP post-MVP instructions in $TEST — NEAR VM will reject this"
     exit 1
+  fi
+
+  if [[ "${#NEAR_METHOD_EXPORTS[@]}" -gt 0 ]]; then
+    node - "$WASM_FILE" "${NEAR_METHOD_EXPORTS[@]}" <<'JS'
+const fs = require("fs");
+const [wasmPath, ...expected] = process.argv.slice(2);
+const module = new WebAssembly.Module(fs.readFileSync(wasmPath));
+const exported = new Set(WebAssembly.Module.exports(module).map((entry) => entry.name));
+const missing = expected.filter((name) => !exported.has(name));
+if (missing.length > 0) {
+  console.error(`Missing NEAR method exports in ${wasmPath}: ${missing.join(", ")}`);
+  process.exit(1);
+}
+JS
   fi
 done
 

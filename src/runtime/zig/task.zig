@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
 const apply = @import("apply.zig");
@@ -11,6 +12,7 @@ const rc = @import("rc.zig");
 const task_manager = @import("task_manager.zig");
 const task_tls = @import("task_tls.zig");
 const libc_c = @import("runtime_c");
+const is_wasm = builtin.os.tag == .wasi or builtin.os.tag == .freestanding;
 
 fn taskPtr(t: *anyopaque) *lean.lean_task_object {
     return @ptrCast(@alignCast(t));
@@ -30,6 +32,33 @@ fn closureSlots(o: *lean.lean_closure_object) [*]?*anyopaque {
 
 fn opaqueFunPtr(fun: anytype) ?*anyopaque {
     return @ptrCast(@constCast(fun));
+}
+
+fn yieldForRuntimeTest() void {
+    std.atomic.spinLoopHint();
+    if (!is_wasm) {
+        std.Thread.yield() catch {};
+    }
+}
+
+fn sleepNanosForRuntimeTest(nanos: u64) void {
+    if (is_wasm) {
+        return;
+    } else {
+        const delay = std.c.timespec{
+            .sec = @intCast(nanos / std.time.ns_per_s),
+            .nsec = @intCast(nanos % std.time.ns_per_s),
+        };
+        _ = std.c.nanosleep(&delay, null);
+    }
+}
+
+fn sleepMillisForRuntimeTest(millis: u32) void {
+    if (is_wasm) {
+        return;
+    } else {
+        _ = libc_c.usleep(millis * 1000);
+    }
 }
 
 fn taskValue(task: *lean.lean_task_object) ?*anyopaque {
@@ -238,7 +267,7 @@ pub export fn leanrt_test_runtime_task_wait(task: *anyopaque) callconv(.c) bool 
 
 fn sleepTask(ms_obj: *anyopaque, _: *anyopaque) callconv(.c) ?*anyopaque {
     const sleep_ms: u32 = @intCast(object.lean_unbox(ms_obj));
-    _ = libc_c.usleep(sleep_ms * 1000);
+    sleepMillisForRuntimeTest(sleep_ms);
     return object.lean_box(@intCast(sleep_ms));
 }
 
@@ -678,29 +707,25 @@ var g_state_target_release = std.atomic.Value(bool).init(false);
 
 fn spinUntilTrue(flag: *std.atomic.Value(bool)) void {
     while (!flag.load(.acquire)) {
-        std.atomic.spinLoopHint();
-        std.Thread.yield() catch {};
+        yieldForRuntimeTest();
     }
 }
 
 fn spinUntilCount(counter: *std.atomic.Value(usize), expected: usize) void {
     while (counter.load(.acquire) < expected) {
-        std.atomic.spinLoopHint();
-        std.Thread.yield() catch {};
+        yieldForRuntimeTest();
     }
 }
 
 fn waitForTaskValue(task: *lean.lean_task_object, timeout_ms: u64) bool {
     var remaining_polls: u64 = timeout_ms * 200;
-    const delay = std.c.timespec{ .sec = 0, .nsec = 500_000 };
     while (taskValue(task) == null) {
         if (remaining_polls == 0) {
             return false;
         }
         remaining_polls -= 1;
-        std.atomic.spinLoopHint();
-        std.Thread.yield() catch {};
-        _ = std.c.nanosleep(&delay, null);
+        yieldForRuntimeTest();
+        sleepNanosForRuntimeTest(500_000);
     }
     return true;
 }
@@ -766,8 +791,7 @@ fn bindToPendingTask(value: ?*anyopaque) callconv(.c) ?*anyopaque {
 fn cancelAwareRoot(_: ?*anyopaque) callconv(.c) ?*anyopaque {
     g_cancel_root_started.store(true, .release);
     while (!lean_io_check_canceled_core()) {
-        std.atomic.spinLoopHint();
-        std.Thread.yield() catch {};
+        yieldForRuntimeTest();
     }
     g_cancel_root_saw_cancel.store(true, .release);
     return object.lean_box(10);
@@ -798,32 +822,27 @@ fn stateTarget(_: ?*anyopaque) callconv(.c) ?*anyopaque {
 }
 
 fn delayedWaitAny20(_: ?*anyopaque) callconv(.c) ?*anyopaque {
-    const delay = std.c.timespec{ .sec = 0, .nsec = 20 * std.time.ns_per_ms };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(20 * std.time.ns_per_ms);
     return object.lean_box(20);
 }
 
 fn delayedWaitAny40(_: ?*anyopaque) callconv(.c) ?*anyopaque {
-    const delay = std.c.timespec{ .sec = 0, .nsec = 40 * std.time.ns_per_ms };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(40 * std.time.ns_per_ms);
     return object.lean_box(40);
 }
 
 fn delayedWaitAny60(_: ?*anyopaque) callconv(.c) ?*anyopaque {
-    const delay = std.c.timespec{ .sec = 0, .nsec = 60 * std.time.ns_per_ms };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(60 * std.time.ns_per_ms);
     return object.lean_box(60);
 }
 
 fn delayedWaitAny80(_: ?*anyopaque) callconv(.c) ?*anyopaque {
-    const delay = std.c.timespec{ .sec = 0, .nsec = 80 * std.time.ns_per_ms };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(80 * std.time.ns_per_ms);
     return object.lean_box(80);
 }
 
 fn delayedWaitAny100(_: ?*anyopaque) callconv(.c) ?*anyopaque {
-    const delay = std.c.timespec{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(100 * std.time.ns_per_ms);
     return object.lean_box(100);
 }
 
@@ -841,11 +860,7 @@ fn makeTaskList(tasks: []const *anyopaque) *anyopaque {
 }
 
 fn delayedRelease(flag: *std.atomic.Value(bool)) void {
-    const delay = std.c.timespec{
-        .sec = 0,
-        .nsec = 50 * std.time.ns_per_ms,
-    };
-    _ = std.c.nanosleep(&delay, null);
+    sleepNanosForRuntimeTest(50 * std.time.ns_per_ms);
     flag.store(true, .release);
 }
 

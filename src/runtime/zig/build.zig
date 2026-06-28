@@ -21,15 +21,21 @@ pub fn build(b: *std.Build) void {
     // the full C++ libuv subsystem and GMP as below.
     const is_wasm = target.result.os.tag == .wasi or target.result.os.tag == .freestanding;
 
-
     const mpz_mod = b.addModule("mpz_zig", .{
         .root_source_file = b.path("mpz_zig.zig"),
     });
-    const runtime_c = b.addTranslateC(.{
-        .root_source_file = b.path("runtime_c.h"),
+    const runtime_c_mod = if (is_wasm) b.createModule(.{
+        .root_source_file = b.path("runtime_c_empty.zig"),
         .target = target,
         .optimize = optimize,
-    });
+    }) else blk: {
+        const runtime_c = b.addTranslateC(.{
+            .root_source_file = b.path("runtime_c.h"),
+            .target = target,
+            .optimize = optimize,
+        });
+        break :blk runtime_c.createModule();
+    };
     const opts = b.addOptions();
     opts.addOption(bool, "export_allocator_symbols", export_allocator_symbols);
     opts.addOption(bool, "export_lean_helpers", export_lean_helpers);
@@ -40,12 +46,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("root.zig"),
         .target = target,
         .optimize = optimize,
-        .link_libc = true,
+        .link_libc = target.result.os.tag != .freestanding,
         // WASM targets are single-threaded; std.Thread is unavailable there.
         .single_threaded = is_wasm,
     });
     root_mod.addImport("mpz_zig", mpz_mod);
-    root_mod.addImport("runtime_c", runtime_c.createModule());
+    root_mod.addImport("runtime_c", runtime_c_mod);
     root_mod.addImport("runtime_options", opts_mod);
     if (!is_wasm) {
         // Native: link GMP and libc++.
@@ -59,8 +65,6 @@ pub fn build(b: *std.Build) void {
         while (libuv_library_dir_it.next()) |dir| root_mod.addLibraryPath(.{ .cwd_relative = dir });
     }
 
-
-
     // C++ libuv subsystem used by the Zig runtime. These mirror the sources in
     // src/runtime/CMakeLists.txt but omit libuv.cpp (replaced by Zig-side init)
     // and keep the net_addr.cpp exports (the Zig-side net_addr.zig stubs are
@@ -69,53 +73,54 @@ pub fn build(b: *std.Build) void {
     // Skipped on WASM: no libuv, no pthreads, no POSIX networking.
     if (!is_wasm) {
         const uv_cpp_sources = &.{
-        "../uv/dns.cpp",
-        "../uv/event_loop.cpp",
-        "../uv/net_addr.cpp",
-        "../uv/signal.cpp",
-        "../uv/system.cpp",
-        "../uv/tcp.cpp",
-        "../uv/timer.cpp",
-        "../uv/udp.cpp",
-        "uv_compat.cpp",
-        "uv_init.cpp",
-        "uv_loop_thread.cpp",
-        "uv_promise_bridge.cpp",
-        "uv_version.cpp",
-    };
-    var uv_cpp_flags = std.ArrayList([]const u8).empty;
-    defer uv_cpp_flags.deinit(b.allocator);
-    uv_cpp_flags.appendSlice(b.allocator, &.{
-        "-std=c++17",
-        "-O2",
-        "-include", "uv_compat.h",
-        "-DLEAN_SMALL_ALLOCATOR",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-    }) catch @panic("OOM");
-    root_mod.addCSourceFiles(.{
-        .files = uv_cpp_sources,
-        .flags = uv_cpp_flags.items,
-    });
+            "../uv/dns.cpp",
+            "../uv/event_loop.cpp",
+            "../uv/net_addr.cpp",
+            "../uv/signal.cpp",
+            "../uv/system.cpp",
+            "../uv/tcp.cpp",
+            "../uv/timer.cpp",
+            "../uv/udp.cpp",
+            "uv_compat.cpp",
+            "uv_init.cpp",
+            "uv_loop_thread.cpp",
+            "uv_promise_bridge.cpp",
+            "uv_version.cpp",
+        };
+        var uv_cpp_flags = std.ArrayList([]const u8).empty;
+        defer uv_cpp_flags.deinit(b.allocator);
+        uv_cpp_flags.appendSlice(b.allocator, &.{
+            "-std=c++17",
+            "-O2",
+            "-include",
+            "uv_compat.h",
+            "-DLEAN_SMALL_ALLOCATOR",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        }) catch @panic("OOM");
+        root_mod.addCSourceFiles(.{
+            .files = uv_cpp_sources,
+            .flags = uv_cpp_flags.items,
+        });
 
-    // Weak exports that let C++ code call lean_mk_io_error_* while the real
-    // implementations live in the Zig runtime (io_error.zig).
-    const uv_c_sources = &.{
-        "io_error_weak_exports.c",
-    };
-    const uv_c_flags = &.{
-        "-std=c11",
-        "-O2",
-        b.fmt("-I{s}", .{lean_include_dir}),
-        "-I../..",
-    };
-    root_mod.addCSourceFiles(.{
-        .files = uv_c_sources,
-        .flags = uv_c_flags,
-    });
+        // Weak exports that let C++ code call lean_mk_io_error_* while the real
+        // implementations live in the Zig runtime (io_error.zig).
+        const uv_c_sources = &.{
+            "io_error_weak_exports.c",
+        };
+        const uv_c_flags = &.{
+            "-std=c11",
+            "-O2",
+            b.fmt("-I{s}", .{lean_include_dir}),
+            "-I../..",
+        };
+        root_mod.addCSourceFiles(.{
+            .files = uv_c_sources,
+            .flags = uv_c_flags,
+        });
 
-    var libuv_library_it = std.mem.tokenizeScalar(u8, libuv_libraries, '|');
-    while (libuv_library_it.next()) |lib_name| root_mod.linkSystemLibrary(lib_name, .{ .use_pkg_config = .no });
+        var libuv_library_it = std.mem.tokenizeScalar(u8, libuv_libraries, '|');
+        while (libuv_library_it.next()) |lib_name| root_mod.linkSystemLibrary(lib_name, .{ .use_pkg_config = .no });
     } // end if (!is_wasm)
 
     const lib = b.addLibrary(.{
