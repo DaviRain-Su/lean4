@@ -3,37 +3,54 @@ import Lean.Near
 /-! Lean NEAR Counter Contract (SDK version)
 
 Uses the `Lean.Near` SDK instead of raw `@[extern]` bindings.
-The counter helper is local example code built on top of `Near.Storage`.
+The counter helper is local example code built on top of typed Layer 3 storage.
 -/
 
 open Near
 
 /-- Example-local persistent counter backed by NEAR storage. -/
 structure Counter where
-  key : String
+  key : Storage.Key UInt64
 
 namespace Counter
 
-def make (key : String) : Counter := ⟨key⟩
+def make (key : String) : Counter := ⟨Storage.Key.make key⟩
 
-def get (c : Counter) : IO UInt64 := do
-  let val := (← Storage.rawRead c.key).getD "0"
-  pure (val.toNat?.getD 0).toUInt64
+def get (c : Counter) : IO UInt64 :=
+  c.key.read 0
 
 def set (c : Counter) (n : UInt64) : IO Bool :=
-  Storage.write c.key (toString n)
+  c.key.write n
 
-def increment (c : Counter) : IO UInt64 := do
-  let next := (← c.get) + 1
-  let _ ← c.set next
-  pure next
+def reset (c : Counter) : IO Bool :=
+  c.set 0
+
+def increment (c : Counter) : IO UInt64 :=
+  c.key.modify 0 (· + 1)
 
 end Counter
 
-/-- Contract entry: read count from storage, increment, return new value. -/
-def main : IO UInt32 := do
-  let counter := Counter.make "count"
+namespace CounterContract
+
+def counter : Counter := Counter.make "count"
+
+def init : Contract.Method .init := Contract.initializer "init" do
+  let ok ← Contract.requireNotInitialized
+  if ok then
+    let _ ← Contract.initStateAs true
+    let _ ← counter.reset
+    Contract.returnU64 0
+
+def get : Contract.Method .view := Contract.view "get" do
+  Contract.returnU64 (← counter.get)
+
+def increment : Contract.Method .update := Contract.update "increment" do
   let n ← counter.increment
-  Env.log s!"incremented to {n}"
-  Contract.returnValue (toString n)
-  pure 0
+  Env.log ("incremented to " ++ toString n)
+  Contract.returnU64 n
+
+end CounterContract
+
+/-- Single-entry test harness: run the update method that a NEAR export would call. -/
+def main : IO UInt32 := do
+  CounterContract.increment.run

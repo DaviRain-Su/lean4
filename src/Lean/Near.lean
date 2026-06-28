@@ -161,6 +161,22 @@ class Codec (α : Type) where
   encode : α → String
   decode : String → Option α
 
+@[inline] def parseNat? (s : String) : Option Nat :=
+  match s.toList with
+  | [] => none
+  | chars =>
+    chars.foldl (fun acc? c =>
+      match acc? with
+      | none => none
+      | some acc =>
+      let code := c.toNat
+      let zeroCode := '0'.toNat
+      let nineCode := '9'.toNat
+      if code < zeroCode || code > nineCode then
+        none
+      else
+        some (acc * 10 + (code - zeroCode))) (some 0)
+
 instance : Codec String where
   encode := id
   decode := some
@@ -168,13 +184,13 @@ instance : Codec String where
 instance : Codec UInt64 where
   encode := toString
   decode s :=
-    match s.toNat? with
+    match parseNat? s with
     | some n => some n.toUInt64
     | none => none
 
 instance : Codec Nat where
   encode := toString
-  decode := String.toNat?
+  decode := parseNat?
 
 instance : Codec Bool where
   encode b := if b then "true" else "false"
@@ -190,38 +206,38 @@ instance : Codec AccountId where
 instance : Codec NearToken where
   encode t := toString t.yoctoNear
   decode s :=
-    match s.toNat? with
+    match parseNat? s with
     | some n => some (NearToken.fromYocto n.toUInt64)
     | none => none
 
 instance : Codec Gas where
   encode g := toString g.inner
   decode s :=
-    match s.toNat? with
+    match parseNat? s with
     | some n => some (Gas.fromGas n.toUInt64)
     | none => none
 
 /-- Read and decode a typed value from storage. Decode failures are treated as missing values. -/
-def readAs? [Codec α] (key : String) : IO (Option α) := do
+@[inline] def readAs? [Codec α] (key : String) : IO (Option α) := do
   match (← rawRead key) with
   | some value => pure (Codec.decode value)
   | none => pure none
 
 /-- Read and decode a typed value, falling back to a caller-provided default. -/
-def readAs [Codec α] (key : String) (default : α) : IO α := do
+@[inline] def readAs [Codec α] (key : String) (default : α) : IO α := do
   match (← readAs? (α := α) key) with
   | some value => pure value
   | none => pure default
 
 /-- Encode and write a typed value to storage. -/
-def writeAs [Codec α] (key : String) (value : α) : IO Bool :=
+@[inline] def writeAs [Codec α] (key : String) (value : α) : IO Bool :=
   rawWrite key (Codec.encode value)
 
 /-- Alias for `hasKey` that reads naturally in typed storage code. -/
-def contains (key : String) : IO Bool := hasKey key
+@[inline] def contains (key : String) : IO Bool := hasKey key
 
 /-- Alias for `remove`. -/
-def delete (key : String) : IO Bool := remove key
+@[inline] def delete (key : String) : IO Bool := remove key
 
 /-- Typed storage key. The phantom type pins the expected value codec. -/
 structure Key (α : Type) where
@@ -231,28 +247,28 @@ structure Key (α : Type) where
 namespace Key
 
 /-- Create a typed storage key. -/
-def make (name : String) : Key α := ⟨name⟩
+@[inline] def make (name : String) : Key α := ⟨name⟩
 
 /-- Read a typed key. -/
-def read? [Codec α] (key : Key α) : IO (Option α) :=
+@[inline] def read? [Codec α] (key : Key α) : IO (Option α) :=
   Storage.readAs? (α := α) key.name
 
 /-- Read a typed key with a default. -/
-def read [Codec α] (key : Key α) (default : α) : IO α :=
+@[inline] def read [Codec α] (key : Key α) (default : α) : IO α :=
   Storage.readAs (α := α) key.name default
 
 /-- Write a typed key. -/
-def write [Codec α] (key : Key α) (value : α) : IO Bool :=
+@[inline] def write [Codec α] (key : Key α) (value : α) : IO Bool :=
   Storage.writeAs key.name value
 
 /-- Check if a typed key exists. -/
-def contains (key : Key α) : IO Bool := Storage.contains key.name
+@[inline] def contains (key : Key α) : IO Bool := Storage.contains key.name
 
 /-- Remove a typed key. -/
-def remove (key : Key α) : IO Bool := Storage.remove key.name
+@[inline] def remove (key : Key α) : IO Bool := Storage.remove key.name
 
 /-- Modify a present typed value, returning none if the key is absent or undecodable. -/
-def modify? [Codec α] (key : Key α) (f : α → α) : IO (Option α) := do
+@[inline] def modify? [Codec α] (key : Key α) (f : α → α) : IO (Option α) := do
   match (← key.read?) with
   | some current =>
     let next := f current
@@ -261,7 +277,7 @@ def modify? [Codec α] (key : Key α) (f : α → α) : IO (Option α) := do
   | none => pure none
 
 /-- Modify a typed value using a default when the key is missing or undecodable. -/
-def modify [Codec α] (key : Key α) (default : α) (f : α → α) : IO α := do
+@[inline] def modify [Codec α] (key : Key α) (default : α) (f : α → α) : IO α := do
   let current ← key.read default
   let next := f current
   let _ ← key.write next
@@ -277,15 +293,15 @@ structure Slot (α : Type) where
 namespace Slot
 
 /-- Create a typed storage slot. -/
-def make (name : String) : Slot α := ⟨Key.make name⟩
+@[inline] def make (name : String) : Slot α := ⟨Key.make name⟩
 
-def read? [Codec α] (slot : Slot α) : IO (Option α) := slot.key.read?
-def read [Codec α] (slot : Slot α) (default : α) : IO α := slot.key.read default
-def write [Codec α] (slot : Slot α) (value : α) : IO Bool := slot.key.write value
-def contains (slot : Slot α) : IO Bool := slot.key.contains
-def remove (slot : Slot α) : IO Bool := slot.key.remove
-def modify? [Codec α] (slot : Slot α) (f : α → α) : IO (Option α) := slot.key.modify? f
-def modify [Codec α] (slot : Slot α) (default : α) (f : α → α) : IO α :=
+@[inline] def read? [Codec α] (slot : Slot α) : IO (Option α) := slot.key.read?
+@[inline] def read [Codec α] (slot : Slot α) (default : α) : IO α := slot.key.read default
+@[inline] def write [Codec α] (slot : Slot α) (value : α) : IO Bool := slot.key.write value
+@[inline] def contains (slot : Slot α) : IO Bool := slot.key.contains
+@[inline] def remove (slot : Slot α) : IO Bool := slot.key.remove
+@[inline] def modify? [Codec α] (slot : Slot α) (f : α → α) : IO (Option α) := slot.key.modify? f
+@[inline] def modify [Codec α] (slot : Slot α) (default : α) (f : α → α) : IO α :=
   slot.key.modify default f
 
 end Slot
@@ -298,34 +314,34 @@ structure TypedMap (α : Type) where
 namespace TypedMap
 
 /-- Create a typed map using the given storage prefix. -/
-def make (mapPrefix : String) : TypedMap α := ⟨mapPrefix⟩
+@[inline] def make (mapPrefix : String) : TypedMap α := ⟨mapPrefix⟩
 
 /-- Build the concrete storage key for a map entry. -/
-def storageKey (m : TypedMap α) (key : String) : String :=
+@[inline] def storageKey (m : TypedMap α) (key : String) : String :=
   m.mapPrefix ++ ":" ++ key
 
 /-- Read and decode a map entry. -/
-def get [Codec α] (m : TypedMap α) (key : String) : IO (Option α) :=
+@[inline] def get [Codec α] (m : TypedMap α) (key : String) : IO (Option α) :=
   Storage.readAs? (α := α) (m.storageKey key)
 
 /-- Read a map entry with a default. -/
-def getOr [Codec α] (m : TypedMap α) (key : String) (default : α) : IO α :=
+@[inline] def getOr [Codec α] (m : TypedMap α) (key : String) (default : α) : IO α :=
   Storage.readAs (α := α) (m.storageKey key) default
 
 /-- Set a typed map entry. -/
-def set [Codec α] (m : TypedMap α) (key : String) (value : α) : IO Bool :=
+@[inline] def set [Codec α] (m : TypedMap α) (key : String) (value : α) : IO Bool :=
   Storage.writeAs (m.storageKey key) value
 
 /-- Check if a map entry exists. -/
-def contains (m : TypedMap α) (key : String) : IO Bool :=
+@[inline] def contains (m : TypedMap α) (key : String) : IO Bool :=
   Storage.contains (m.storageKey key)
 
 /-- Remove a map entry. -/
-def remove (m : TypedMap α) (key : String) : IO Bool :=
+@[inline] def remove (m : TypedMap α) (key : String) : IO Bool :=
   Storage.remove (m.storageKey key)
 
 /-- Modify a map entry using a default when the entry is missing or undecodable. -/
-def modify [Codec α] (m : TypedMap α) (key : String) (default : α) (f : α → α) : IO α := do
+@[inline] def modify [Codec α] (m : TypedMap α) (key : String) (default : α) (f : α → α) : IO α := do
   let current ← m.getOr key default
   let next := f current
   let _ ← m.set key next
@@ -370,15 +386,15 @@ opaque valueReturn (data : String) : IO Unit
 opaque log (msg : String) : IO Unit
 
 /-- Get the current contract account as an `AccountId`. -/
-def currentAccount : IO AccountId := do
+@[inline] def currentAccount : IO AccountId := do
   pure (AccountId.unchecked (← currentAccountId))
 
 /-- Get the predecessor account as an `AccountId`. -/
-def predecessorAccount : IO AccountId := do
+@[inline] def predecessorAccount : IO AccountId := do
   pure (AccountId.unchecked (← predecessorAccountId))
 
 /-- Alias for raw contract input as a UTF-8 string. -/
-def inputString : IO String := input
+@[inline] def inputString : IO String := input
 
 /-- Snapshot of the NEAR execution context currently exposed by the bridge. -/
 structure Context where
@@ -390,7 +406,7 @@ structure Context where
   deriving Repr
 
 /-- Read the execution context with typed account IDs. -/
-def context : IO Context := do
+@[inline] def context : IO Context := do
   let currentAccount ← currentAccount
   let predecessorAccount ← predecessorAccount
   let blockHeight ← blockHeight
@@ -399,7 +415,7 @@ def context : IO Context := do
   pure { currentAccount, predecessorAccount, blockHeight, blockTimestamp, input }
 
 /-- Log any value with a `ToString` instance. -/
-def logValue [ToString α] (value : α) : IO Unit :=
+@[inline] def logValue [ToString α] (value : α) : IO Unit :=
   log (toString value)
 
 end Env
@@ -427,55 +443,55 @@ structure Method (mode : Mode) where
   run : IO UInt32
 
 /-- Run a contract action and return a NEAR-compatible success code. -/
-def entry (action : IO Unit) : IO UInt32 := do
+@[inline] def entry (action : IO Unit) : IO UInt32 := do
   action
   pure 0
 
 /-- Define an initializer method. -/
-def initializer (name : String) (action : InitM Unit) : Method .init :=
+@[inline] def initializer (name : String) (action : InitM Unit) : Method .init :=
   { name, run := entry action }
 
 /-- Define a view method. -/
-def view (name : String) (action : ViewM Unit) : Method .view :=
+@[inline] def view (name : String) (action : ViewM Unit) : Method .view :=
   { name, run := entry action }
 
 /-- Define an update method. -/
-def update (name : String) (action : UpdateM Unit) : Method .update :=
+@[inline] def update (name : String) (action : UpdateM Unit) : Method .update :=
   { name, run := entry action }
 
 /-- Check if the contract is initialized (STATE key exists). -/
-def isInitialized : IO Bool := Storage.contains "STATE"
+@[inline] def isInitialized : IO Bool := Storage.contains "STATE"
 
 /-- Return a value (string) to the caller. -/
-def returnValue (value : String) : IO Unit := Env.valueReturn value
+@[inline] def returnValue (value : String) : IO Unit := Env.valueReturn value
 
 /-- Return a UTF-8 text value to the caller. -/
-def returnText (value : String) : IO Unit := returnValue value
+@[inline] def returnText (value : String) : IO Unit := returnValue value
 
 /-- Return a JSON payload to the caller. The caller is responsible for valid JSON. -/
-def returnJson (value : String) : IO Unit := returnValue value
+@[inline] def returnJson (value : String) : IO Unit := returnValue value
 
 /-- Return success with no body. -/
-def done : IO Unit := Env.valueReturn ""
+@[inline] def done : IO Unit := Env.valueReturn ""
 
 /-- Return a boolean as a string. -/
-def returnBool (b : Bool) : IO Unit := Env.valueReturn (if b then "true" else "false")
+@[inline] def returnBool (b : Bool) : IO Unit := Env.valueReturn (if b then "true" else "false")
 
 /-- Return a `UInt64` as a string. -/
-def returnU64 (n : UInt64) : IO Unit := returnValue (toString n)
+@[inline] def returnU64 (n : UInt64) : IO Unit := returnValue (toString n)
 
 /-- Return a `Nat` as a string. -/
-def returnNat (n : Nat) : IO Unit := returnValue (toString n)
+@[inline] def returnNat (n : Nat) : IO Unit := returnValue (toString n)
 
 /-- Return an account ID as a string. -/
-def returnAccountId (account : AccountId) : IO Unit := returnValue account.id
+@[inline] def returnAccountId (account : AccountId) : IO Unit := returnValue account.id
 
 /-- Return a storage-codec encoded value. -/
-def returnEncoded [Storage.Codec α] (value : α) : IO Unit :=
+@[inline] def returnEncoded [Storage.Codec α] (value : α) : IO Unit :=
   returnValue (Storage.Codec.encode value)
 
 /-- Require a condition. Until the bridge exposes NEAR panic, failures log and return false. -/
-def require (condition : Bool) (msg : String) : IO Bool := do
+@[inline] def require (condition : Bool) (msg : String) : IO Bool := do
   if condition then
     pure true
   else
@@ -483,41 +499,41 @@ def require (condition : Bool) (msg : String) : IO Bool := do
     pure false
 
 /-- Require that the contract is already initialized. -/
-def requireInitialized : IO Bool := do
+@[inline] def requireInitialized : IO Bool := do
   require (← isInitialized) "contract is not initialized"
 
 /-- Require that the contract is not initialized yet. -/
-def requireNotInitialized : IO Bool := do
+@[inline] def requireNotInitialized : IO Bool := do
   let initialized ← isInitialized
   require (!initialized) "contract is already initialized"
 
 /-- Check whether the predecessor is the given account. -/
-def isPredecessor (account : AccountId) : IO Bool := do
+@[inline] def isPredecessor (account : AccountId) : IO Bool := do
   pure ((← Env.predecessorAccount) == account)
 
 /-- Require the predecessor to match an expected account. -/
-def requirePredecessor (account : AccountId) : IO Bool := do
+@[inline] def requirePredecessor (account : AccountId) : IO Bool := do
   require (← isPredecessor account) ("expected predecessor " ++ toString account)
 
 /-- Initialize the contract state. -/
-def initState (value : String) : IO Bool := Storage.write "STATE" value
+@[inline] def initState (value : String) : IO Bool := Storage.write "STATE" value
 
 /-- Load contract state. -/
-def loadState : IO (Option String) := Storage.read? "STATE"
+@[inline] def loadState : IO (Option String) := Storage.read? "STATE"
 
 /-- Save typed contract state at the conventional `STATE` key. -/
-def initStateAs [Storage.Codec α] (value : α) : IO Bool :=
+@[inline] def initStateAs [Storage.Codec α] (value : α) : IO Bool :=
   Storage.writeAs "STATE" value
 
 /-- Alias for writing typed contract state. -/
-def saveStateAs [Storage.Codec α] (value : α) : IO Bool := initStateAs value
+@[inline] def saveStateAs [Storage.Codec α] (value : α) : IO Bool := initStateAs value
 
 /-- Load and decode typed contract state from the conventional `STATE` key. -/
-def loadStateAs? [Storage.Codec α] : IO (Option α) :=
+@[inline] def loadStateAs? [Storage.Codec α] : IO (Option α) :=
   Storage.readAs? (α := α) "STATE"
 
 /-- Load typed contract state with a default. -/
-def loadStateAs [Storage.Codec α] (default : α) : IO α :=
+@[inline] def loadStateAs [Storage.Codec α] (default : α) : IO α :=
   Storage.readAs (α := α) "STATE" default
 
 end Contract

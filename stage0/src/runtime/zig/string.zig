@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const alloc = @import("alloc.zig");
+const box = @import("box.zig");
 const lean = @import("lean_object.zig");
 const object = @import("object.zig");
 const rc = @import("rc.zig");
@@ -145,7 +146,7 @@ export fn lean_string_mk(cs: *anyopaque) callconv(.c) *anyopaque {
     var it: ?*anyopaque = cs;
     while (it) |node| {
         if (object.lean_is_scalar(node)) break;
-        const c = @as(u32, @truncate(object.lean_unbox(ctor.lean_ctor_get(node, 0))));
+        const c = box.lean_unbox_uint32(ctor.lean_ctor_get(node, 0));
         var buf: [4]u8 = undefined;
         const n = utf8.pushUnicodeScalar(&buf, c);
         bytes.appendSlice(std.heap.page_allocator, buf[0..n]) catch @panic("lean_string_mk: out of memory");
@@ -169,7 +170,7 @@ export fn lean_string_data(s: *anyopaque) callconv(.c) *anyopaque {
         const prev = utf8.prevIndex(bytes, pos);
         const code = utf8.decodeAt(bytes, size, prev) orelse 0xFFFD;
         const cell = alloc.lean_alloc_ctor(1, 2, 0);
-        ctor.lean_ctor_set(cell, 0, object.lean_box(@as(usize, code)));
+        ctor.lean_ctor_set(cell, 0, box.lean_box_uint32(code));
         ctor.lean_ctor_set(cell, 1, result);
         result = cell;
         pos = prev;

@@ -17,12 +17,14 @@ OUTPUT="${2:-$(basename "$INPUT" .zig).wasm}"
 
 LEAN_RT_ZIG="${LEAN_RT_ZIG:-$ROOT/src/runtime/zig/lean_rt.zig}"
 LEAN_NEAR_ZIG="${LEAN_NEAR_ZIG:-$ROOT/src/runtime/zig/host/near/lean_near.zig}"
+LEAN_NEAR_ROOT_ZIG="${LEAN_NEAR_ROOT_ZIG:-$ROOT/src/runtime/zig/near_contract_root.zig}"
+LEAN_MPZ_ZIG="${LEAN_MPZ_ZIG:-$ROOT/src/runtime/zig/mpz_zig.zig}"
 LEANRT_LIB="${LEANRT_LIB:-$ROOT/src/runtime/zig/zig-out/lib/libleanrt_zig.a}"
 OPTIMIZE="${NEAR_OPTIMIZE:-ReleaseFast}"
 WASM_TARGET="${WASM_TARGET:-wasm32-wasi}"
 WASM_CPU="${WASM_CPU:-baseline+atomics}"
 
-for f in "$LEAN_RT_ZIG" "$LEAN_NEAR_ZIG" "$LEANRT_LIB"; do
+for f in "$LEAN_RT_ZIG" "$LEAN_NEAR_ZIG" "$LEAN_NEAR_ROOT_ZIG" "$LEAN_MPZ_ZIG" "$LEANRT_LIB"; do
   if [[ ! -f "$f" ]]; then
     echo "zigc-near: required file not found: $f" >&2
     echo "  Build the runtime first: cd src/runtime/zig && zig build -Dtarget=$WASM_TARGET --prefix zig-out" >&2
@@ -30,17 +32,33 @@ for f in "$LEAN_RT_ZIG" "$LEAN_NEAR_ZIG" "$LEANRT_LIB"; do
   fi
 done
 
+OUTPUT_DIR="$(dirname "$OUTPUT")"
+mkdir -p "$OUTPUT_DIR"
+RUNTIME_OPTIONS_ZIG="${LEAN_RUNTIME_OPTIONS_ZIG:-$OUTPUT_DIR/near_runtime_options.zig}"
+if [[ -z "${LEAN_RUNTIME_OPTIONS_ZIG:-}" ]]; then
+  cat > "$RUNTIME_OPTIONS_ZIG" <<'ZIG'
+pub const export_allocator_symbols: bool = true;
+pub const allocator_backend: u8 = 0;
+pub const mpz_backend: u8 = 0;
+ZIG
+fi
+
 exec zig build-exe \
   -target "$WASM_TARGET" \
   -fno-entry \
   -O "$OPTIMIZE" \
   -mcpu "$WASM_CPU" \
   --export=main \
+  --export=_lean_main \
   "$LEANRT_LIB" \
+  --dep contract \
   --dep lean_rt \
-  --dep lean_near \
-  -Mroot="$INPUT" \
+  --dep mpz_zig \
+  --dep runtime_options \
+  -Mroot="$LEAN_NEAR_ROOT_ZIG" \
+  -Mcontract="$INPUT" \
   -Mlean_rt="$LEAN_RT_ZIG" \
-  -Mlean_near="$LEAN_NEAR_ZIG" \
+  -Mmpz_zig="$LEAN_MPZ_ZIG" \
+  -Mruntime_options="$RUNTIME_OPTIONS_ZIG" \
   -lc \
   -femit-bin="$OUTPUT"

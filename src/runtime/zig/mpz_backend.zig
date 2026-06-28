@@ -3,7 +3,9 @@
 
 //! Backend selector for the mpz module. Lives inside the `mpz_zig` module
 //! (not shared with root) so it does not trigger Zig's "file exists in two
-//! modules" rule. Kept in sync manually with runtime_options.mpz_backend.
+//! modules" rule.
 
 /// 0 = gmp (native default), 1 = zig-bigint (std.math.big.int, WASM-safe).
-pub const mpz_backend: u8 = 0;
+const builtin = @import("builtin");
+
+pub const mpz_backend: u8 = if (builtin.cpu.arch == .wasm32) 1 else 0;
