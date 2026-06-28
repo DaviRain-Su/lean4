@@ -121,8 +121,7 @@ def ctorSetStmt (obj : YExpr) (i : Nat) (value : YExpr) : YStmt :=
     yBuiltin "add" #[obj, yBuiltin "mul" #[yNum (i + 1), yNum 32]], value]
 
 /-- Allocate `nwords` fresh words: returns (statements, ptr expr). -/
-def allocN (nwords : Nat) : Array YStmt × YExpr :=
-  let ptrName := "_alloc_ptr"
+def allocN (nwords : Nat) (ptrName : String) : Array YStmt × YExpr :=
   let decl : YStmt := sVarDecl #[tn ptrName] (some freeMemPtrExpr)
   let bump : YStmt := sExprStmt <| yBuiltin "mstore" #[yNum freeMemPtrSlot,
     yBuiltin "add" #[yStr ptrName, yBuiltin "mul" #[yNum nwords, yNum 32]]]
@@ -153,6 +152,12 @@ abbrev EmitYulM := ReaderT Context <| StateRefT State CoreM
 
 @[inline] def emit (s : YStmt) : EmitYulM Unit :=
   modify fun st => { st with stmts := st.stmts.push s }
+
+/-- Generate a fresh temporary name. -/
+def freshName : EmitYulM String := do
+  let st ← get
+  set { st with fresh := st.fresh + 1 }
+  pure ("_t" ++ toString st.fresh)
 
 @[inline] def emitMany (ss : Array YStmt) : EmitYulM Unit :=
   modify fun st => { st with stmts := st.stmts ++ ss }
@@ -254,7 +259,7 @@ mutual
     let byteLen := bytes.size
     let dataWords := (byteLen + 31) / 32
     let nwords := 4 + dataWords
-    let (allocStmts, ptr) := allocN nwords
+    let (allocStmts, ptr) := allocN nwords (← freshName)
     emitMany allocStmts
     emit <| sExprStmt (yBuiltin "mstore" #[ptr, ctorHeaderExpr 249 0 0])
     emit <| sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[ptr, yNum 32], yNum byteLen])
@@ -280,7 +285,7 @@ mutual
       emit <| sVarDecl #[tn lhsId] (some (leanBoxExpr (yNum info.cidx)))
       return
     let nwords := info.size + 1
-    let (allocStmts, ptr) := allocN nwords
+    let (allocStmts, ptr) := allocN nwords (← freshName)
     emitMany allocStmts
     -- Store header at offset 0 (ptr points to it).
     emit <| sExprStmt (yBuiltin "mstore" #[ptr, ctorHeaderExpr info.cidx info.size 0])
@@ -292,7 +297,7 @@ mutual
       EmitYulM Unit := do
     -- Closure object: [header(tag=245), fn_id, arity, num_fixed, args...]
     let nwords := args.size + 4
-    let (allocStmts, ptr) := allocN nwords
+    let (allocStmts, ptr) := allocN nwords (← freshName)
     emitMany allocStmts
     emit <| sExprStmt (yBuiltin "mstore" #[ptr, ctorHeaderExpr 245 args.size 0])
     emit <| ctorSetStmt ptr 0 (yNum (fn.hash.toNat))
@@ -317,7 +322,7 @@ mutual
         let opcode : String := externName.drop "lean_evm_".length |>.toString
         -- EVM externs take/return raw U256; unbox args, box the result.
         let unboxedArgs := argExprs.map leanUnboxExpr
-        if opcode == "returnMem" || opcode == "revertMem" || opcode == "mstore" || opcode == "sstore" || opcode == "log0" || opcode == "log1" || opcode == "log2" then
+        if opcode == "returnMem" || opcode == "revertMem" then
           -- Terminating builtins: control never returns.
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])
@@ -327,8 +332,15 @@ mutual
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sVarDecl #[tn lhsId] (some leanBoxZero)
         else
-          -- Value builtins: box the result.
-          emit <| sVarDecl #[tn lhsId] (some (leanBoxExpr (yBuiltin opcode unboxedArgs)))
+          -- Value builtins (sload, calldataload, caller, ...): wrap the result
+          -- in a Result.ok ctor (tag 0, field 0 = boxed value) so that LCNF's
+          -- IO monad bind can match on tag 0 (success) and read the field.
+          let rawVal := leanBoxExpr (yBuiltin opcode unboxedArgs)
+          let (allocStmts, ptr) := allocN 2 (← freshName)  -- header + 1 field
+          emitMany allocStmts
+          emit <| sExprStmt (yBuiltin "mstore" #[ptr, ctorHeaderExpr 0 1 0])  -- tag 0, 1 field
+          emit <| ctorSetStmt ptr 0 rawVal
+          emit <| sVarDecl #[tn lhsId] (some ptr)
       else
         emit <| sVarDecl #[tn lhsId] (some (yCall (yulFnName fn) argExprs))
     | _ =>
@@ -587,8 +599,10 @@ def dispatchBlock (methods : Array MethodSpec) : YStmt :=
     let argExprs := (List.range m.argCount).toArray.map calldataArgExpr
     let callExpr : YExpr := yCall m.fnName argExprs
     let bodyStmts := if m.returnsValue then
+      -- _r is a Result.ok ctor (tag 0); read field 0 (the boxed Nat) then unbox.
       #[ sVarDecl #[tn "_r"] (some callExpr)
-       , sExprStmt (yBuiltin "mstore" #[yNum 0, leanUnboxExpr (yStr "_r")])
+       , sVarDecl #[tn "_v"] (some (ctorGetExpr (yStr "_r") 0))
+       , sExprStmt (yBuiltin "mstore" #[yNum 0, leanUnboxExpr (yStr "_v")])
        , sExprStmt (yBuiltin "return" #[yNum 0, yNum 32])
        ]
     else
