@@ -43,3 +43,11 @@ lean_object* lean_evm_selfdestruct(uintptr_t beneficiary) { (void)beneficiary; r
 lean_object* lean_evm_blockhash(uintptr_t bn) { (void)bn; return lean_box_nat(0); }
 lean_object* lean_evm_extcodesize(uintptr_t addr) { (void)addr; return lean_box_nat(0); }
 lean_object* lean_evm_extcodehash(uintptr_t addr) { (void)addr; return lean_box_nat(0); }
+lean_object* lean_evm_gas(void) { return lean_box_nat(0); }
+lean_object* lean_evm_origin(void) { return lean_box_nat(0); }
+lean_object* lean_evm_gasprice(void) { return lean_box_nat(0); }
+lean_object* lean_evm_coinbase(void) { return lean_box_nat(0); }
+lean_object* lean_evm_gaslimit(void) { return lean_box_nat(0); }
+lean_object* lean_evm_basefee(void) { return lean_box_nat(0); }
+lean_object* lean_evm_chainid(void) { return lean_box_nat(1); }
+lean_object* lean_evm_balance(uintptr_t addr) { (void)addr; return lean_box_nat(0); }

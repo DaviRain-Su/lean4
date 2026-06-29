@@ -119,6 +119,34 @@ These map 1:1 to EVM opcodes via EmitYul. Arguments and return values use `Nat`
 /-- EVM `extcodehash`: code hash at `addr`. -/
 @[extern "lean_evm_extcodehash"] opaque extcodehash (addr : Nat) : IO Nat
 
+/-! ## Transaction context -/
+
+/-- Remaining gas (`gas()` in EVM). -/
+@[extern "lean_evm_gas"] opaque gas : IO Nat
+
+/-- Transaction origin (`ORIGIN` opcode). -/
+@[extern "lean_evm_origin"] opaque origin : IO Nat
+
+/-- Gas price (`GASPRICE` opcode). -/
+@[extern "lean_evm_gasprice"] opaque gasprice : IO Nat
+
+/-! ## Block context -/
+
+/-- Block coinbase (`COINBASE` opcode). -/
+@[extern "lean_evm_coinbase"] opaque coinbase : IO Nat
+
+/-- Block gas limit (`GASLIMIT` opcode). -/
+@[extern "lean_evm_gaslimit"] opaque gaslimit : IO Nat
+
+/-- Block base fee (`BASEFEE` opcode, EIP-1559). -/
+@[extern "lean_evm_basefee"] opaque basefee : IO Nat
+
+/-- Chain ID (`CHAINID` opcode, EIP-155). -/
+@[extern "lean_evm_chainid"] opaque chainId : IO Nat
+
+/-- Balance of any address (`BALANCE` opcode). -/
+@[extern "lean_evm_balance"] opaque balanceOf (addr : Nat) : IO Nat
+
 /-! ## Typed aliases -/
 
 /-- A 256-bit unsigned integer, EVM's native word. -/
@@ -322,22 +350,74 @@ end Storage.Array
 
 namespace Env
 
-  /-- The sender of the current call. -/
+  -- ## msg (Vyper: msg.sender, msg.value, msg.gas, msg.data)
+
+  /-- The sender of the current call (`msg.sender`). -/
   @[inline] def sender : IO Address := Evm.caller
 
-  /-- The wei value attached to the current call. -/
+  /-- The wei value attached to the current call (`msg.value`). -/
   @[inline] def value : IO UInt256 := Evm.callvalue
 
-  /-- The current block timestamp. -/
+  /-- The remaining gas (`msg.gas`). -/
+  @[inline] def gas : IO Nat := Evm.gas
+
+  -- ## tx (Vyper: tx.origin, tx.gasprice)
+
+  /-- The original sender of the transaction (`tx.origin`). -/
+  @[inline] def origin : IO Address := Evm.origin
+
+  /-- The gas price of the transaction (`tx.gasprice`). -/
+  @[inline] def gasprice : IO Nat := Evm.gasprice
+
+  -- ## block (Vyper: block.number, block.timestamp, block.coinbase, etc.)
+
+  /-- The current block timestamp (`block.timestamp`). -/
   @[inline] def blockTimestamp : IO UInt256 := Evm.timestamp
 
-  /-- The current block number. -/
+  /-- The current block number (`block.number`). -/
   @[inline] def blockNumber : IO UInt256 := Evm.number
 
-  /-- The contract's own balance. -/
+  /-- The current block coinbase address (`block.coinbase`). -/
+  @[inline] def coinbase : IO Address := Evm.coinbase
+
+  /-- The current block gas limit (`block.gaslimit`). -/
+  @[inline] def gaslimit : IO Nat := Evm.gaslimit
+
+  /-- The current block base fee (`block.basefee`). -/
+  @[inline] def basefee : IO Nat := Evm.basefee
+
+  /-- The block hash of a recent block (`blockhash(n)`). -/
+  @[inline] def blockHash (n : Nat) : IO Nat := Evm.blockhash n
+
+  /-- The contract's own balance (`self.balance`). -/
   @[inline] def balance : IO UInt256 := Evm.selfbalance
 
+  /-- The balance of any address (`address.balance`). -/
+  @[inline] def balanceOf (addr : Address) : IO Nat := Evm.balanceOf addr
+
+  -- ## chain (Vyper: chain.id)
+
+  /-- The current chain ID (`chain.id`). -/
+  @[inline] def chainId : IO Nat := Evm.chainId
+
+  /-- The deployed code hash at an address. -/
+  @[inline] def codehash (addr : Address) : IO Nat := extcodehash addr
+
+  /-- The deployed code size at an address. -/
+  @[inline] def codesize (addr : Address) : IO Nat := extcodesize addr
+
 end Env
+
+/-! ## Math builtins (Vyper-style) -/
+
+/-- Minimum of two Nats. -/
+@[inline] def min (a b : Nat) : Nat := if a ≤ b then a else b
+
+/-- Maximum of two Nats. -/
+@[inline] def max (a b : Nat) : Nat := if a ≥ b then a else b
+
+/-- Absolute difference (a - b if a ≥ b, else 0). -/
+@[inline] def absDiff (a b : Nat) : Nat := if a ≥ b then a - b else 0
 
 /-! ## Assertion helpers -/
 
