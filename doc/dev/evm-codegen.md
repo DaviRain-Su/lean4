@@ -26,10 +26,20 @@ EVM bytecode (deployed)
 
 ## Current status
 
-Phase 0 (feasibility spike) is **complete and verified**. Every runtime primitive
-the codegen will rely on has been hand-written in Yul, compiled with `solc
---strict-assembly --bin`, deployed to a local `anvil` node, and exercised through
-`forge test`:
+**Complete and verified end-to-end.** All phases implemented:
+
+- **Phase 0** — feasibility spike. ✅
+- **Phase 1** — `EmitYul` codegen covering full LCNF. ✅
+- **Phase 2** — Lean object runtime in Yul (Nat arithmetic, Array, String). ✅
+- **Phase 3** — `Lean.Evm` SDK (Storage, Env, externs). ✅
+- **Phase 4** — `tools/evmc` toolchain + selector dispatch. ✅
+- **Phase 5** — forge test suite (`tests/emitzig_evm/`). ✅
+- **Phase 6** — example contracts (`examples/evm/contracts/`). ✅
+
+Verified contracts (forge tests, all pass):
+- Counter: get/set/increment/decrement (gas ~33k)
+- SimpleToken: init/owner/supply/balanceOf/transfer/revert (gas ~117k)
+- ArrayExample: array size/index/sum (gas ~10k)
 
 - **Scalar box/unbox**: `lean_box(n) = (n << 1) | 1`, `lean_unbox(o) = o >> 1`.
   Verified `5 + 7 = 12` through a full box → add → unbox round-trip.
