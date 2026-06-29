@@ -12,6 +12,19 @@ function numberResult(value) {
   if (Buffer.isBuffer(value)) return Number(value.toString("utf8"));
   return Number(value);
 }
+async function expectFailure(label, thunk, needle) {
+  try {
+    await thunk();
+    assert.fail(`${label} unexpectedly succeeded`);
+  } catch (error) {
+    const text = error && error.stack ? error.stack : String(error);
+    assert.ok(
+      text.includes(needle),
+      `${label} failed, but did not contain expected marker ${needle}:\n${text}`
+    );
+    console.log(`  ✔ ${label} failed as expected: ${needle}`);
+  }
+}
 
 async function main() {
   if (!fs.existsSync(factoryWasm)) {
@@ -38,6 +51,15 @@ async function main() {
     assert.equal(numberResult(initialCount), 0);
     console.log("  ✔ allPairsLength:", numberResult(initialCount));
 
+    console.log("Checking IDENTICAL_ADDRESSES rejection...");
+    await root.call(factory, "setTokenA", "token0.near");
+    await root.call(factory, "setTokenB", "token0.near");
+    await expectFailure(
+      "createPair identical addresses",
+      () => root.call(factory, "createPair", {}),
+      "IDENTICAL_ADDRESSES"
+    );
+
     console.log("Setting pending token addresses...");
     await root.call(factory, "setTokenA", "token0.near");
     await root.call(factory, "setTokenB", "token1.near");
@@ -51,6 +73,28 @@ async function main() {
     const updatedCount = await factory.view("allPairsLength", {});
     assert.equal(numberResult(updatedCount), 1);
     console.log("  ✔ allPairsLength after createPair:", numberResult(updatedCount));
+
+    console.log("Checking PAIR_EXISTS rejection...");
+    await root.call(factory, "setTokenA", "token0.near");
+    await root.call(factory, "setTokenB", "token1.near");
+    await expectFailure(
+      "createPair duplicate pair",
+      () => root.call(factory, "createPair", {}),
+      "PAIR_EXISTS"
+    );
+
+    console.log("Checking FORBIDDEN setter guards...");
+    const outsider = await root.devCreateAccount();
+    await expectFailure(
+      "setFeeTo by non-setter",
+      () => outsider.call(factory, "setFeeTo", "mallory.near"),
+      "FORBIDDEN"
+    );
+    await expectFailure(
+      "setFeeToSetter by non-setter",
+      () => outsider.call(factory, "setFeeToSetter", "mallory.near"),
+      "FORBIDDEN"
+    );
     console.log("\n✅ Sandbox test passed");
   } finally {
     await worker.tearDown();
