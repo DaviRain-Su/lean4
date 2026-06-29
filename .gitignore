@@ -40,3 +40,8 @@ wdOut.txt
 src/runtime/zig/zig-out/
 lean_rt.o
 *.o
+
+# EVM build artifacts
+examples/evm/contracts/.*.yul
+*.bin
+build/evm/

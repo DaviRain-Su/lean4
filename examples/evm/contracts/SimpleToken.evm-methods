@@ -1,0 +1,5 @@
+init(uint256)=l_SimpleToken_init[update]
+getOwner()=l_SimpleToken_getOwner[view]
+totalSupply()=l_SimpleToken_totalSupply[view]
+balanceOf(uint256)=l_SimpleToken_balanceOf[view]
+transfer(uint256,uint256)=l_SimpleToken_transfer[update]

@@ -1,0 +1,3 @@
+sizeOf3()=l_ArrayExample_sizeOf3[view]
+getElem()=l_ArrayExample_getElem[view]
+sumOf3()=l_ArrayExample_sumOf3[view]

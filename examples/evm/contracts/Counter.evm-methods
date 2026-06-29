@@ -1,0 +1,4 @@
+get()=l_Counter_get[view]
+set(uint256)=l_Counter_set[update]
+increment()=l_Counter_increment[update]
+decrement()=l_Counter_decrement[update]
