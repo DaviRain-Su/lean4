@@ -33,12 +33,6 @@ def allPairsKey (index : Nat) : String :=
 
 namespace Spec
 
-/-- Pairs are unique: (tokenA, tokenB) maps to at most one pair. -/
-theorem pair_uniqueness {tokenA tokenB : String}
-    (h : tokenA ≠ tokenB)
-    : tokenA < tokenB ∨ tokenB < tokenA := by
-  exact Ne.lt_or_lt h
-
 /-- Token ordering for canonical pair address. -/
 def sortTokens (tokenA tokenB : String) : String × String :=
   if tokenA < tokenB then (tokenA, tokenB) else (tokenB, tokenA)
@@ -49,41 +43,42 @@ end Spec
 
 def getPair (tokenA tokenB : String) : IO String := do
   let (t0, t1) := Spec.sortTokens tokenA tokenB
-  let v ← Storage.readString? (pairKey t0 t1)
-  pure v.getD ""
+  let v : Option String ← Storage.readAs? (pairKey t0 t1)
+  pure (v.getD "")
 
 def setPair (tokenA tokenB pairAddr : String) : IO Unit := do
   let (t0, t1) := Spec.sortTokens tokenA tokenB
-  Storage.writeString (pairKey t0 t1) pairAddr
-  Storage.writeString (pairKey t1 t0) pairAddr  -- reverse lookup
+  let _ ← Storage.writeAs (pairKey t0 t1) pairAddr
+  let _ ← Storage.writeAs (pairKey t1 t0) pairAddr  -- reverse lookup
 
 def getPairCount : IO Nat := do
-  let v ← Storage.readNat? pairCountKey.name
-  pure v.getD 0
+  let v ← Storage.readAs? (α := Nat) pairCountKey.name
+  pure (v.getD 0)
 
 def allPairsAt (index : Nat) : IO String := do
-  let v ← Storage.readString? (allPairsKey index)
-  pure v.getD ""
+  let v ← Storage.readAs? (α := String) (allPairsKey index)
+  pure (v.getD "")
 
 /-- Append a pair to the allPairs array. -/
 def appendPair (pairAddr : String) : IO Unit := do
   let count ← getPairCount
-  Storage.writeString (allPairsKey count) pairAddr
-  Storage.writeNat pairCountKey.name (count + 1)
+  let _ ← Storage.writeAs (allPairsKey count) pairAddr
+  let _ ← Storage.writeAs pairCountKey.name (count + 1)
 
 -- ## Guards
 
 def requireFeeToSetter : IO Unit := do
-  let setter ← Storage.readString? feeToSetterKey.name |>.getD ""
+  let setterOpt : Option String ← Storage.readAs? feeToSetterKey.name
+  let setter := setterOpt.getD ""
   let caller ← Env.predecessorAccount
-  if caller != setter then Contract.panic "UniswapV2: FORBIDDEN"
+  if caller.id != setter then Contract.panic "UniswapV2: FORBIDDEN"
 
 -- ## Entrypoints
 
 /-- Initialize the factory. Caller becomes feeToSetter. -/
 @[export l_UniswapV2Factory_init]
 def init (feeToSetter : String) : IO Unit := do
-  Storage.writeString feeToSetterKey.name feeToSetter
+  let _ ← Storage.writeAs feeToSetterKey.name feeToSetter
 
 /-- Create a new pair for tokenA and tokenB.
     Returns the pair account id (subaccount of factory). -/
@@ -110,13 +105,13 @@ def createPair (tokenA tokenB : String) : IO String := do
 @[export l_UniswapV2Factory_setFeeTo]
 def setFeeTo (feeTo : String) : IO Unit := do
   requireFeeToSetter
-  Storage.writeString feeToKey.name feeTo
+  let _ ← Storage.writeAs feeToKey.name feeTo
 
 /-- Set new feeToSetter. Only current feeToSetter. -/
 @[export l_UniswapV2Factory_setFeeToSetter]
 def setFeeToSetter (newSetter : String) : IO Unit := do
   requireFeeToSetter
-  Storage.writeString feeToSetterKey.name newSetter
+  let _ ← Storage.writeAs feeToSetterKey.name newSetter
 
 /-- Get the number of pairs created. -/
 @[export l_UniswapV2Factory_allPairsLength]

@@ -45,3 +45,4 @@ lean_rt.o
 examples/evm/contracts/.*.yul
 *.bin
 build/evm/
+*.olean

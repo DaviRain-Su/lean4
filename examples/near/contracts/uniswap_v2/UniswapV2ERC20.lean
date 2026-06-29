@@ -52,25 +52,25 @@ end Spec
 -- ## Read/Write helpers
 
 def getTotalSupply : IO Nat := do
-  let v ← Storage.readNat? totalSupplyKey.name
-  pure v.getD 0
+  let v : Option Nat ← Storage.readAs? (α := Nat) totalSupplyKey.name
+  pure (v.getD 0)
 
-def setTotalSupply (v : Nat) : IO Unit :=
-  Storage.writeNat totalSupplyKey.name v
+def setTotalSupply (v : Nat) : IO Unit := do
+  let _ ← Storage.writeAs totalSupplyKey.name v
 
 def balanceOf (account : String) : IO Nat := do
-  let v ← Storage.readNat? (balanceKey account)
-  pure v.getD 0
+  let v : Option Nat ← Storage.readAs? (α := Nat) (balanceKey account)
+  pure (v.getD 0)
 
-def _setBalance (account : String) (v : Nat) : IO Unit :=
-  Storage.writeNat (balanceKey account) v
+def _setBalance (account : String) (v : Nat) : IO Unit := do
+  let _ ← Storage.writeAs (balanceKey account) v
 
 def _allowance (owner spender : String) : IO Nat := do
-  let v ← Storage.readNat? (allowanceKey owner spender)
-  pure v.getD 0
+  let v : Option Nat ← Storage.readAs? (α := Nat) (allowanceKey owner spender)
+  pure (v.getD 0)
 
-def _approve (owner spender : String) (v : Nat) : IO Unit :=
-  Storage.writeNat (allowanceKey owner spender) v
+def _approve (owner spender : String) (v : Nat) : IO Unit := do
+  let _ ← Storage.writeAs (allowanceKey owner spender) v
 
 def _transfer (src dst : String) (v : Nat) : IO Unit := do
   let srcBal ← balanceOf src
@@ -86,9 +86,9 @@ def _mint (to : String) (v : Nat) : IO Unit := do
   _setBalance to (bal + v)
 
 /-- Burn LP tokens from `from`. -/
-def _burn (from : String) (v : Nat) : IO Unit := do
-  let bal ← balanceOf from
-  _setBalance from (bal - v)
+def _burn (holder : String) (v : Nat) : IO Unit := do
+  let bal ← balanceOf holder
+  _setBalance holder (bal - v)
   let ts ← getTotalSupply
   setTotalSupply (ts - v)
 

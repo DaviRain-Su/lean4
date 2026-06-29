@@ -19,7 +19,7 @@ namespace UniswapV2.FT
 def transfer (token : AccountId) (receiver : String) (amount : Amount.U128) (memo : String := "") : IO Promise := do
   let args := "{\"receiver_id\":\"" ++ receiver ++ "\",\"amount\":\"" ++ toString amount.hi ++ toString amount.lo ++ "\""
   let args := if memo == "" then args ++ "}" else args ++ ",\"memo\":\"" ++ memo ++ "\"}"
-  Promise.create token "ft_transfer" args NearToken.oneYocto (Gas.ofNGas 30)
+  Promise.create token "ft_transfer" args NearToken.oneYocto (Gas.fromTgas 30)
 
 /-- Call `ft_transfer_call`: transfer tokens to a contract and trigger a callback.
     The receiver contract's `ft_on_transfer` method is called with `msg`. -/
@@ -27,13 +27,13 @@ def transferCall (token : AccountId) (receiver : String) (amount : Amount.U128) 
   let args := "{\"receiver_id\":\"" ++ receiver ++ "\",\"amount\":\"" ++ toString amount.hi ++ toString amount.lo
   let args := args ++ "\",\"msg\":\"" ++ msg ++ "\""
   let args := if memo == "" then args ++ "}" else args ++ ",\"memo\":\"" ++ memo ++ "\"}"
-  Promise.create token "ft_transfer_call" args NearToken.oneYocto (Gas.ofNGas 50)
+  Promise.create token "ft_transfer_call" args NearToken.oneYocto (Gas.fromTgas 50)
 
 /-- Call `ft_balance_of` on a token contract. Returns a Promise whose callback
     will contain the balance as a JSON string. -/
 def balanceOf (token : AccountId) (account : String) : IO Promise := do
   let args := "{\"account_id\":\"" ++ account ++ "\"}"
-  Promise.create token "ft_balance_of" args NearToken.zero (Gas.ofNGas 15)
+  Promise.create token "ft_balance_of" args NearToken.zero (Gas.fromTgas 15)
 
 /-- Parse the balance from a Promise callback result (JSON string). -/
 def parseBalanceResult (data : String) : Amount.U128 :=
