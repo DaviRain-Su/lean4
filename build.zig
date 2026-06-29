@@ -98,6 +98,70 @@ const SavedDriverMetadata = struct {
     cmake_args: []const []const u8 = &.{},
 };
 
+const DriverDefaults = struct {
+    profile: BuildProfile,
+    binary_dir: []const u8,
+    jobs: usize,
+    install_prefix: []const u8,
+    cmake_args: []const []const u8,
+    make_args: []const []const u8,
+    ctest_args: []const []const u8,
+    ctest_junit: ?[]const u8,
+
+    fn config(self: DriverDefaults, command: DriverCommand) DriverConfig {
+        return .{
+            .command = command,
+            .profile = self.profile,
+            .binary_dir = self.binary_dir,
+            .jobs = self.jobs,
+            .install_prefix = self.install_prefix,
+            .cmake_args = self.cmake_args,
+            .make_args = self.make_args,
+            .ctest_args = self.ctest_args,
+            .ctest_junit = self.ctest_junit,
+            .target = null,
+            .stage = null,
+            .stage_target = null,
+            .git_commit_message = null,
+        };
+    }
+
+    fn rootTargetConfig(self: DriverDefaults, target: []const u8) DriverConfig {
+        var cfg = self.config(.root_target);
+        cfg.target = target;
+        return cfg;
+    }
+
+    fn stageTargetConfig(self: DriverDefaults, stage: StageName, stage_target: []const u8) DriverConfig {
+        var cfg = self.config(.stage_target);
+        cfg.stage = stage;
+        cfg.stage_target = stage_target;
+        return cfg;
+    }
+
+    fn ctestConfig(self: DriverDefaults, stage: StageName, junit_path: ?[]const u8) DriverConfig {
+        var cfg = self.config(.ctest);
+        cfg.stage = stage;
+        cfg.ctest_junit = junit_path;
+        return cfg;
+    }
+
+    fn prepareBenchStagesConfig(self: DriverDefaults) DriverConfig {
+        var cfg = self.config(.prepare_bench_stages);
+        cfg.stage = .stage1;
+        return cfg;
+    }
+
+    fn checkRebootstrapConfig(self: DriverDefaults) DriverConfig {
+        var cfg = self.config(.check_rebootstrap);
+        cfg.target = "stage1";
+        cfg.stage = .stage1;
+        cfg.stage_target = "update-stage0";
+        cfg.git_commit_message = "chore: update-stage0";
+        return cfg;
+    }
+};
+
 pub fn build(b: *Build) void {
     const requested_profile = b.option(BuildProfile, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug");
     const bootstrap_profile = requested_profile orelse .@"dev-release";
@@ -114,148 +178,70 @@ pub fn build(b: *Build) void {
 
     const configure_cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
     const inherited_cmake_args = resolveInheritedCmakeArgs(raw_cmake_args, configure_cmake_args, saved_metadata);
+    const configure_defaults: DriverDefaults = .{
+        .profile = profile,
+        .binary_dir = binary_dir,
+        .jobs = jobs,
+        .install_prefix = b.install_path,
+        .cmake_args = configure_cmake_args,
+        .make_args = make_args,
+        .ctest_args = ctest_args,
+        .ctest_junit = ctest_junit,
+    };
+    const runtime_defaults: DriverDefaults = .{
+        .profile = profile,
+        .binary_dir = binary_dir,
+        .jobs = jobs,
+        .install_prefix = b.install_path,
+        .cmake_args = inherited_cmake_args,
+        .make_args = make_args,
+        .ctest_args = ctest_args,
+        .ctest_junit = ctest_junit,
+    };
 
-    _ = addNamedStep(
+    _ = addDriverStep(
         b,
         "configure",
         "Run CMake configure for the selected profile and build directory",
-        createDriverCommand(
-            b,
-            .{
-                .command = .configure,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = configure_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = null,
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        configure_defaults.config(.configure),
         &.{},
     );
 
-    const configure_dependency_cmd = createDriverCommand(
-        b,
-        .{
-            .command = .configure,
-            .profile = profile,
-            .binary_dir = binary_dir,
-            .jobs = jobs,
-            .install_prefix = b.install_path,
-            .cmake_args = inherited_cmake_args,
-            .make_args = make_args,
-            .ctest_args = ctest_args,
-            .ctest_junit = ctest_junit,
-            .target = null,
-            .stage = null,
-            .stage_target = null,
-            .git_commit_message = null,
-        },
-    );
+    const configure_dependency_cmd = createDriverCommand(b, runtime_defaults.config(.configure));
 
-    const stage1_configure_step = addNamedStep(
+    const stage1_configure_step = addRootTargetStep(
         b,
+        runtime_defaults,
         "stage1-configure",
         "Build stage0 and configure the stage1 sub-build",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage1-configure",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        "stage1-configure",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage1_step = addNamedStep(
+    const stage1_step = addRootTargetStep(
         b,
+        runtime_defaults,
         "stage1",
         "Build stage1",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage1",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        "stage1",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage2_step = addNamedStep(
+    const stage2_step = addRootTargetStep(
         b,
+        runtime_defaults,
         "stage2",
         "Build stage2",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage2",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        "stage2",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage3_step = addNamedStep(
+    const stage3_step = addRootTargetStep(
         b,
+        runtime_defaults,
         "stage3",
         "Build stage3",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage3",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        "stage3",
         &.{&configure_dependency_cmd.step},
     );
 
@@ -265,356 +251,123 @@ pub fn build(b: *Build) void {
         .stage3 = stage3_step,
     };
     const selected_stage_step = stageStep(selected_stage, stages);
-    const default_stage_junit_path = b.fmt("{s}/{s}/test-results.xml", .{ binary_dir, selected_stage.asString() });
+    const default_stage_junit_path = b.fmt("{s}/{s}/test-results.xml", .{ runtime_defaults.binary_dir, selected_stage.asString() });
 
-    _ = addNamedStep(
+    _ = addCTestStep(
         b,
+        runtime_defaults,
         "test",
         "Run ctest against the selected stage (default stage1)",
-        createDriverCommand(
-            b,
-            .{
-                .command = .ctest,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = null,
-                .stage = selected_stage,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        selected_stage,
+        runtime_defaults.ctest_junit,
         &.{selected_stage_step},
     );
 
-    _ = addNamedStep(
+    _ = addCTestStep(
         b,
+        runtime_defaults,
         "test-junit",
         "Run ctest against the selected stage and write JUnit output to the standard stage-local path",
-        createDriverCommand(
-            b,
-            .{
-                .command = .ctest,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit orelse default_stage_junit_path,
-                .target = null,
-                .stage = selected_stage,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        selected_stage,
+        runtime_defaults.ctest_junit orelse default_stage_junit_path,
         &.{selected_stage_step},
     );
 
-    _ = addNamedStep(
-        b,
-        "bench",
-        "Run the full benchmark suite",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "bench",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{&configure_dependency_cmd.step},
-    );
+    _ = addRootTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", "bench", &.{&configure_dependency_cmd.step});
+    _ = addRootTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", "bench-part1", &.{&configure_dependency_cmd.step});
+    _ = addRootTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", "bench-part2", &.{&configure_dependency_cmd.step});
+    _ = addRootTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", "clean-stdlib", &.{&configure_dependency_cmd.step});
+    _ = addRootTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", "cache-get", &.{stage1_configure_step});
+    _ = addRootTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", "check-stage3", &.{stage3_step});
+    _ = addStageTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, "update-stage0", &.{selected_stage_step});
+    _ = addStageTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, "update-stage0-commit", &.{selected_stage_step});
+    attachInstallStep(b, runtime_defaults, selected_stage, &.{selected_stage_step});
 
-    _ = addNamedStep(
-        b,
-        "bench-part1",
-        "Run benchmark suite part 1",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "bench-part1",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{&configure_dependency_cmd.step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "bench-part2",
-        "Run benchmark suite part 2",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "bench-part2",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{&configure_dependency_cmd.step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "clean-stdlib",
-        "Remove generated stdlib artifacts from the selected build directory",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "clean-stdlib",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{&configure_dependency_cmd.step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "cache-get",
-        "Download the Lake cache for the selected build directory",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "cache-get",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{stage1_configure_step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "check-stage3",
-        "Build stage3 and compare it against stage2",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "check-stage3",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
-        &.{stage3_step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "update-stage0",
-        "Refresh stage0 from the selected stage (default stage1)",
-        createDriverCommand(
-            b,
-            .{
-                .command = .stage_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = null,
-                .stage = selected_stage,
-                .stage_target = "update-stage0",
-                .git_commit_message = null,
-            },
-        ),
-        &.{selected_stage_step},
-    );
-
-    _ = addNamedStep(
-        b,
-        "update-stage0-commit",
-        "Refresh stage0 from the selected stage and create the update commit",
-        createDriverCommand(
-            b,
-            .{
-                .command = .stage_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = null,
-                .stage = selected_stage,
-                .stage_target = "update-stage0-commit",
-                .git_commit_message = null,
-            },
-        ),
-        &.{selected_stage_step},
-    );
-
-    const install_cmd = createDriverCommand(
-        b,
-        .{
-            .command = .stage_target,
-            .profile = profile,
-            .binary_dir = binary_dir,
-            .jobs = jobs,
-            .install_prefix = b.install_path,
-            .cmake_args = inherited_cmake_args,
-            .make_args = make_args,
-            .ctest_args = ctest_args,
-            .ctest_junit = ctest_junit,
-            .target = null,
-            .stage = selected_stage,
-            .stage_target = "install",
-            .git_commit_message = null,
-        },
-    );
-    const install_step = b.getInstallStep();
-    install_step.dependOn(selected_stage_step);
-    install_step.dependOn(&install_cmd.step);
-
-    const prepare_bench_stages_step = addNamedStep(
+    const prepare_bench_stages_step = addDriverStep(
         b,
         "prepare-bench-stages",
         "Copy stage1 into stage2 and stage3 build directories for benchmark-oriented flows",
-        createDriverCommand(
-            b,
-            .{
-                .command = .prepare_bench_stages,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = null,
-                .stage = .stage1,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        runtime_defaults.prepareBenchStagesConfig(),
         &.{stage1_step},
     );
 
-    _ = addNamedStep(
+    _ = addRootTargetStep(
         b,
+        runtime_defaults,
         "bench-stage2",
         "Prepare benchmark staging directories and then build stage2",
-        createDriverCommand(
-            b,
-            .{
-                .command = .root_target,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage2",
-                .stage = null,
-                .stage_target = null,
-                .git_commit_message = null,
-            },
-        ),
+        "stage2",
         &.{prepare_bench_stages_step},
     );
 
-    _ = addNamedStep(
+    _ = addDriverStep(
         b,
         "check-rebootstrap",
         "Update stage0 from stage1, create the checkpoint commit, rebuild stage1, and rerun stage1 tests",
-        createDriverCommand(
-            b,
-            .{
-                .command = .check_rebootstrap,
-                .profile = profile,
-                .binary_dir = binary_dir,
-                .jobs = jobs,
-                .install_prefix = b.install_path,
-                .cmake_args = inherited_cmake_args,
-                .make_args = make_args,
-                .ctest_args = ctest_args,
-                .ctest_junit = ctest_junit,
-                .target = "stage1",
-                .stage = .stage1,
-                .stage_target = "update-stage0",
-                .git_commit_message = "chore: update-stage0",
-            },
-        ),
+        runtime_defaults.checkRebootstrapConfig(),
         &.{stage1_configure_step},
     );
 
     b.default_step = stage1_step;
+}
+
+fn addDriverStep(
+    b: *Build,
+    name: []const u8,
+    description: []const u8,
+    config: DriverConfig,
+    deps: []const *Step,
+) *Step {
+    return addNamedStep(b, name, description, createDriverCommand(b, config), deps);
+}
+
+fn addRootTargetStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    name: []const u8,
+    description: []const u8,
+    target: []const u8,
+    deps: []const *Step,
+) *Step {
+    return addDriverStep(b, name, description, defaults.rootTargetConfig(target), deps);
+}
+
+fn addStageTargetStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    name: []const u8,
+    description: []const u8,
+    stage: StageName,
+    stage_target: []const u8,
+    deps: []const *Step,
+) *Step {
+    return addDriverStep(b, name, description, defaults.stageTargetConfig(stage, stage_target), deps);
+}
+
+fn addCTestStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    name: []const u8,
+    description: []const u8,
+    stage: StageName,
+    junit_path: ?[]const u8,
+    deps: []const *Step,
+) *Step {
+    return addDriverStep(b, name, description, defaults.ctestConfig(stage, junit_path), deps);
+}
+
+fn attachInstallStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    stage: StageName,
+    deps: []const *Step,
+) void {
+    const install_cmd = createDriverCommand(b, defaults.stageTargetConfig(stage, "install"));
+    const install_step = b.getInstallStep();
+    for (deps) |dep| {
+        install_step.dependOn(dep);
+    }
+    install_step.dependOn(&install_cmd.step);
 }
 
 fn addNamedStep(

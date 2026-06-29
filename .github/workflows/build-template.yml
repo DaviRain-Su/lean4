@@ -50,6 +50,8 @@ jobs:
       # somehow MinGW clang64 (or cmake?) defaults to `g++` even though it doesn't exist
       CXX: c++
       MACOSX_DEPLOYMENT_TARGET: 11.0
+      MATRIX_CMAKE_OPTIONS_JSON: ${{ toJson(matrix.CMAKE_OPTIONS) }}
+      MATRIX_CTEST_OPTIONS_JSON: ${{ toJson(matrix.CTEST_OPTIONS) }}
     steps:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
@@ -131,6 +133,10 @@ jobs:
           [ -d build ] || mkdir build
           BUILD_PROFILE="${{ matrix.CMAKE_PRESET || 'release' }}"
           echo "LEAN_ZIG_BINARY_DIR=build" >> "$GITHUB_ENV"
+          MATRIX_CMAKE_OPTIONS=()
+          while IFS= read -r opt; do
+            MATRIX_CMAKE_OPTIONS+=("$opt")
+          done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CMAKE_OPTIONS_JSON"]) or [])]')
           cd build
           # arguments passed to `cmake`
           OPTIONS=(-DWFAIL=ON)
@@ -160,8 +166,12 @@ jobs:
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.LEAN_SPECIAL_VERSION_DESC }})
           fi
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            # contortion to support empty OPTIONS with old macOS bash
-            cmake .. --preset "$BUILD_PROFILE" -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
+            cmake_cmd=(cmake .. --preset "$BUILD_PROFILE" -B .)
+            if [[ ${#MATRIX_CMAKE_OPTIONS[@]} -gt 0 ]]; then
+              cmake_cmd+=("${MATRIX_CMAKE_OPTIONS[@]}")
+            fi
+            cmake_cmd+=("${OPTIONS[@]}" "-DLEAN_INSTALL_PREFIX=$PWD/..")
+            "${cmake_cmd[@]}"
           else
             ZIG_CONFIGURE_ARGS=(
               "-Dprofile=$BUILD_PROFILE"
@@ -172,11 +182,8 @@ jobs:
             for opt in "${OPTIONS[@]}"; do
               ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
             done
-            if [[ -n '${{ matrix.CMAKE_OPTIONS }}' ]]; then
-              eval "MATRIX_CMAKE_OPTIONS=(${{ matrix.CMAKE_OPTIONS }})"
-              for opt in "${MATRIX_CMAKE_OPTIONS[@]}"; do
-                ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
-              done
+            for opt in "${MATRIX_CMAKE_OPTIONS[@]}"; do
+              ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
             fi
             cd ..
             zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
@@ -297,18 +304,23 @@ jobs:
         id: test
         run: |
           ulimit -c unlimited  # coredumps
+          MATRIX_CTEST_OPTIONS=()
+          while IFS= read -r opt; do
+            MATRIX_CTEST_OPTIONS+=("$opt")
+          done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CTEST_OPTIONS_JSON"]) or [])]')
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/$TARGET_STAGE -j$NPROC --output-junit test-results.xml ${{ matrix.CTEST_OPTIONS }}
+            ctest_cmd=(ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir "build/$TARGET_STAGE" "-j$NPROC" --output-junit test-results.xml)
+            if [[ ${#MATRIX_CTEST_OPTIONS[@]} -gt 0 ]]; then
+              ctest_cmd+=("${MATRIX_CTEST_OPTIONS[@]}")
+            fi
+            time "${ctest_cmd[@]}"
           else
             ZIG_TEST_ARGS=(
               "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
               "-Dstage=$TARGET_STAGE"
             )
-            if [[ -n '${{ matrix.CTEST_OPTIONS }}' ]]; then
-              eval "MATRIX_CTEST_OPTIONS=(${{ matrix.CTEST_OPTIONS }})"
-              for opt in "${MATRIX_CTEST_OPTIONS[@]}"; do
-                ZIG_TEST_ARGS+=("-Dctest-arg=$opt")
-              done
+            for opt in "${MATRIX_CTEST_OPTIONS[@]}"; do
+              ZIG_TEST_ARGS+=("-Dctest-arg=$opt")
             fi
             time zig build test-junit "${ZIG_TEST_ARGS[@]}"
           fi

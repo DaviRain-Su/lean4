@@ -297,10 +297,13 @@ jobs:
                 "binary-check": "ldd -v",
                 // We are not warning-free yet on all platforms, start with Linux
                 // Do not (yet) use Lake cache on release
-                "CMAKE_OPTIONS": "-DLEAN_EXTRA_CXX_FLAGS=-Werror" + (level < 3 ? " -DUSE_LAKE_CACHE=ON" : ""),
+                "CMAKE_OPTIONS": [
+                  "-DLEAN_EXTRA_CXX_FLAGS=-Werror",
+                  ...(level < 3 ? ["-DUSE_LAKE_CACHE=ON"] : []),
+                ],
                 "lake-actions-cache": level < 3,
                 // foreign code may be linked against more recent glibc
-                "CTEST_OPTIONS": "-E 'foreign'",
+                "CTEST_OPTIONS": ["-E", "foreign"],
               },
               {
                 "name": "Linux Lake (Cached)",
@@ -313,7 +316,10 @@ jobs:
                 "secondary": true,
                 // NOTE: `test-bench` currently seems to be broken on `ubuntu-latest`
                 "test-bench": large && level >= 2,
-                "CMAKE_OPTIONS": "-DLEAN_EXTRA_CXX_FLAGS=-Werror -DUSE_LAKE_CACHE=ON",
+                "CMAKE_OPTIONS": [
+                  "-DLEAN_EXTRA_CXX_FLAGS=-Werror",
+                  "-DUSE_LAKE_CACHE=ON",
+                ],
               },
               {
                 "name": "Linux RelWithAssert",
@@ -323,7 +329,7 @@ jobs:
                 "CMAKE_PRESET": "relwithassert",
                 // * `elab_bench/big_do` crashes with exit code 134
                 // * `compile_bench/channel` randomly segfaults
-                "CTEST_OPTIONS": "-E 'elab_bench/big_do|compile_bench/channel'",
+                "CTEST_OPTIONS": ["-E", "elab_bench/big_do|compile_bench/channel"],
               },
               {
                 "name": "Linux fsanitize",
@@ -344,7 +350,7 @@ jobs:
                 // * `grind_guide` always times out.
                 // * `pkg/|lake/` tests sometimes time out (likely even hang), related to Lake CI
                 //   failures?
-                "CTEST_OPTIONS": "-E 'StackOverflow|reverse-ffi|interactive|async_select_channel|9366|run/bv_|grind_guide|grind_bitvec2|grind_constProp|grind_indexmap|grind_list|grind_lint|grind_array_attach|grind_ite_trace|pkg/|lake/'"
+                "CTEST_OPTIONS": ["-E", "StackOverflow|reverse-ffi|interactive|async_select_channel|9366|run/bv_|grind_guide|grind_bitvec2|grind_constProp|grind_indexmap|grind_list|grind_lint|grind_array_attach|grind_ite_trace|pkg/|lake/"]
               },
               {
                 "name": "macOS",
@@ -357,7 +363,7 @@ jobs:
                 "prepare-llvm": "../script/prepare-llvm-macos.sh lean-llvm*",
                 "binary-check": "otool -L",
                 "tar": "gtar", // https://github.com/actions/runner-images/issues/2619
-                "CTEST_OPTIONS": "-E 'leanlaketest_hello'", // started failing from unpack
+                "CTEST_OPTIONS": ["-E", "leanlaketest_hello"], // started failing from unpack
               },
               {
                 "name": "macOS aarch64",
@@ -365,7 +371,7 @@ jobs:
                 "test": level >= 2,
                 // standard GH runner only comes with 7GB so use large runner if possible when running tests
                 "os": large && (fast || level >= 2) ? "nscloud-macos-sequoia-arm64-6x14" : "macos-15",
-                "CMAKE_OPTIONS": "-DLEAN_INSTALL_SUFFIX=-darwin_aarch64",
+                "CMAKE_OPTIONS": ["-DLEAN_INSTALL_SUFFIX=-darwin_aarch64"],
                 "release": true,
                 "shell": "bash -euxo pipefail {0}",
                 "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-aarch64-apple-darwin.tar.zst",
@@ -380,7 +386,7 @@ jobs:
                 "enabled": level >= 2,
                 "test": true,
                 "shell": "msys2 {0}",
-                "CMAKE_OPTIONS": "-G \"Unix Makefiles\"",
+                "CMAKE_OPTIONS": ["-G", "Unix Makefiles"],
                 "llvm-url": "https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-x86_64-w64-windows-gnu.tar.zst",
                 "prepare-llvm": "../script/prepare-llvm-mingw.sh lean-llvm*",
                 "binary-check": "ldd",
@@ -388,7 +394,7 @@ jobs:
               {
                 "name": "Linux aarch64",
                 "os": "ubuntu-24.04-arm",
-                "CMAKE_OPTIONS": "-DLEAN_INSTALL_SUFFIX=-linux_aarch64",
+                "CMAKE_OPTIONS": ["-DLEAN_INSTALL_SUFFIX=-linux_aarch64"],
                 "release": true,
                 "enabled": level >= 2,
                 "test": true,
@@ -425,7 +431,7 @@ jobs:
             ];
             if (lakeCi) {
               for (const job of matrix) {
-                job["CMAKE_OPTIONS"] = (job["CMAKE_OPTIONS"] ? job["CMAKE_OPTIONS"] + " " : "") + "-DLAKE_CI=ON";
+                job["CMAKE_OPTIONS"] = [...(job["CMAKE_OPTIONS"] ?? []), "-DLAKE_CI=ON"];
               }
             }
             console.log(`matrix:\n${JSON.stringify(matrix, null, 2)}`);
