@@ -173,13 +173,25 @@ import "forge-std/Test.sol";
 contract VaultTest is Test {
     address vault = address(0x7A17);
     address alice = address(0xA11CE);
+    address bob = address(0xB0B);
     function setUp() public {
         bytes memory code = hex"${VAULT_BIN}";
         vm.etch(vault, code);
         vm.deal(alice, 100 ether);
+        vm.deal(bob, 100 ether);
         vm.prank(alice);
         (bool ok,) = vault.call(abi.encodeWithSignature("init()"));
         require(ok, "init failed");
+    }
+    function test_initGuard() public {
+        vm.prank(bob);
+        (bool reverted,) = vault.call(abi.encodeWithSignature("init()"));
+        assertFalse(reverted, "re-init should revert");
+    }
+    function test_getOwner() public {
+        (bool ok, bytes memory r) = vault.call(abi.encodeWithSignature("getOwner()"));
+        assertTrue(ok);
+        assertEq(abi.decode(r, (uint256)), uint256(uint160(alice)));
     }
     function test_deposit() public {
         vm.prank(alice);
@@ -189,6 +201,16 @@ contract VaultTest is Test {
         assertEq(abi.decode(r, (uint256)), 1000);
         (, bytes memory ts) = vault.call(abi.encodeWithSignature("totalShares()"));
         assertEq(abi.decode(ts, (uint256)), 1000);
+    }
+    function test_multiDeposit() public {
+        vm.prank(alice);
+        vault.call{value: 1000}(abi.encodeWithSignature("deposit()"));
+        vm.prank(bob);
+        vault.call{value: 500}(abi.encodeWithSignature("deposit()"));
+        (, bytes memory r) = vault.call(abi.encodeWithSignature("reserves()"));
+        assertEq(abi.decode(r, (uint256)), 1500);
+        (, bytes memory ts) = vault.call(abi.encodeWithSignature("totalShares()"));
+        assertEq(abi.decode(ts, (uint256)), 1500);
     }
     function test_withdraw() public {
         vm.prank(alice);
@@ -207,6 +229,18 @@ contract VaultTest is Test {
         vm.prank(alice);
         (bool reverted,) = vault.call(abi.encodeWithSignature("withdraw(uint256)", uint256(999)));
         assertFalse(reverted, "overdraft should revert");
+    }
+    function test_solventAfterOps() public {
+        vm.prank(alice);
+        vault.call{value: 1000}(abi.encodeWithSignature("deposit()"));
+        vm.prank(bob);
+        vault.call{value: 500}(abi.encodeWithSignature("deposit()"));
+        vm.prank(alice);
+        vault.call(abi.encodeWithSignature("withdraw(uint256)", uint256(200)));
+        (, bytes memory r) = vault.call(abi.encodeWithSignature("reserves()"));
+        (, bytes memory ts) = vault.call(abi.encodeWithSignature("totalShares()"));
+        assertEq(abi.decode(r, (uint256)), abi.decode(ts, (uint256)), "vault must be solvent");
+        assertEq(abi.decode(r, (uint256)), 1300);
     }
     receive() external payable {}
 }
