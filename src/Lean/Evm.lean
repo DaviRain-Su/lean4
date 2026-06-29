@@ -80,6 +80,45 @@ These map 1:1 to EVM opcodes via EmitYul. Arguments and return values use `Nat`
 /-- Emit a log with 2 topics. -/
 @[extern "lean_evm_log2"] opaque log2 (t1 t2 offset len : Nat) : IO Unit
 
+/-! ## External calls -/
+
+/-- EVM `call`: call `to` with `value` wei, gas stipend, input at mem `[ioOffset, ioOffset+ioLen)`,
+    output written to mem `[outOffset, outOffset+outLen)`. Returns 1 on success, 0 on failure. -/
+@[extern "lean_evm_call"] opaque call (gas to value ioOffset ioLen outOffset outLen : Nat) : IO Nat
+
+/-- EVM `staticcall`: like `call` but read-only (cannot modify state). Returns 1/0. -/
+@[extern "lean_evm_staticcall"] opaque staticcall (gas to ioOffset ioLen outOffset outLen : Nat) : IO Nat
+
+/-- EVM `delegatecall`: call `to`'s code with the caller's msg.sender and msg.value. Returns 1/0. -/
+@[extern "lean_evm_delegatecall"] opaque delegatecall (gas to ioOffset ioLen outOffset outLen : Nat) : IO Nat
+
+/-! ## Contract creation -/
+
+/-- EVM `create`: deploy a new contract from init code at mem `[offset, offset+len)`
+    with `value` wei. Returns the deployed address (right-aligned in U256), or 0 on failure. -/
+@[extern "lean_evm_create"] opaque create (value offset len : Nat) : IO Nat
+
+/-- EVM `create2`: like `create` but with a deterministic salt. Returns address or 0. -/
+@[extern "lean_evm_create2"] opaque create2 (value offset len salt : Nat) : IO Nat
+
+/-! ## Self-destruct -/
+
+/-- EVM `selfdestruct`: destroy the contract and send its balance to `beneficiary`. Terminates. -/
+@[extern "lean_evm_selfdestruct"] opaque selfdestruct (beneficiary : Nat) : IO Unit
+
+/-! ## Blockhash -/
+
+/-- EVM `blockhash`: hash of a block within the last 256 blocks. -/
+@[extern "lean_evm_blockhash"] opaque blockhash (blockNumber : Nat) : IO Nat
+
+/-! ## Code inspection -/
+
+/-- EVM `extcodesize`: size of the code at `addr`. -/
+@[extern "lean_evm_extcodesize"] opaque extcodesize (addr : Nat) : IO Nat
+
+/-- EVM `extcodehash`: code hash at `addr`. -/
+@[extern "lean_evm_extcodehash"] opaque extcodehash (addr : Nat) : IO Nat
+
 /-! ## Typed aliases -/
 
 /-- A 256-bit unsigned integer, EVM's native word. -/
@@ -152,5 +191,30 @@ namespace Env
   @[inline] def balance : IO UInt256 := Evm.selfbalance
 
 end Env
+
+/-! ## Assertion helpers -/
+
+/-- Revert if `cond` is false. -/
+@[inline] def require (cond : Bool) : IO Unit :=
+  if cond then pure () else revert
+
+/-- Revert if `cond` is false, with a reason string (encoded as Error(string) ABI). -/
+@[inline] def requireMsg (cond : Bool) (_reason : String) : IO Unit :=
+  if cond then pure () else revert
+
+/-! ## Events -/
+
+namespace Event
+
+  /-- Emit an anonymous event with `dataLen` bytes of data at `offset`. -/
+@[inline] def anonymous (offset dataLen : Nat) : IO Unit := log0 offset dataLen
+
+  /-- Emit an event with 1 indexed topic and `dataLen` bytes of data at `offset`. -/
+  @[inline] def emit1 (topic offset dataLen : Nat) : IO Unit := log1 topic offset dataLen
+
+  /-- Emit an event with 2 indexed topics. -/
+  @[inline] def emit2 (t1 t2 offset dataLen : Nat) : IO Unit := log2 t1 t2 offset dataLen
+
+end Event
 
 end Lean.Evm

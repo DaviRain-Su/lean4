@@ -322,7 +322,7 @@ mutual
         let opcode : String := externName.drop "lean_evm_".length |>.toString
         -- EVM externs take/return raw U256; unbox args, box the result.
         let unboxedArgs := argExprs.map leanUnboxExpr
-        if opcode == "returnMem" || opcode == "revertMem" then
+        if opcode == "returnMem" || opcode == "revertMem" || opcode == "selfdestruct" then
           -- Terminating builtins: control never returns.
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])
@@ -570,7 +570,56 @@ def runtimeHelpers : Array YStmt :=
     sFuncDef "f_Nat_lor" #[tn "a", tn "b"] #[tn "r"]
       { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "or" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
     sFuncDef "f_Nat_xor" #[tn "a", tn "b"] #[tn "r"]
-      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "xor" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] }
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "xor" #[leanUnboxExpr (yStr "a"), leanUnboxExpr (yStr "b")]))] },
+    -- -----------------------------------------------------------------------
+    -- Array runtime (lean_array_object: tag=248, size@32, cap@64, data@96+)
+    -- -----------------------------------------------------------------------
+    -- lean_array_get_size(a) returns the boxed size of array `a`.
+    sFuncDef "lean_array_get_size" #[tn "a"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (leanBoxExpr (yBuiltin "mload" #[yBuiltin "add" #[yStr "a", yNum 32]]))] },
+    -- lean_array_get_core(a, i) returns element i (0-indexed from data start).
+    sFuncDef "lean_array_get_core" #[tn "a", tn "i"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (yBuiltin "mload" #[
+          yBuiltin "add" #[yBuiltin "add" #[yStr "a", yNum 96],
+            yBuiltin "mul" #[yStr "i", yNum 32]]])] },
+    -- lean_array_set_core(a, i, v) sets element i.
+    sFuncDef "lean_array_set_core" #[tn "a", tn "i", tn "v"] #[]
+      { statements := #[sExprStmt (yBuiltin "mstore" #[
+          yBuiltin "add" #[yBuiltin "add" #[yStr "a", yNum 96],
+            yBuiltin "mul" #[yStr "i", yNum 32]], yStr "v"])] },
+    -- lean_array_push(a, v): append v. Assumes capacity > size (caller ensures).
+    -- Increments size and writes the element.
+    sFuncDef "lean_array_push" #[tn "a", tn "v"] #[tn "r"]
+      { statements := #[
+          sVarDecl #[tn "sz"] (some (yBuiltin "mload" #[yBuiltin "add" #[yStr "a", yNum 32]])),
+          sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[yBuiltin "add" #[yStr "a", yNum 96],
+            yBuiltin "mul" #[yStr "sz", yNum 32]], yStr "v"]),
+          sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[yStr "a", yNum 32], yBuiltin "add" #[yStr "sz", yNum 1]]),
+          sAssignment #["r"] (yStr "a")
+        ] },
+    sFuncDef "lean_array_mk" #[tn "n"] #[tn "r"]
+      { statements := #[
+          sVarDecl #[tn "_mk_ptr"] (some freeMemPtrExpr),
+          sExprStmt (yBuiltin "mstore" #[yNum freeMemPtrSlot,
+            yBuiltin "add" #[yStr "_mk_ptr", yBuiltin "mul" #[yBuiltin "add" #[yStr "n", yNum 3], yNum 32]]]),
+          sExprStmt (yBuiltin "mstore" #[yStr "_mk_ptr", ctorHeaderExpr 248 0 0]),
+          sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[yStr "_mk_ptr", yNum 32], yNum 0]),
+          sExprStmt (yBuiltin "mstore" #[yBuiltin "add" #[yStr "_mk_ptr", yNum 64], leanUnboxExpr (yStr "n")]),
+          sAssignment #["r"] (yStr "_mk_ptr")
+        ] },
+    -- f_Array_mkEmpty(c): Lean's Array.mkEmpty, creates an array with capacity c.
+    sFuncDef "f_Array_mkEmpty" #[tn "c"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (yCall "lean_array_mk" #[yStr "c"])] },
+    -- f_Array_push(a, v): simplified — assumes capacity > size (no realloc).
+    sFuncDef "f_Array_push" #[tn "a", tn "v"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (yCall "lean_array_push" #[yStr "a", yStr "v"])] },
+    -- f_Array_size(a): returns boxed size.
+    sFuncDef "f_Array_size" #[tn "a"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (yCall "lean_array_get_size" #[yStr "a"])] },
+    -- f_Array_get_x21InternalBorrowed(a, i): returns element i (no bounds check).
+    -- The first parameter is a borrow/state token (ignored).
+    sFuncDef "f_Array_get_x21InternalBorrowed" #[tn "_s", tn "a", tn "i"] #[tn "r"]
+      { statements := #[sAssignment #["r"] (yCall "lean_array_get_core" #[yStr "a", leanUnboxExpr (yStr "i")])] }
   ]
 
 -- ---------------------------------------------------------------------------

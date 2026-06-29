@@ -34,3 +34,12 @@ lean_object* lean_evm_keccak256(uintptr_t offset, uintptr_t len) { (void)offset;
 lean_object* lean_evm_log0(uintptr_t offset, uintptr_t len) { (void)offset; (void)len; return lean_box_unit(); }
 lean_object* lean_evm_log1(uintptr_t t, uintptr_t offset, uintptr_t len) { (void)t; (void)offset; (void)len; return lean_box_unit(); }
 lean_object* lean_evm_log2(uintptr_t t1, uintptr_t t2, uintptr_t offset, uintptr_t len) { (void)t1; (void)t2; (void)offset; (void)len; return lean_box_unit(); }
+lean_object* lean_evm_call(uintptr_t gas, uintptr_t to, uintptr_t value, uintptr_t ioOff, uintptr_t ioLen, uintptr_t outOff, uintptr_t outLen) { (void)gas; (void)to; (void)value; (void)ioOff; (void)ioLen; (void)outOff; (void)outLen; return lean_box_nat(0); }
+lean_object* lean_evm_staticcall(uintptr_t gas, uintptr_t to, uintptr_t ioOff, uintptr_t ioLen, uintptr_t outOff, uintptr_t outLen) { (void)gas; (void)to; (void)ioOff; (void)ioLen; (void)outOff; (void)outLen; return lean_box_nat(0); }
+lean_object* lean_evm_delegatecall(uintptr_t gas, uintptr_t to, uintptr_t ioOff, uintptr_t ioLen, uintptr_t outOff, uintptr_t outLen) { (void)gas; (void)to; (void)ioOff; (void)ioLen; (void)outOff; (void)outLen; return lean_box_nat(0); }
+lean_object* lean_evm_create(uintptr_t value, uintptr_t offset, uintptr_t len) { (void)value; (void)offset; (void)len; return lean_box_nat(0); }
+lean_object* lean_evm_create2(uintptr_t value, uintptr_t offset, uintptr_t len, uintptr_t salt) { (void)value; (void)offset; (void)len; (void)salt; return lean_box_nat(0); }
+lean_object* lean_evm_selfdestruct(uintptr_t beneficiary) { (void)beneficiary; return lean_box_unit(); }
+lean_object* lean_evm_blockhash(uintptr_t bn) { (void)bn; return lean_box_nat(0); }
+lean_object* lean_evm_extcodesize(uintptr_t addr) { (void)addr; return lean_box_nat(0); }
+lean_object* lean_evm_extcodehash(uintptr_t addr) { (void)addr; return lean_box_nat(0); }
