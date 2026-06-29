@@ -1,0 +1,4 @@
+init()=l_Ownable_init[update]
+owner()=l_Ownable_owner[view]
+transferOwnership(uint256)=l_Ownable_transferOwnership[update]
+renounceOwnership()=l_Ownable_renounceOwnership[update]

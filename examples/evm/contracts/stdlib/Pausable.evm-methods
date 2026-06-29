@@ -1,0 +1,3 @@
+paused()=l_Pausable_paused[view]
+pause()=l_Pausable_pause[update]
+unpause()=l_Pausable_unpause[update]

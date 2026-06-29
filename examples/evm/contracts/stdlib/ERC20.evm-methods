@@ -1,0 +1,8 @@
+totalSupply()=l_ERC20_totalSupply[view]
+balanceOf(uint256)=l_ERC20_balanceOf[view]
+transfer(uint256,uint256)=l_ERC20_transfer[update]
+allowance(uint256,uint256)=l_ERC20_allowance[view]
+approve(uint256,uint256)=l_ERC20_approve[update]
+transferFrom(uint256,uint256,uint256)=l_ERC20_transferFrom[update]
+mint(uint256,uint256)=l_ERC20_mint[update]
+burn(uint256,uint256)=l_ERC20_burn[update]
