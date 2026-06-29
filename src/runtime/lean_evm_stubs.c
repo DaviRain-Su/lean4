@@ -51,3 +51,5 @@ lean_object* lean_evm_gaslimit(void) { return lean_box_nat(0); }
 lean_object* lean_evm_basefee(void) { return lean_box_nat(0); }
 lean_object* lean_evm_chainid(void) { return lean_box_nat(1); }
 lean_object* lean_evm_balance(uintptr_t addr) { (void)addr; return lean_box_nat(0); }
+lean_object* lean_evm_exp(uintptr_t base, uintptr_t exp) { (void)base; (void)exp; return lean_box_nat(0); }
+lean_object* lean_evm_not(uintptr_t n) { (void)n; return lean_box_nat(0); }

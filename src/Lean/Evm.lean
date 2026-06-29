@@ -419,6 +419,26 @@ end Env
 /-- Absolute difference (a - b if a ≥ b, else 0). -/
 @[inline] def absDiff (a b : Nat) : Nat := if a ≥ b then a - b else 0
 
+/-- Integer square root via binary search. Uses decreasing range. -/
+def isqrt (n : Nat) : Nat :=
+  if n ≤ 1 then n
+  else Nat.sqrt n
+
+/-- Square root (same as isqrt for integers, returns floor sqrt). -/
+@[inline] def sqrt (n : Nat) : Nat := isqrt n
+
+/-- Floor division (a / b rounded down). Same as Nat division for non-negative. -/
+@[inline] def floorDiv (a b : Nat) : Nat := a / b
+
+/-- Ceiling division (a / b rounded up). -/
+@[inline] def ceilDiv (a b : Nat) : Nat := (a + b - 1) / b
+
+/-- Exponentiation (a ^ b mod 2^256). Uses EVM EXP. -/
+@[extern "lean_evm_exp"] opaque natPow (base exp : Nat) : IO Nat
+
+/-- Bitwise NOT (~n mod 2^256). -/
+@[extern "lean_evm_not"] opaque bitNot (n : Nat) : IO Nat
+
 /-! ## Assertion helpers -/
 
 /-- Revert if `cond` is false. -/
@@ -443,5 +463,42 @@ namespace Event
   @[inline] def emit2 (t1 t2 offset dataLen : Nat) : IO Unit := log2 t1 t2 offset dataLen
 
 end Event
+
+/-! ## Cryptography (EVM precompiles) -/
+
+/-- SHA-256 hash via EVM precompile at address 0x02.
+    Input at mem [offset, offset+len), output (32 bytes) written to mem[outOffset]. -/
+@[inline] def sha256 (offset len outOffset : Nat) : IO Nat := do
+  let _ ← staticcall 3000 0x02 offset len outOffset 32
+  mload outOffset
+
+/-- ECDSA public key recovery via EVM precompile at address 0x01.
+    Input: hash(32) + v(32) + r(32) + s(32) at mem [offset, offset+128).
+    Output: recovered address (32 bytes) at mem[outOffset]. -/
+@[inline] def ecrecover (offset outOffset : Nat) : IO Nat := do
+  let _ ← staticcall 3000 0x01 offset 128 outOffset 32
+  mload outOffset
+
+/-! ## Bytecode helpers -/
+
+/-- Compute a Solidity function selector (first 4 bytes of keccak256(sig)).
+    The signature string must be at mem [offset, offset+len). Returns the
+    4-byte selector right-shifted to fit in a U256 (e.g. 0x6d4ce63c). -/
+@[inline] def methodId (offset len : Nat) : IO Nat := do
+  let h ← keccak256 offset len
+  pure (h / (2 ^ 224))  -- take top 4 bytes
+
+/-- Copy `len` bytes from src to dst in 32-byte chunks. -/
+@[inline] def memcpy (dst src len : Nat) : IO Unit := do
+  let chunks := len / 32
+  for i in [:chunks] do
+    mstore (dst + i * 32) (← mload (src + i * 32))
+  if len % 32 > 0 then
+    mstore (dst + chunks * 32) (← mload (src + chunks * 32))
+
+/-- Concatenate two 32-byte words at mem [dst, dst+64). -/
+@[inline] def concat64 (dst a b : Nat) : IO Unit := do
+  mstore dst a
+  mstore (dst + 32) b
 
 end Lean.Evm
