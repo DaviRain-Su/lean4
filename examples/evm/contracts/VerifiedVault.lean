@@ -2,69 +2,68 @@
 Copyright (c) 2026 DaviRain. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 
-A DeFi-style vault contract with formal verification, compiled to EVM.
+A DeFi-style vault contract with formal verification, using typed storage
+data structures (Storage.Var, Storage.Map) that mirror Solidity's storage
+variable system.
 
-The pattern mirrors the NEAR VerifiedVault:
+Compare the storage layout section to the equivalent Solidity:
 
-1. Model financial state transitions as pure Lean functions over `Nat`
-   (U256 on EVM).
-2. Prove the key invariant: the vault is always fully collateralized
-   (reserves == shares).
-3. Make the EVM entrypoints call the verified transition functions.
+```solidity
+address public owner;           // Storage.Var Nat 0
+uint256 public reserves;        // Storage.Var Nat 2
+uint256 public totalShares;     // Storage.Var Nat 3
+mapping(address => uint256) public balanceOf;  // Storage.Map Nat 4
+```
 
-The proofs are checked by Lean before EmitYul produces the contract bytecode.
-They do not appear in the runtime code, but they guarantee that the financial
-logic is sound at compile time.
+The formal specification and proofs guarantee that reserves == totalShares
+(the vault is always fully collateralized) after every deposit and withdraw.
 -/
 import Lean.Evm
 open Lean.Evm
 
 namespace VerifiedVault
 
-/- Storage layout:
-    slot 0: owner (who can withdraw)
-    slot 1: initialized flag
-    slot 2: total reserves
-    slot 3: total shares outstanding
-    mapping at slot 4: depositor => shares -/
+-- ## Typed storage layout (Solidity-style)
+
+/-- slot 0: contract owner -/
+def owner : Storage.Var Nat := Storage.Var.ofSlot 0
+
+/-- slot 1: initialized flag -/
+def initialized : Storage.Var Nat := Storage.Var.ofSlot 1
+
+/-- slot 2: total reserves -/
+def reservesVar : Storage.Var Nat := Storage.Var.ofSlot 2
+
+/-- slot 3: total shares outstanding -/
+def totalSharesVar : Storage.Var Nat := Storage.Var.ofSlot 3
+
+/-- slot 4: depositor => share balance (mapping) -/
+def balances : Storage.Map Nat := Storage.Map.ofSlot 4
+
+-- ## Pure financial model + proofs
 
 namespace Spec
 
-/-- Pure model of the vault's financial state. -/
 structure State where
   reserves : Nat
   shares   : Nat
 
-/-- The vault is fully collateralized: every share is backed 1:1. -/
-def solvent (s : State) : Prop :=
-  s.reserves = s.shares
+def solvent (s : State) : Prop := s.reserves = s.shares
 
 def empty : State := { reserves := 0, shares := 0 }
 
-/-- Deposit: mint 1 share per unit deposited. Returns none on overflow. -/
 def deposit? (s : State) (amount : Nat) : Option State :=
-  let reserves' := s.reserves + amount
-  let shares'   := s.shares + amount
-  -- On EVM (U256), overflow wraps; we accept wrapping behavior for now.
-  -- In a production vault this would use checked arithmetic.
-  some { reserves := reserves', shares := shares' }
+  some { reserves := s.reserves + amount, shares := s.shares + amount }
 
-/-- Withdraw: burn `amount` shares. Returns none if insufficient reserves/shares. -/
 def withdraw? (s : State) (amount : Nat) : Option State :=
   if amount ≤ s.reserves ∧ amount ≤ s.shares then
     some { reserves := s.reserves - amount, shares := s.shares - amount }
-  else
-    none
+  else none
 
-/-- Guard: can the vault afford this withdrawal? -/
 def canWithdraw (s : State) (amount : Nat) : Bool :=
   amount ≤ s.reserves ∧ amount ≤ s.shares
 
--- ## Formal proofs (checked at compile time, erased from runtime)
-
-theorem empty_solvent : solvent empty := by
-  unfold solvent empty
-  rfl
+theorem empty_solvent : solvent empty := by rfl
 
 theorem deposit_preserves_solvent {s next : State} {amount : Nat}
     (h : solvent s) (hn : deposit? s amount = some next) : solvent next := by
@@ -79,37 +78,37 @@ theorem withdraw_preserves_solvent {s next : State} {amount : Nat}
   unfold withdraw? at hn
   by_cases w : amount ≤ s.reserves ∧ amount ≤ s.shares
   · simp [w] at hn
-    rw [← hn]
-    show s.reserves - amount = s.shares - amount
-    rw [h]
+    rw [← hn]; show s.reserves - amount = s.shares - amount; rw [h]
   · simp [w] at hn
 
 end Spec
 
+-- ## Storage boundary: read/write the verified State through typed vars
+
 namespace StorageState
 
-/-- Read the vault state from EVM storage. -/
 def read : IO Spec.State := do
-  let r ← Storage.load 2
-  let s ← Storage.load 3
+  let r ← reservesVar.read
+  let s ← totalSharesVar.read
   pure { reserves := r, shares := s }
 
-/-- Write the vault state to EVM storage. -/
 def write (s : Spec.State) : IO Unit := do
-  Storage.store 2 s.reserves
-  Storage.store 3 s.shares
+  reservesVar.write s.reserves
+  totalSharesVar.write s.shares
 
 end StorageState
+
+-- ## EVM entrypoints
 
 /-- Initialize the vault. Caller becomes owner. -/
 @[export l_VerifiedVault_init]
 def init : IO Unit := do
-  let owner ← Env.sender
-  Storage.store 0 owner
-  Storage.store 1 1          -- initialized flag
+  let o ← Env.sender
+  owner.write o
+  initialized.write 1
   StorageState.write Spec.empty
 
-/-- Deposit: mint 1:1 shares. Caller's shares are tracked in mapping slot 4. -/
+/-- Deposit ether, mint 1:1 shares to caller. -/
 @[export l_VerifiedVault_deposit]
 def deposit : IO Unit := do
   let depositor ← Env.sender
@@ -121,17 +120,14 @@ def deposit : IO Unit := do
     | none => revert
     | some next =>
       StorageState.write next
-      -- credit depositor's shares
-      let bal ← Storage.mapLoad 4 depositor
-      Storage.mapStore 4 depositor (bal + amount)
+      let _ ← balances.modify depositor (· + amount)
 
-/-- Withdraw: burn caller's shares and send reserves back. -/
+/-- Withdraw `amount` shares, send ether back to caller. -/
 @[export l_VerifiedVault_withdraw]
 def withdraw (amount : Nat) : IO Unit := do
   let caller ← Env.sender
   let current ← StorageState.read
-  -- Check caller has enough shares
-  let bal ← Storage.mapLoad 4 caller
+  let bal ← balances.get caller
   if amount > bal then revert
   else if ! Spec.canWithdraw current amount then revert
   else
@@ -139,21 +135,19 @@ def withdraw (amount : Nat) : IO Unit := do
     | none => revert
     | some next =>
       StorageState.write next
-      -- burn caller's shares
-      Storage.mapStore 4 caller (bal - amount)
-      -- send reserves to caller via EVM transfer (low-level call)
+      let _ ← balances.modify caller (· - amount)
       let _ ← call 50000 caller amount 0 0 0 0
 
-/-- Get total reserves. -/
+/-- Query: total reserves. -/
 @[export l_VerifiedVault_reserves]
-def reserves : IO Nat := Storage.load 2
+def reserves : IO Nat := reservesVar.read
 
-/-- Get total shares outstanding. -/
+/-- Query: total shares outstanding. -/
 @[export l_VerifiedVault_totalShares]
-def totalShares : IO Nat := Storage.load 3
+def totalShares : IO Nat := totalSharesVar.read
 
-/-- Get a depositor's share balance. -/
+/-- Query: a depositor's share balance. -/
 @[export l_VerifiedVault_balanceOf]
-def balanceOf (depositor : Nat) : IO Nat := Storage.mapLoad 4 depositor
+def balanceOf (depositor : Nat) : IO Nat := balances.get depositor
 
 end VerifiedVault

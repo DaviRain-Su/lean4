@@ -156,10 +156,10 @@ abbrev Address := Nat
 
 namespace Storage
 
-  /-- Read a U256 from storage key `k`. -/
+  /-- Read a U256 from storage slot `k`. -/
   @[inline] def load (k : Nat) : IO Nat := sload k
 
-  /-- Write a U256 `v` to storage key `k`. -/
+  /-- Write a U256 `v` to storage slot `k`. -/
   @[inline] def store (k : Nat) (v : Nat) : IO Unit := sstore k v
 
   /-- Compute a mapping slot: keccak256(key || slot) packed in memory.
@@ -179,7 +179,144 @@ namespace Storage
     let k ← mapSlot slot key
     sstore k val
 
+  /-- Compute a nested mapping slot: keccak256(keccak256(innerKey || outerKey) || slot).
+      Mirrors Solidity's `mapping(k1 => mapping(k2 => v))` layout. -/
+  @[inline] def map2Slot (slot outerKey innerKey : Nat) : IO Nat := do
+    let inner ← mapSlot outerKey innerKey
+    mstore 0 inner
+    mstore 32 slot
+    keccak256 0 64
+
+  /-- Read from a nested mapping (`slot`, `k1`, `k2`). -/
+  @[inline] def map2Load (slot k1 k2 : Nat) : IO Nat := do
+    let k ← map2Slot slot k1 k2
+    sload k
+
+  /-- Write to a nested mapping (`slot`, `k1`, `k2`, `v`). -/
+  @[inline] def map2Store (slot k1 k2 val : Nat) : IO Unit := do
+    let k ← map2Slot slot k1 k2
+    sstore k val
+
 end Storage
+
+/-! ## Typed storage data structures
+
+These mirror the NEAR `Storage.Key` / `Store.LookupMap` pattern and Solidity's
+storage variable system, providing compile-time slot assignment and type safety.
+
+Usage in a contract:
+
+```lean
+-- Declare storage layout at the top of the contract
+let owner := Storage.Var.ofSlot 0          -- like `address public owner`
+let reserves := Storage.Var.ofSlot 1       -- like `uint256 reserves`
+let balances := Storage.Map.ofSlot 2       -- like `mapping(address => uint256)`
+-- Read/write with type safety
+let o ← owner.read
+owner.write newOwner
+let bal ← balances.get depositor
+balances.set depositor amount
+```
+-/
+
+/-- A named storage variable at a fixed slot (Solidity `uint256 public x`). -/
+structure Storage.Var (α : Type) where
+  slot : Nat
+
+namespace Storage.Var
+
+  /-- Create a variable at a specific storage slot. -/
+  @[inline] def ofSlot (n : Nat) : Storage.Var α := { slot := n }
+
+  /-- Read the variable's value. -/
+  @[inline] def read (v : Storage.Var α) : IO Nat := sload v.slot
+
+  /-- Write a value to the variable. -/
+  @[inline] def write (v : Storage.Var α) (val : Nat) : IO Unit := sstore v.slot val
+
+end Storage.Var
+
+/-- A persistent mapping in storage (Solidity `mapping(keyType => valueType)`). -/
+structure Storage.Map (α : Type) where
+  slot : Nat
+
+namespace Storage.Map
+
+  /-- Create a mapping at a base storage slot. -/
+  @[inline] def ofSlot (n : Nat) : Storage.Map α := { slot := n }
+
+  /-- Get the value for `key`, defaulting to 0. -/
+  @[inline] def get (m : Storage.Map α) (key : Nat) : IO Nat := Storage.mapLoad m.slot key
+
+  /-- Set the value for `key`. -/
+  @[inline] def set (m : Storage.Map α) (key val : Nat) : IO Unit := Storage.mapStore m.slot key val
+
+  /-- Modify the value for `key` using function `f`. -/
+  @[inline] def modify (m : Storage.Map α) (key : Nat) (f : Nat → Nat) : IO Nat := do
+    let current ← m.get key
+    let next := f current
+    m.set key next
+    pure next
+
+end Storage.Map
+
+/-- A nested mapping (Solidity `mapping(k1 => mapping(k2 => v))`). -/
+structure Storage.Map2 (α : Type) where
+  slot : Nat
+
+namespace Storage.Map2
+
+  /-- Create a nested mapping at a base storage slot. -/
+  @[inline] def ofSlot (n : Nat) : Storage.Map2 α := { slot := n }
+
+  /-- Get the value for (`k1`, `k2`). -/
+  @[inline] def get (m : Storage.Map2 α) (k1 k2 : Nat) : IO Nat := Storage.map2Load m.slot k1 k2
+
+  /-- Set the value for (`k1`, `k2`). -/
+  @[inline] def set (m : Storage.Map2 α) (k1 k2 val : Nat) : IO Unit := Storage.map2Store m.slot k1 k2 val
+
+end Storage.Map2
+
+/-- A dynamic-length array in storage (Solidity `uint256[] storage`).
+    Length is at `slot`, elements at `keccak256(slot) + index`. -/
+structure Storage.Array (α : Type) where
+  slot : Nat
+
+namespace Storage.Array
+
+  /-- Create a storage array at a base slot. -/
+  @[inline] def ofSlot (n : Nat) : Storage.Array α := { slot := n }
+
+  /-- Get the array length (stored at `slot`). -/
+  @[inline] def length (a : Storage.Array α) : IO Nat := sload a.slot
+
+  /-- Compute the element slot: keccak256(slot) + index (Solidity layout). -/
+  @[inline] def elemSlot (a : Storage.Array α) (index : Nat) : IO Nat := do
+    mstore 0 a.slot
+    let base ← keccak256 0 32
+    pure (base + index)
+
+  /-- Get element at `index` (returns 0 if out of bounds). -/
+  @[inline] def get (a : Storage.Array α) (index : Nat) : IO Nat := do
+    let len ← a.length
+    if index ≥ len then pure 0
+    else do
+      let slot ← a.elemSlot index
+      sload slot
+
+  /-- Push a value to the end of the array (increments length). -/
+  @[inline] def push (a : Storage.Array α) (val : Nat) : IO Unit := do
+    let len ← a.length
+    let slot ← a.elemSlot len
+    sstore slot val
+    sstore a.slot (len + 1)
+
+  /-- Set element at `index`. -/
+  @[inline] def set (a : Storage.Array α) (index val : Nat) : IO Unit := do
+    let slot ← a.elemSlot index
+    sstore slot val
+
+end Storage.Array
 
 /-! ## Environment -/
 
