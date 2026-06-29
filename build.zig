@@ -92,6 +92,10 @@ const DriverFiles = struct {
     metadata: Build.LazyPath,
 };
 
+const SavedDriverMetadata = struct {
+    cmake_args: []const []const u8 = &.{},
+};
+
 pub fn build(b: *Build) void {
     const profile = b.option(BuildProfile, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug") orelse .@"dev-release";
     const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse profile.defaultBinaryDir();
@@ -103,9 +107,10 @@ pub fn build(b: *Build) void {
     const make_args = b.option([]const []const u8, "make-arg", "Extra argv element passed to make. Repeat once per argument.") orelse &.{};
     const ctest_args = b.option([]const []const u8, "ctest-arg", "Extra argv element passed to ctest. Repeat once per argument.") orelse &.{};
 
-    const cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
+    const configure_cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
+    const inherited_cmake_args = resolveInheritedCmakeArgs(b, binary_dir, raw_cmake_args, configure_cmake_args);
 
-    const configure_step = addNamedStep(
+    _ = addNamedStep(
         b,
         "configure",
         "Run CMake configure for the selected profile and build directory",
@@ -117,7 +122,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = configure_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -128,6 +133,25 @@ pub fn build(b: *Build) void {
             },
         ),
         &.{},
+    );
+
+    const configure_dependency_cmd = createDriverCommand(
+        b,
+        .{
+            .command = .configure,
+            .profile = profile,
+            .binary_dir = binary_dir,
+            .jobs = jobs,
+            .install_prefix = b.install_path,
+            .cmake_args = inherited_cmake_args,
+            .make_args = make_args,
+            .ctest_args = ctest_args,
+            .ctest_junit = ctest_junit,
+            .target = null,
+            .stage = null,
+            .stage_target = null,
+            .git_commit_message = null,
+        },
     );
 
     const stage1_configure_step = addNamedStep(
@@ -142,7 +166,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -152,7 +176,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     const stage1_step = addNamedStep(
@@ -167,7 +191,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -177,7 +201,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     const stage2_step = addNamedStep(
@@ -192,7 +216,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -202,7 +226,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     const stage3_step = addNamedStep(
@@ -217,7 +241,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -227,7 +251,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     const stages = StageSteps{
@@ -249,7 +273,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -274,7 +298,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -284,7 +308,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     _ = addNamedStep(
@@ -299,7 +323,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -309,7 +333,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     _ = addNamedStep(
@@ -324,7 +348,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -334,7 +358,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     _ = addNamedStep(
@@ -349,7 +373,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -359,7 +383,7 @@ pub fn build(b: *Build) void {
                 .git_commit_message = null,
             },
         ),
-        &.{configure_step},
+        &.{&configure_dependency_cmd.step},
     );
 
     _ = addNamedStep(
@@ -374,7 +398,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -399,7 +423,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -424,7 +448,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -449,7 +473,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -470,7 +494,7 @@ pub fn build(b: *Build) void {
             .binary_dir = binary_dir,
             .jobs = jobs,
             .install_prefix = b.install_path,
-            .cmake_args = cmake_args,
+            .cmake_args = inherited_cmake_args,
             .make_args = make_args,
             .ctest_args = ctest_args,
             .ctest_junit = ctest_junit,
@@ -496,7 +520,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -521,7 +545,7 @@ pub fn build(b: *Build) void {
                 .binary_dir = binary_dir,
                 .jobs = jobs,
                 .install_prefix = b.install_path,
-                .cmake_args = cmake_args,
+                .cmake_args = inherited_cmake_args,
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
@@ -594,6 +618,45 @@ fn normalizeCmakeArgs(b: *Build, raw_args: []const []const u8, install_prefix: [
     args.appendSlice(raw_args) catch @panic("OOM");
     args.append(b.fmt("-DLEAN_INSTALL_PREFIX={s}", .{install_prefix})) catch @panic("OOM");
     return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn resolveInheritedCmakeArgs(
+    b: *Build,
+    binary_dir: []const u8,
+    raw_args: []const []const u8,
+    configured_args: []const []const u8,
+) []const []const u8 {
+    if (raw_args.len != 0) return configured_args;
+    return loadSavedCmakeArgs(b, binary_dir) orelse configured_args;
+}
+
+fn loadSavedCmakeArgs(b: *Build, binary_dir: []const u8) ?[]const []const u8 {
+    const metadata_path = b.pathFromRoot(b.pathJoin(&.{ binary_dir, ".zig-driver.json" }));
+    const contents = std.Io.Dir.cwd().readFileAlloc(
+        b.graph.io,
+        metadata_path,
+        b.allocator,
+        .limited(1024 * 1024),
+    ) catch |err| switch (err) {
+        error.FileNotFound => return null,
+        else => std.debug.panic("failed to read saved Zig driver metadata at {s}: {s}", .{
+            metadata_path,
+            @errorName(err),
+        }),
+    };
+    defer b.allocator.free(contents);
+
+    var parsed = json.parseFromSlice(SavedDriverMetadata, b.allocator, contents, .{
+        .ignore_unknown_fields = true,
+    }) catch |err| {
+        std.debug.panic("failed to parse saved Zig driver metadata at {s}: {s}", .{
+            metadata_path,
+            @errorName(err),
+        });
+    };
+    defer parsed.deinit();
+
+    return b.dupeStrings(parsed.value.cmake_args);
 }
 
 fn hasArgPrefix(args: []const []const u8, prefix: []const u8) bool {

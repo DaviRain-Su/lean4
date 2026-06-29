@@ -71,6 +71,10 @@ CMake/Make/CTest layers.
   this option once per argument, for example
   `-Dcmake-arg=-DUSE_LAKE_CACHE=ON` or
   `-Dcmake-arg=-DCMAKE_CXX_COMPILER=clang++`.
+  The driver saves the most recent configure-time argv in
+  `<binary-dir>/.zig-driver.json`, and later `zig build stage1`, `zig build test`,
+  or `zig build install` invocations against that same `-Dbinary-dir` will reuse
+  those saved `cmake` arguments unless you override them again on the command line.
 
 * `-Dmake-arg=`\
   Extra argv elements forwarded to the underlying `make` invocations. Repeat
