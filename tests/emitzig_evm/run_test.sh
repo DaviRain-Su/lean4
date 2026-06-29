@@ -164,6 +164,54 @@ contract ArrayTest is Test {
 }
 SOL
 
+# --- VerifiedVault test ---
+VAULT_BIN=$(cat "$OUT_DIR/VerifiedVault.bin")
+cat > "$TEST_DIR/VaultTest.t.sol" <<SOL
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+import "forge-std/Test.sol";
+contract VaultTest is Test {
+    address vault = address(0x7A17);
+    address alice = address(0xA11CE);
+    function setUp() public {
+        bytes memory code = hex"${VAULT_BIN}";
+        vm.etch(vault, code);
+        vm.deal(alice, 100 ether);
+        vm.prank(alice);
+        (bool ok,) = vault.call(abi.encodeWithSignature("init()"));
+        require(ok, "init failed");
+    }
+    function test_deposit() public {
+        vm.prank(alice);
+        (bool ok,) = vault.call{value: 1000}(abi.encodeWithSignature("deposit()"));
+        assertTrue(ok, "deposit failed");
+        (, bytes memory r) = vault.call(abi.encodeWithSignature("reserves()"));
+        assertEq(abi.decode(r, (uint256)), 1000);
+        (, bytes memory ts) = vault.call(abi.encodeWithSignature("totalShares()"));
+        assertEq(abi.decode(ts, (uint256)), 1000);
+    }
+    function test_withdraw() public {
+        vm.prank(alice);
+        vault.call{value: 1000}(abi.encodeWithSignature("deposit()"));
+        vm.prank(alice);
+        (bool ok,) = vault.call(abi.encodeWithSignature("withdraw(uint256)", uint256(300)));
+        assertTrue(ok, "withdraw failed");
+        (, bytes memory r) = vault.call(abi.encodeWithSignature("reserves()"));
+        assertEq(abi.decode(r, (uint256)), 700);
+        (, bytes memory bal) = vault.call(abi.encodeWithSignature("balanceOf(uint256)", uint256(uint160(alice))));
+        assertEq(abi.decode(bal, (uint256)), 700);
+    }
+    function test_overdraftRevert() public {
+        vm.prank(alice);
+        vault.call{value: 500}(abi.encodeWithSignature("deposit()"));
+        vm.prank(alice);
+        (bool reverted,) = vault.call(abi.encodeWithSignature("withdraw(uint256)", uint256(999)));
+        assertFalse(reverted, "overdraft should revert");
+    }
+    receive() external payable {}
+}
+SOL
+
 # --- Run tests ---
 echo ""
 echo "Running forge tests..."

@@ -1,0 +1,6 @@
+init()=l_VerifiedVault_init[update]
+deposit()=l_VerifiedVault_deposit[update]
+withdraw(uint256)=l_VerifiedVault_withdraw[update]
+reserves()=l_VerifiedVault_reserves[view]
+totalShares()=l_VerifiedVault_totalShares[view]
+balanceOf(uint256)=l_VerifiedVault_balanceOf[view]
