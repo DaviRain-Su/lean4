@@ -209,3 +209,6 @@ def sync : IO Unit := do
   _update bal0 bal1 r.reserve0 r.reserve1
 
 end UniswapV2.Pair
+
+-- NEAR 合约入口
+def main : IO UInt32 := pure 0

@@ -118,3 +118,6 @@ def setFeeToSetter (newSetter : String) : IO Unit := do
 def allPairsLength : IO Nat := getPairCount
 
 end UniswapV2.Factory
+
+-- NEAR 合约入口（需要 main 符号）
+def main : IO UInt32 := pure 0

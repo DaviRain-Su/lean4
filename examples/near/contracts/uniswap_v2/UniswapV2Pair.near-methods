@@ -1,0 +1,4 @@
+pairInitialize=l_UniswapV2_Pair_pairInitialize___boxed
+ftOnTransfer=l_UniswapV2_Pair_ftOnTransfer___boxed
+burn=l_UniswapV2_Pair_burn___boxed
+sync=l_UniswapV2_Pair_sync___boxed

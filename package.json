@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "near-sandbox": "^0.3.0",
+    "near-workspaces": "^5.0.0"
+  }
+}
