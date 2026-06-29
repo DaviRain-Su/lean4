@@ -15,5 +15,5 @@ if [ "$STAGE0_WITH_NIX" = true ]
 then
   "${SED_CMD[@]}" '/chore: update stage0/ s,.*,x nix run .#update-stage0-commit,' "$1"
 else
-  "${SED_CMD[@]}" '/chore: update stage0/ s,.*,x make -j32 -C build/release update-stage0 \&\& git commit -m "chore: update stage0",' "$1"
+  "${SED_CMD[@]}" '/chore: update stage0/ s,.*,x zig build update-stage0-commit -Dprofile=release -Dbinary-dir=build/release,' "$1"
 fi
