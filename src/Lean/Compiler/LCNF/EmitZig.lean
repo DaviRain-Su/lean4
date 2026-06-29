@@ -1541,7 +1541,7 @@ def emitMainFnIfNeeded : EmitM Unit := do
     emitLns ["  _ = argc;", "  _ = argv;", s!"  return {mainFn}();"]
   emitLns [
     "}",
-    "export fn main(argc: c_int, argv0: [*c][*c]u8) callconv(.c) c_int {",
+    "pub export fn main(argc: c_int, argv0: [*c][*c]u8) callconv(.c) c_int {",
     "  const argv = lean_setup_args(argc, argv0);",
     if usesLeanAPI then "  lean_initialize();" else "  lean_initialize_runtime_module();",
     "  var res: LeanObj = " ++ initDefFn ++ "(@as(u8, 1));",
@@ -1561,11 +1561,12 @@ def emitMainFnIfNeeded : EmitM Unit := do
     "  lean_dec_ref(res);",
     "  return 1;",
     "}"
-    -- Note: we emit `export fn main` directly (via the `export` keyword on the
-    -- fn declaration above) rather than `pub fn main + comptime @export`,
-    -- because the latter triggers Zig's `std.start` analysis on
-    -- wasm32-freestanding, which pulls in `std.Io.Threaded` and fails on MVP
-    -- WASM targets (NEAR). The `export` keyword form avoids the start path.
+    -- Note: we emit `pub export fn main` directly rather than `pub fn main` plus
+    -- a separate `comptime @export`, because the latter triggers Zig's
+    -- freestanding `std.start` path on wasm32 and pulls in
+    -- `std.Io.Threaded`, which fails on MVP WASM targets (NEAR). Zig 0.16's
+    -- native `build-exe` path still requires `main` to be `pub`, hence both
+    -- modifiers here.
   ]
   emitLn ""
 where
