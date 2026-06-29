@@ -142,6 +142,16 @@ abbrev Address := Nat
 /-- Revert the call with no data. -/
 @[inline] def revert : IO Unit := revertMem 0 0
 
+/-- Revert with a Solidity-style Error(string) reason.
+    Encodes as: 0x08c379a0 (Error(string) selector) + offset(0x20) + len + data.
+    The caller sees a standard revert reason parseable by ethers.js/web3.
+    The reason string must be pre-written to memory at offset 68 by the caller. -/
+@[inline] def revertWithReason (reasonLen : Nat) : IO Unit := do
+  mstore 0 147846272  -- Error(string) selector 0x08c379a0 (left-shifted by caller)
+  mstore 4 32  -- string data offset
+  mstore 36 reasonLen  -- string length
+  revertMem 0 (68 + ((reasonLen + 31) / 32 * 32))
+
 /-! ## Storage helpers -/
 
 namespace Storage
