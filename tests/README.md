@@ -73,8 +73,8 @@ zig build test -Djobs="$(nproc)"
 Or rerun only the failed tests using
 
 ```sh
-CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="--rerun-failed" \
-zig build test -Djobs="$(nproc)"
+CTEST_OUTPUT_ON_FAILURE=1 \
+zig build test -Djobs="$(nproc)" -Dctest-arg=--rerun-failed
 ```
 
 Run an individual test using one of these commands.
@@ -82,12 +82,12 @@ Note that regex arguments to `-R` need to be double-quoted
 if they contain any special shell characters like `|`.
 
 ```sh
-CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="-R '<regex>'" \
-zig build test -Djobs="$(nproc)"
+CTEST_OUTPUT_ON_FAILURE=1 \
+zig build test -Djobs="$(nproc)" -Dctest-arg=-R "-Dctest-arg=<regex>"
 
 # For a non-default stage, for example stage2
-CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="-R '<regex>'" \
-zig build test -Dstage=stage2 -Djobs="$(nproc)"
+CTEST_OUTPUT_ON_FAILURE=1 \
+zig build test -Dstage=stage2 -Djobs="$(nproc)" -Dctest-arg=-R "-Dctest-arg=<regex>"
 
 # Manually, without ctest
 tests/with_stage1_test_env.sh path/to/test/directory/run_test.sh

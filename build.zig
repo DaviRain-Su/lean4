@@ -2,7 +2,64 @@ const std = @import("std");
 
 const Build = std.Build;
 const Step = Build.Step;
+const json = std.json;
 const mem = std.mem;
+
+const BuildProfile = enum {
+    release,
+    @"dev-release",
+    debug,
+    relwithassert,
+    sanitize,
+    sandebug,
+
+    fn presetName(self: BuildProfile) []const u8 {
+        return switch (self) {
+            .release => "release",
+            .@"dev-release" => "dev-release",
+            .debug => "debug",
+            .relwithassert => "relwithassert",
+            .sanitize => "sanitize",
+            .sandebug => "sandebug",
+        };
+    }
+
+    fn defaultBinaryDir(self: BuildProfile) []const u8 {
+        return switch (self) {
+            .release, .@"dev-release" => "build/release",
+            .debug => "build/debug",
+            .relwithassert => "build/relwithassert",
+            .sanitize => "build/sanitize",
+            .sandebug => "build/sandebug",
+        };
+    }
+};
+
+const StageName = enum {
+    stage1,
+    stage2,
+    stage3,
+
+    fn asString(self: StageName) []const u8 {
+        return @tagName(self);
+    }
+};
+
+const DriverCommand = enum {
+    configure,
+    root_target,
+    stage_target,
+    ctest,
+
+    fn asString(self: DriverCommand) []const u8 {
+        return switch (self) {
+            .configure => "configure",
+            .root_target => "root-target",
+            .stage_target => "stage-target",
+            .ctest => "ctest",
+        };
+    }
+};
 
 const StageSteps = struct {
     stage1: *Step,
@@ -10,56 +67,156 @@ const StageSteps = struct {
     stage3: *Step,
 };
 
+const DriverConfig = struct {
+    command: DriverCommand,
+    profile: BuildProfile,
+    binary_dir: []const u8,
+    jobs: usize,
+    install_prefix: []const u8,
+    cmake_args: []const []const u8,
+    make_args: []const []const u8,
+    ctest_args: []const []const u8,
+    ctest_junit: ?[]const u8,
+    target: ?[]const u8,
+    stage: ?StageName,
+    stage_target: ?[]const u8,
+};
+
+const DriverFiles = struct {
+    shell: Build.LazyPath,
+    metadata: Build.LazyPath,
+};
+
 pub fn build(b: *Build) void {
-    const profile = b.option([]const u8, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug") orelse "dev-release";
-    const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse defaultBinaryDir(profile);
-    const jobs = b.option(usize, "jobs", "Parallelism for make and ctest. 0 means auto-detect.") orelse 0;
-    const selected_stage_name = b.option([]const u8, "stage", "Stage to use for stage-local commands such as test, install, and update-stage0. Default: stage1.") orelse "stage1";
+    const profile = b.option(BuildProfile, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug") orelse .@"dev-release";
+    const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse profile.defaultBinaryDir();
+    const requested_jobs = b.option(usize, "jobs", "Parallelism for make and ctest. 0 means auto-detect.") orelse 0;
+    const jobs = if (requested_jobs == 0) defaultJobs() else requested_jobs;
+    const selected_stage = b.option(StageName, "stage", "Stage to use for stage-local commands such as test, install, and update-stage0. Default: stage1.") orelse .stage1;
+    const ctest_junit = b.option([]const u8, "ctest-junit", "Path passed to ctest --output-junit.");
+    const raw_cmake_args = b.option([]const []const u8, "cmake-arg", "Extra argv element passed to cmake --preset. Repeat once per argument.") orelse &.{};
+    const make_args = b.option([]const []const u8, "make-arg", "Extra argv element passed to make. Repeat once per argument.") orelse &.{};
+    const ctest_args = b.option([]const []const u8, "ctest-arg", "Extra argv element passed to ctest. Repeat once per argument.") orelse &.{};
 
-    _ = defaultBinaryDir(profile);
+    const cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
 
-    const configure_cmd = createDriverCommand(b, profile, binary_dir, jobs, "configure", &.{});
     const configure_step = addNamedStep(
         b,
         "configure",
         "Run CMake configure for the selected profile and build directory",
-        configure_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .configure,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{},
     );
 
-    const stage1_configure_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"stage1-configure"});
     const stage1_configure_step = addNamedStep(
         b,
         "stage1-configure",
         "Build stage0 and configure the stage1 sub-build",
-        stage1_configure_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage1-configure",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const stage1_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"stage1"});
     const stage1_step = addNamedStep(
         b,
         "stage1",
         "Build stage1",
-        stage1_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage1",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const stage2_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"stage2"});
     const stage2_step = addNamedStep(
         b,
         "stage2",
         "Build stage2",
-        stage2_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage2",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const stage3_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"stage3"});
     const stage3_step = addNamedStep(
         b,
         "stage3",
         "Build stage3",
-        stage3_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage3",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
@@ -68,90 +225,241 @@ pub fn build(b: *Build) void {
         .stage2 = stage2_step,
         .stage3 = stage3_step,
     };
-    const selected_stage_step = stageStep(selected_stage_name, stages);
+    const selected_stage_step = stageStep(selected_stage, stages);
 
-    const test_cmd = createDriverCommand(b, profile, binary_dir, jobs, "ctest", &.{selected_stage_name});
     _ = addNamedStep(
         b,
         "test",
         "Run ctest against the selected stage (default stage1)",
-        test_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .ctest,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = selected_stage,
+                .stage_target = null,
+            },
+        ),
         &.{selected_stage_step},
     );
 
-    const bench_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"bench"});
     _ = addNamedStep(
         b,
         "bench",
         "Run the full benchmark suite",
-        bench_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "bench",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const bench_part1_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"bench-part1"});
     _ = addNamedStep(
         b,
         "bench-part1",
         "Run benchmark suite part 1",
-        bench_part1_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "bench-part1",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const bench_part2_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"bench-part2"});
     _ = addNamedStep(
         b,
         "bench-part2",
         "Run benchmark suite part 2",
-        bench_part2_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "bench-part2",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const clean_stdlib_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"clean-stdlib"});
     _ = addNamedStep(
         b,
         "clean-stdlib",
         "Remove generated stdlib artifacts from the selected build directory",
-        clean_stdlib_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "clean-stdlib",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{configure_step},
     );
 
-    const cache_get_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"cache-get"});
     _ = addNamedStep(
         b,
         "cache-get",
         "Download the Lake cache for the selected build directory",
-        cache_get_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "cache-get",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{stage1_configure_step},
     );
 
-    const check_stage3_cmd = createDriverCommand(b, profile, binary_dir, jobs, "root-target", &.{"check-stage3"});
     _ = addNamedStep(
         b,
         "check-stage3",
         "Build stage3 and compare it against stage2",
-        check_stage3_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "check-stage3",
+                .stage = null,
+                .stage_target = null,
+            },
+        ),
         &.{stage3_step},
     );
 
-    const update_stage0_cmd = createDriverCommand(b, profile, binary_dir, jobs, "stage-target", &.{ selected_stage_name, "update-stage0" });
     _ = addNamedStep(
         b,
         "update-stage0",
         "Refresh stage0 from the selected stage (default stage1)",
-        update_stage0_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .stage_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = selected_stage,
+                .stage_target = "update-stage0",
+            },
+        ),
         &.{selected_stage_step},
     );
 
-    const update_stage0_commit_cmd = createDriverCommand(b, profile, binary_dir, jobs, "stage-target", &.{ selected_stage_name, "update-stage0-commit" });
     _ = addNamedStep(
         b,
         "update-stage0-commit",
         "Refresh stage0 from the selected stage and create the update commit",
-        update_stage0_commit_cmd,
+        createDriverCommand(
+            b,
+            .{
+                .command = .stage_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = selected_stage,
+                .stage_target = "update-stage0-commit",
+            },
+        ),
         &.{selected_stage_step},
     );
 
-    const install_cmd = createDriverCommand(b, profile, binary_dir, jobs, "stage-target", &.{ selected_stage_name, "install" });
+    const install_cmd = createDriverCommand(
+        b,
+        .{
+            .command = .stage_target,
+            .profile = profile,
+            .binary_dir = binary_dir,
+            .jobs = jobs,
+            .install_prefix = b.install_path,
+            .cmake_args = cmake_args,
+            .make_args = make_args,
+            .ctest_args = ctest_args,
+            .ctest_junit = ctest_junit,
+            .target = null,
+            .stage = selected_stage,
+            .stage_target = "install",
+        },
+    );
     const install_step = b.getInstallStep();
     install_step.dependOn(selected_stage_step);
     install_step.dependOn(&install_cmd.step);
@@ -174,52 +482,147 @@ fn addNamedStep(
     return step;
 }
 
-fn createDriverCommand(
-    b: *Build,
-    profile: []const u8,
-    binary_dir: []const u8,
-    jobs: usize,
-    command: []const u8,
-    extra_args: []const []const u8,
-) *Build.Step.Run {
-    var argv = std.array_list.Managed([]const u8).init(b.allocator);
-    defer argv.deinit();
-
-    argv.appendSlice(&.{
-        "bash",
-        "-e",
-        "-u",
-        "-o",
-        "pipefail",
-        "script/zig-build-driver.sh",
-        command,
-        profile,
-        binary_dir,
-        b.fmt("{}", .{jobs}),
-    }) catch @panic("OOM");
-    argv.appendSlice(extra_args) catch @panic("OOM");
-
-    const cmd = b.addSystemCommand(argv.items);
+fn createDriverCommand(b: *Build, config: DriverConfig) *Build.Step.Run {
+    const files = createDriverFiles(b, config);
+    const cmd = b.addSystemCommand(&.{ "bash", "-e", "-u", "-o", "pipefail" });
+    cmd.addFileArg(b.path("script/zig-build-driver.sh"));
+    cmd.addFileArg(files.shell);
+    cmd.addFileArg(files.metadata);
     cmd.setCwd(b.path("."));
-    cmd.setEnvironmentVariable("LEAN_ZIG_INSTALL_PREFIX", b.install_path);
     return cmd;
 }
 
-fn defaultBinaryDir(profile: []const u8) []const u8 {
-    if (mem.eql(u8, profile, "release") or mem.eql(u8, profile, "dev-release")) return "build/release";
-    if (mem.eql(u8, profile, "debug")) return "build/debug";
-    if (mem.eql(u8, profile, "relwithassert")) return "build/relwithassert";
-    if (mem.eql(u8, profile, "sanitize")) return "build/sanitize";
-    if (mem.eql(u8, profile, "sandebug")) return "build/sandebug";
-    std.debug.panic(
-        "unsupported -Dprofile value '{s}'; expected one of: release, dev-release, debug, relwithassert, sanitize, sandebug",
-        .{profile},
-    );
+fn createDriverFiles(b: *Build, config: DriverConfig) DriverFiles {
+    const write_files = b.addWriteFiles();
+    const stem = driverFileStem(b, config);
+    const shell = write_files.add(b.fmt("{s}.sh", .{stem}), renderShellConfig(b, config));
+    const metadata = write_files.add(b.fmt("{s}.json", .{stem}), renderMetadataJson(b, config));
+    return .{
+        .shell = shell,
+        .metadata = metadata,
+    };
 }
 
-fn stageStep(name: []const u8, stages: StageSteps) *Step {
-    if (mem.eql(u8, name, "stage1")) return stages.stage1;
-    if (mem.eql(u8, name, "stage2")) return stages.stage2;
-    if (mem.eql(u8, name, "stage3")) return stages.stage3;
-    std.debug.panic("unsupported -Dstage value '{s}'; expected one of: stage1, stage2, stage3", .{name});
+fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
+    return switch (config.command) {
+        .configure => "driver-configure",
+        .ctest => b.fmt("driver-ctest-{s}", .{config.stage.?.asString()}),
+        .root_target => b.fmt("driver-root-{s}", .{config.target.?}),
+        .stage_target => b.fmt("driver-stage-{s}-{s}", .{ config.stage.?.asString(), config.stage_target.? }),
+    };
+}
+
+fn normalizeCmakeArgs(b: *Build, raw_args: []const []const u8, install_prefix: []const u8) []const []const u8 {
+    if (hasArgPrefix(raw_args, "-DLEAN_INSTALL_PREFIX=")) {
+        return raw_args;
+    }
+
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+    args.appendSlice(raw_args) catch @panic("OOM");
+    args.append(b.fmt("-DLEAN_INSTALL_PREFIX={s}", .{install_prefix})) catch @panic("OOM");
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn hasArgPrefix(args: []const []const u8, prefix: []const u8) bool {
+    for (args) |arg| {
+        if (mem.startsWith(u8, arg, prefix)) return true;
+    }
+    return false;
+}
+
+fn defaultJobs() usize {
+    return std.Thread.getCpuCount() catch 1;
+}
+
+fn stageStep(name: StageName, stages: StageSteps) *Step {
+    return switch (name) {
+        .stage1 => stages.stage1,
+        .stage2 => stages.stage2,
+        .stage3 => stages.stage3,
+    };
+}
+
+fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
+    var out: std.Io.Writer.Allocating = .init(b.allocator);
+    const w = &out.writer;
+
+    writeShellAssignment(w, "COMMAND", config.command.asString());
+    writeShellAssignment(w, "PROFILE", config.profile.presetName());
+    writeShellAssignment(w, "BINARY_DIR", config.binary_dir);
+    writeShellAssignment(w, "JOBS", b.fmt("{}", .{config.jobs}));
+    writeShellAssignment(w, "INSTALL_PREFIX", config.install_prefix);
+    writeOptionalShellAssignment(w, "TARGET", config.target);
+    writeOptionalShellAssignment(w, "STAGE", if (config.stage) |stage| stage.asString() else null);
+    writeOptionalShellAssignment(w, "STAGE_TARGET", config.stage_target);
+    writeOptionalShellAssignment(w, "CTEST_JUNIT", config.ctest_junit);
+    writeShellArray(w, "cmake_args", config.cmake_args);
+    writeShellArray(w, "make_args", config.make_args);
+    writeShellArray(w, "ctest_args", config.ctest_args);
+
+    return out.toOwnedSlice() catch @panic("OOM");
+}
+
+fn writeShellAssignment(w: *std.Io.Writer, name: []const u8, value: []const u8) void {
+    w.print("{s}=", .{name}) catch @panic("OOM");
+    writeShellQuoted(w, value);
+    w.writeByte('\n') catch @panic("OOM");
+}
+
+fn writeOptionalShellAssignment(w: *std.Io.Writer, name: []const u8, maybe_value: ?[]const u8) void {
+    writeShellAssignment(w, name, maybe_value orelse "");
+}
+
+fn writeShellArray(w: *std.Io.Writer, name: []const u8, values: []const []const u8) void {
+    w.print("{s}=(\n", .{name}) catch @panic("OOM");
+    for (values) |value| {
+        w.writeAll("  ") catch @panic("OOM");
+        writeShellQuoted(w, value);
+        w.writeByte('\n') catch @panic("OOM");
+    }
+    w.writeAll(")\n") catch @panic("OOM");
+}
+
+fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
+    w.writeByte('\'') catch @panic("OOM");
+    var start: usize = 0;
+    while (mem.indexOfScalarPos(u8, value, start, '\'')) |idx| {
+        if (idx > start) {
+            w.writeAll(value[start..idx]) catch @panic("OOM");
+        }
+        w.writeAll("'\"'\"'") catch @panic("OOM");
+        start = idx + 1;
+    }
+    if (start < value.len) {
+        w.writeAll(value[start..]) catch @panic("OOM");
+    }
+    w.writeByte('\'') catch @panic("OOM");
+}
+
+fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
+    const stage_name = if (config.stage) |stage| stage.asString() else null;
+    const payload = .{
+        .binary_dir = config.binary_dir,
+        .cmake_args = config.cmake_args,
+        .command = config.command.asString(),
+        .ctest_args = config.ctest_args,
+        .ctest_junit = config.ctest_junit,
+        .install_prefix = config.install_prefix,
+        .jobs = config.jobs,
+        .make_args = config.make_args,
+        .profile = config.profile.presetName(),
+        .stage = stage_name,
+        .stage_target = config.stage_target,
+        .target = config.target,
+        .zig_version = @import("builtin").zig_version_string,
+    };
+
+    var out: std.Io.Writer.Allocating = .init(b.allocator);
+    var stringify: json.Stringify = .{
+        .writer = &out.writer,
+        .options = .{ .whitespace = .indent_2 },
+    };
+    stringify.write(payload) catch @panic("OOM");
+    out.writer.writeByte('\n') catch @panic("OOM");
+    return out.toOwnedSlice() catch @panic("OOM");
 }

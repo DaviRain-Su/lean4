@@ -13,10 +13,18 @@ if [ ! -f "$LLVM_TARBALL" ]; then
     curl --location -o "$LLVM_TARBALL" "https://github.com/leanprover/lean-llvm/releases/download/$LLVM_RELEASE/lean-llvm-x86_64-linux-gnu.tar.zst"
 fi
 
-export LEAN_ZIG_CMAKE_ARGS
-LEAN_ZIG_CMAKE_ARGS="$(./script/prepare-llvm-linux.sh "$LLVM_TARBALL") -DWFAIL=OFF"
+zig_args=(
+    -Dprofile=release
+    -Dbinary-dir=build/release
+    "-Djobs=$(nproc)"
+    -Dcmake-arg=-DWFAIL=OFF
+)
+eval "prepare_args=($(./script/prepare-llvm-linux.sh "$LLVM_TARBALL"))"
+for arg in "${prepare_args[@]}"; do
+    zig_args+=("-Dcmake-arg=$arg")
+done
 
-zig build configure -Dprofile=release -Dbinary-dir=build/release -Djobs="$(nproc)"
+zig build configure "${zig_args[@]}"
 rm -rf build/release/stage2
 cp -r build/release/stage1 build/release/stage2
 rm -rf build/release/stage3

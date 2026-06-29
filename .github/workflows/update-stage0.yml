@@ -86,14 +86,19 @@ jobs:
         cd build
         wget -q https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-x86_64-linux-gnu.tar.zst
         PREPARE="$(../script/prepare-llvm-linux.sh lean-llvm*)"
-        ZIG_CMAKE_ARGS="$PREPARE -DWFAIL=ON -DLEAN_EXTRA_CXX_FLAGS=-Werror"
-        {
-          echo "LEAN_ZIG_CMAKE_ARGS<<EOF"
-          printf '%s\n' "$ZIG_CMAKE_ARGS"
-          echo "EOF"
-        } >> "$GITHUB_ENV"
+        eval "PREPARE_ARGS=($PREPARE)"
+        ZIG_CONFIGURE_ARGS=(
+          -Dprofile=release
+          -Dbinary-dir=build
+          "-Djobs=$NPROC"
+        )
+        for opt in "${PREPARE_ARGS[@]}"; do
+          ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
+        done
+        ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DWFAIL=ON)
+        ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DLEAN_EXTRA_CXX_FLAGS=-Werror)
         cd ..
-        zig build configure -Dprofile=release -Dbinary-dir=build -Djobs="$NPROC"
+        zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
     - if: env.should_update_stage0 == 'yes'
       run: |
         zig build update-stage0-commit -Dprofile=release -Dbinary-dir=build -Djobs="$NPROC"

@@ -66,18 +66,24 @@ CMake/Make/CTest layers.
   Override the build directory. By default this follows the selected preset,
   e.g. `build/release` for `release` and `dev-release`.
 
-* `LEAN_ZIG_CMAKE_ARGS`\
-  Extra arguments to pass through to `cmake --preset ... -B ...`. Use this for
-  lower-level options such as `-DCMAKE_C_COMPILER=...`,
-  `-DCMAKE_CXX_COMPILER=...`, `-DUSE_LAKE_CACHE=ON`, or release metadata flags.
+* `-Dcmake-arg=`\
+  Extra argv elements passed through to `cmake --preset ... -B ...`. Repeat
+  this option once per argument, for example
+  `-Dcmake-arg=-DUSE_LAKE_CACHE=ON` or
+  `-Dcmake-arg=-DCMAKE_CXX_COMPILER=clang++`.
 
-* `LEAN_ZIG_MAKE_ARGS`\
-  Extra arguments forwarded to the underlying `make` invocations. This is the
-  equivalent of appending `VERBOSE=1` or similar knobs to the legacy commands.
+* `-Dmake-arg=`\
+  Extra argv elements forwarded to the underlying `make` invocations. Repeat
+  this option once per argument, for example `-Dmake-arg=VERBOSE=1`.
 
-* `LEAN_ZIG_CTEST_ARGS`\
-  Extra arguments forwarded to `ctest` when running `zig build test`, e.g.
-  `--rerun-failed` or `-R '<regex>'`.
+* `-Dctest-arg=`\
+  Extra argv elements forwarded to `ctest` when running `zig build test`.
+  Repeat this option once per argument, for example
+  `-Dctest-arg=--rerun-failed` or
+  `-Dctest-arg=-R "-Dctest-arg=<regex>"`.
+
+* `-Dctest-junit=`\
+  Path forwarded to `ctest --output-junit` when running `zig build test`.
 
 Lean will automatically use [CCache](https://ccache.dev/) if available to avoid
 redundant builds, especially after stage 0 has been updated.
@@ -85,7 +91,7 @@ redundant builds, especially after stage 0 has been updated.
 Troubleshooting
 ---------------
 
-* Use `LEAN_ZIG_MAKE_ARGS=VERBOSE=1 zig build ...` to print the underlying
-  `make` commands.
+* Use `zig build -Dmake-arg=VERBOSE=1 ...` to print the underlying `make`
+  commands.
 * If you need to bypass the Zig driver entirely, the legacy `cmake --preset ...`
   and `make -C ...` commands are still supported.

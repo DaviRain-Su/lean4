@@ -162,18 +162,27 @@ jobs:
             OPTIONS+=(-DLEAN_VERSION_IS_RELEASE=1)
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.LEAN_SPECIAL_VERSION_DESC }})
           fi
-          ZIG_CMAKE_ARGS="${OPTIONS[*]} ${{ matrix.CMAKE_OPTIONS }} -DLEAN_INSTALL_PREFIX=$PWD/.."
-          {
-            echo "LEAN_ZIG_CMAKE_ARGS<<EOF"
-            printf '%s\n' "$ZIG_CMAKE_ARGS"
-            echo "EOF"
-          } >> "$GITHUB_ENV"
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             # contortion to support empty OPTIONS with old macOS bash
             cmake .. --preset "$BUILD_PROFILE" -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
           else
+            ZIG_CONFIGURE_ARGS=(
+              "-Dprofile=$BUILD_PROFILE"
+              "-Dbinary-dir=build"
+              "-Djobs=$NPROC"
+              "-Dcmake-arg=-DLEAN_INSTALL_PREFIX=$PWD/.."
+            )
+            for opt in "${OPTIONS[@]}"; do
+              ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
+            done
+            if [[ -n '${{ matrix.CMAKE_OPTIONS }}' ]]; then
+              eval "MATRIX_CMAKE_OPTIONS=(${{ matrix.CMAKE_OPTIONS }})"
+              for opt in "${MATRIX_CMAKE_OPTIONS[@]}"; do
+                ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
+              done
+            fi
             cd ..
-            zig build configure -Dprofile="$BUILD_PROFILE" -Dbinary-dir=build -Djobs="$NPROC"
+            zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
           fi
       - name: Build Stage 0 & Configure Stage 1
         run: |
@@ -294,9 +303,20 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/$TARGET_STAGE -j$NPROC --output-junit test-results.xml ${{ matrix.CTEST_OPTIONS }}
           else
-            export LEAN_ZIG_CTEST_JUNIT="build/$TARGET_STAGE/test-results.xml"
-            export LEAN_ZIG_CTEST_ARGS="${{ matrix.CTEST_OPTIONS }}"
-            time zig build test -Dstage="$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            ZIG_TEST_ARGS=(
+              "-Dstage=$TARGET_STAGE"
+              "-Dprofile=$LEAN_ZIG_PROFILE"
+              "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
+              "-Djobs=$NPROC"
+              "-Dctest-junit=build/$TARGET_STAGE/test-results.xml"
+            )
+            if [[ -n '${{ matrix.CTEST_OPTIONS }}' ]]; then
+              eval "MATRIX_CTEST_OPTIONS=(${{ matrix.CTEST_OPTIONS }})"
+              for opt in "${MATRIX_CTEST_OPTIONS[@]}"; do
+                ZIG_TEST_ARGS+=("-Dctest-arg=$opt")
+              done
+            fi
+            time zig build test "${ZIG_TEST_ARGS[@]}"
           fi
         if: matrix.test
       - name: Test Summary
@@ -347,7 +367,6 @@ jobs:
             time make -C build -j$NPROC
             time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/stage1 -j$NPROC
           else
-            unset LEAN_ZIG_CTEST_ARGS
             time zig build -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
             time zig build test -Dstage=stage1 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
           fi
