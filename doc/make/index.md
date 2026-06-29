@@ -88,6 +88,23 @@ CMake/Make/CTest layers.
 Lean will automatically use [CCache](https://ccache.dev/) if available to avoid
 redundant builds, especially after stage 0 has been updated.
 
+Composite Helper Steps
+----------------------
+
+Some higher-level workflows are now exposed directly through `zig build` as
+well:
+
+* `zig build prepare-bench-stages`\
+  Build `stage1` if needed, then copy it into `stage2` and `stage3` build
+  directories. This is the benchmark-oriented staging flow used by CI and the
+  radar helper scripts.
+
+* `zig build check-rebootstrap`\
+  Mirror the CI rebootstrap check locally: refresh `stage0` from `stage1`,
+  create the `chore: update-stage0` checkpoint commit, rebuild `stage1`, and
+  rerun `stage1` tests. Because this command creates a commit, use it only when
+  you are ready for that mutation.
+
 Troubleshooting
 ---------------
 

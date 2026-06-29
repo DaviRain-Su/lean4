@@ -148,8 +148,6 @@ jobs:
           if [[ -n '${{ matrix.prepare-llvm }}' ]]; then
             wget -q ${{ matrix.llvm-url }}
             PREPARE="$(${{ matrix.prepare-llvm }})"
-            cp -r stage1 stage2
-            cp -r stage1 stage3
             eval "OPTIONS+=($PREPARE)"
           fi
           if [[ -n '${{ matrix.release }}' && -n '${{ inputs.nightly }}' ]]; then
@@ -333,6 +331,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build -j$NPROC stage2
           else
+            zig build prepare-bench-stages -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
             zig build stage2 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
           fi
         if: matrix.test-bench
@@ -359,16 +358,11 @@ jobs:
           git config user.name "update-stage0"
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build update-stage0
-          else
-            zig build update-stage0 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
-          fi
-          git commit --allow-empty -m "chore: update-stage0"
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            git commit --allow-empty -m "chore: update-stage0"
             time make -C build -j$NPROC
             time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/stage1 -j$NPROC
           else
-            time zig build -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
-            time zig build test -Dstage=stage1 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build check-rebootstrap -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
           fi
         if: matrix.check-rebootstrap
       - name: CCache stats

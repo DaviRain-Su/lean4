@@ -42,6 +42,21 @@ run_ctest_stage() {
   "${args[@]}"
 }
 
+run_prepare_bench_stages() {
+  local source_dir="$BINARY_DIR/$STAGE"
+  rm -rf "$BINARY_DIR/stage2"
+  cp -r "$source_dir" "$BINARY_DIR/stage2"
+  rm -rf "$BINARY_DIR/stage3"
+  cp -r "$source_dir" "$BINARY_DIR/stage3"
+}
+
+run_check_rebootstrap() {
+  run_make_stage_target
+  git commit --allow-empty -m "$GIT_COMMIT_MESSAGE"
+  run_make_root_target
+  run_ctest_stage
+}
+
 case "$COMMAND" in
   configure)
     mkdir -p "$BINARY_DIR"
@@ -60,6 +75,12 @@ case "$COMMAND" in
     ;;
   ctest)
     run_ctest_stage
+    ;;
+  prepare-bench-stages)
+    run_prepare_bench_stages
+    ;;
+  check-rebootstrap)
+    run_check_rebootstrap
     ;;
   *)
     echo "unknown command: $COMMAND" >&2

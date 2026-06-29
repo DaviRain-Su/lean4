@@ -50,6 +50,8 @@ const DriverCommand = enum {
     root_target,
     stage_target,
     ctest,
+    prepare_bench_stages,
+    check_rebootstrap,
 
     fn asString(self: DriverCommand) []const u8 {
         return switch (self) {
@@ -57,6 +59,8 @@ const DriverCommand = enum {
             .root_target => "root-target",
             .stage_target => "stage-target",
             .ctest => "ctest",
+            .prepare_bench_stages => "prepare-bench-stages",
+            .check_rebootstrap => "check-rebootstrap",
         };
     }
 };
@@ -80,6 +84,7 @@ const DriverConfig = struct {
     target: ?[]const u8,
     stage: ?StageName,
     stage_target: ?[]const u8,
+    git_commit_message: ?[]const u8,
 };
 
 const DriverFiles = struct {
@@ -119,6 +124,7 @@ pub fn build(b: *Build) void {
                 .target = null,
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{},
@@ -143,6 +149,7 @@ pub fn build(b: *Build) void {
                 .target = "stage1-configure",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -167,6 +174,7 @@ pub fn build(b: *Build) void {
                 .target = "stage1",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -191,6 +199,7 @@ pub fn build(b: *Build) void {
                 .target = "stage2",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -215,6 +224,7 @@ pub fn build(b: *Build) void {
                 .target = "stage3",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -246,6 +256,7 @@ pub fn build(b: *Build) void {
                 .target = null,
                 .stage = selected_stage,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{selected_stage_step},
@@ -270,6 +281,7 @@ pub fn build(b: *Build) void {
                 .target = "bench",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -294,6 +306,7 @@ pub fn build(b: *Build) void {
                 .target = "bench-part1",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -318,6 +331,7 @@ pub fn build(b: *Build) void {
                 .target = "bench-part2",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -342,6 +356,7 @@ pub fn build(b: *Build) void {
                 .target = "clean-stdlib",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{configure_step},
@@ -366,6 +381,7 @@ pub fn build(b: *Build) void {
                 .target = "cache-get",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{stage1_configure_step},
@@ -390,6 +406,7 @@ pub fn build(b: *Build) void {
                 .target = "check-stage3",
                 .stage = null,
                 .stage_target = null,
+                .git_commit_message = null,
             },
         ),
         &.{stage3_step},
@@ -414,6 +431,7 @@ pub fn build(b: *Build) void {
                 .target = null,
                 .stage = selected_stage,
                 .stage_target = "update-stage0",
+                .git_commit_message = null,
             },
         ),
         &.{selected_stage_step},
@@ -438,6 +456,7 @@ pub fn build(b: *Build) void {
                 .target = null,
                 .stage = selected_stage,
                 .stage_target = "update-stage0-commit",
+                .git_commit_message = null,
             },
         ),
         &.{selected_stage_step},
@@ -458,11 +477,62 @@ pub fn build(b: *Build) void {
             .target = null,
             .stage = selected_stage,
             .stage_target = "install",
+            .git_commit_message = null,
         },
     );
     const install_step = b.getInstallStep();
     install_step.dependOn(selected_stage_step);
     install_step.dependOn(&install_cmd.step);
+
+    _ = addNamedStep(
+        b,
+        "prepare-bench-stages",
+        "Copy stage1 into stage2 and stage3 build directories for benchmark-oriented flows",
+        createDriverCommand(
+            b,
+            .{
+                .command = .prepare_bench_stages,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = .stage1,
+                .stage_target = null,
+                .git_commit_message = null,
+            },
+        ),
+        &.{stage1_step},
+    );
+
+    _ = addNamedStep(
+        b,
+        "check-rebootstrap",
+        "Update stage0 from stage1, create the checkpoint commit, rebuild stage1, and rerun stage1 tests",
+        createDriverCommand(
+            b,
+            .{
+                .command = .check_rebootstrap,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage1",
+                .stage = .stage1,
+                .stage_target = "update-stage0",
+                .git_commit_message = "chore: update-stage0",
+            },
+        ),
+        &.{stage1_configure_step},
+    );
 
     b.default_step = stage1_step;
 }
@@ -509,6 +579,8 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
         .ctest => b.fmt("driver-ctest-{s}", .{config.stage.?.asString()}),
         .root_target => b.fmt("driver-root-{s}", .{config.target.?}),
         .stage_target => b.fmt("driver-stage-{s}-{s}", .{ config.stage.?.asString(), config.stage_target.? }),
+        .prepare_bench_stages => "driver-prepare-bench-stages",
+        .check_rebootstrap => "driver-check-rebootstrap",
     };
 }
 
@@ -556,6 +628,7 @@ fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
     writeOptionalShellAssignment(w, "STAGE", if (config.stage) |stage| stage.asString() else null);
     writeOptionalShellAssignment(w, "STAGE_TARGET", config.stage_target);
     writeOptionalShellAssignment(w, "CTEST_JUNIT", config.ctest_junit);
+    writeOptionalShellAssignment(w, "GIT_COMMIT_MESSAGE", config.git_commit_message);
     writeShellArray(w, "cmake_args", config.cmake_args);
     writeShellArray(w, "make_args", config.make_args);
     writeShellArray(w, "ctest_args", config.ctest_args);
@@ -614,6 +687,7 @@ fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
         .stage = stage_name,
         .stage_target = config.stage_target,
         .target = config.target,
+        .git_commit_message = config.git_commit_message,
         .zig_version = @import("builtin").zig_version_string,
     };
 

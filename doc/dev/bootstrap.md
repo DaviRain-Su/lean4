@@ -95,6 +95,10 @@ update `stage0` from `stage1`, or `zig build update-stage0-commit -Dstage=stage2
 to update from another stage. This command will automatically stage the updated files
 and introduce a commit, so make sure to commit your work before that.
 
+If you want to mirror the CI rebootstrap check locally after such an update,
+use `zig build check-rebootstrap`. It performs the `update-stage0`, checkpoint
+commit, rebuild, and stage1 test pass as one `zig build` step.
+
 If you rebased the branch (either onto a newer version of `master`, or fixing
 up some commits prior to the stage0 update), recreate the stage0 update commits.
 The script `script/rebase-stage0.sh` can be used for that.
