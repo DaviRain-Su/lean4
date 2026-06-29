@@ -130,7 +130,6 @@ jobs:
           ulimit -c unlimited  # coredumps
           [ -d build ] || mkdir build
           BUILD_PROFILE="${{ matrix.CMAKE_PRESET || 'release' }}"
-          echo "LEAN_ZIG_PROFILE=$BUILD_PROFILE" >> "$GITHUB_ENV"
           echo "LEAN_ZIG_BINARY_DIR=build" >> "$GITHUB_ENV"
           cd build
           # arguments passed to `cmake`
@@ -188,7 +187,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             time make -C build stage1-configure -j$NPROC
           else
-            time zig build stage1-configure -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            time zig build stage1-configure -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
       - name: Download Lake Cache
         if: matrix.name == 'Linux Lake (Cached)'
@@ -203,7 +202,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             time make -C build $TARGET_STAGE -j$NPROC
           else
-            time zig build "$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            time zig build "$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
       # Should be done as early as possible and in particular *before* "Check rebootstrap" which
       # changes the state of stage1/
@@ -260,7 +259,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build/$TARGET_STAGE install
           else
-            zig build install -Dstage="$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build install -Dstage="$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
       - name: Check Binaries
         run: ${{ matrix.binary-check }} lean-*/bin/* || true
@@ -302,11 +301,8 @@ jobs:
             time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/$TARGET_STAGE -j$NPROC --output-junit test-results.xml ${{ matrix.CTEST_OPTIONS }}
           else
             ZIG_TEST_ARGS=(
-              "-Dstage=$TARGET_STAGE"
-              "-Dprofile=$LEAN_ZIG_PROFILE"
               "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
-              "-Djobs=$NPROC"
-              "-Dctest-junit=build/$TARGET_STAGE/test-results.xml"
+              "-Dstage=$TARGET_STAGE"
             )
             if [[ -n '${{ matrix.CTEST_OPTIONS }}' ]]; then
               eval "MATRIX_CTEST_OPTIONS=(${{ matrix.CTEST_OPTIONS }})"
@@ -314,7 +310,7 @@ jobs:
                 ZIG_TEST_ARGS+=("-Dctest-arg=$opt")
               done
             fi
-            time zig build test "${ZIG_TEST_ARGS[@]}"
+            time zig build test-junit "${ZIG_TEST_ARGS[@]}"
           fi
         if: matrix.test
       - name: Test Summary
@@ -331,8 +327,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build -j$NPROC stage2
           else
-            zig build prepare-bench-stages -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
-            zig build stage2 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build bench-stage2 -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
         if: matrix.test-bench
       - name: Check Stage 3
@@ -340,7 +335,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build -j$NPROC check-stage3
           else
-            zig build check-stage3 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build check-stage3 -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
         if: matrix.check-stage3
       - name: Test Benchmarks
@@ -348,7 +343,7 @@ jobs:
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
             make -C build -j$NPROC bench
           else
-            zig build bench -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build bench -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
         if: matrix.test-bench
       - name: Check rebootstrap
@@ -362,7 +357,7 @@ jobs:
             time make -C build -j$NPROC
             time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/stage1 -j$NPROC
           else
-            zig build check-rebootstrap -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            zig build check-rebootstrap -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
           fi
         if: matrix.check-rebootstrap
       - name: CCache stats

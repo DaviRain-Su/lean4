@@ -93,14 +93,19 @@ const DriverFiles = struct {
 };
 
 const SavedDriverMetadata = struct {
+    profile: ?BuildProfile = null,
+    jobs: ?usize = null,
     cmake_args: []const []const u8 = &.{},
 };
 
 pub fn build(b: *Build) void {
-    const profile = b.option(BuildProfile, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug") orelse .@"dev-release";
-    const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse profile.defaultBinaryDir();
-    const requested_jobs = b.option(usize, "jobs", "Parallelism for make and ctest. 0 means auto-detect.") orelse 0;
-    const jobs = if (requested_jobs == 0) defaultJobs() else requested_jobs;
+    const requested_profile = b.option(BuildProfile, "profile", "Build profile: release, dev-release, debug, relwithassert, sanitize, or sandebug");
+    const bootstrap_profile = requested_profile orelse .@"dev-release";
+    const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse bootstrap_profile.defaultBinaryDir();
+    const saved_metadata = loadSavedDriverMetadata(b, binary_dir);
+    const profile = requested_profile orelse resolveSavedProfile(saved_metadata) orelse .@"dev-release";
+    const requested_jobs = b.option(usize, "jobs", "Parallelism for make and ctest. 0 means auto-detect.");
+    const jobs = resolveJobs(requested_jobs, saved_metadata);
     const selected_stage = b.option(StageName, "stage", "Stage to use for stage-local commands such as test, install, and update-stage0. Default: stage1.") orelse .stage1;
     const ctest_junit = b.option([]const u8, "ctest-junit", "Path passed to ctest --output-junit.");
     const raw_cmake_args = b.option([]const []const u8, "cmake-arg", "Extra argv element passed to cmake --preset. Repeat once per argument.") orelse &.{};
@@ -108,7 +113,7 @@ pub fn build(b: *Build) void {
     const ctest_args = b.option([]const []const u8, "ctest-arg", "Extra argv element passed to ctest. Repeat once per argument.") orelse &.{};
 
     const configure_cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
-    const inherited_cmake_args = resolveInheritedCmakeArgs(b, binary_dir, raw_cmake_args, configure_cmake_args);
+    const inherited_cmake_args = resolveInheritedCmakeArgs(raw_cmake_args, configure_cmake_args, saved_metadata);
 
     _ = addNamedStep(
         b,
@@ -260,6 +265,7 @@ pub fn build(b: *Build) void {
         .stage3 = stage3_step,
     };
     const selected_stage_step = stageStep(selected_stage, stages);
+    const default_stage_junit_path = b.fmt("{s}/{s}/test-results.xml", .{ binary_dir, selected_stage.asString() });
 
     _ = addNamedStep(
         b,
@@ -277,6 +283,31 @@ pub fn build(b: *Build) void {
                 .make_args = make_args,
                 .ctest_args = ctest_args,
                 .ctest_junit = ctest_junit,
+                .target = null,
+                .stage = selected_stage,
+                .stage_target = null,
+                .git_commit_message = null,
+            },
+        ),
+        &.{selected_stage_step},
+    );
+
+    _ = addNamedStep(
+        b,
+        "test-junit",
+        "Run ctest against the selected stage and write JUnit output to the standard stage-local path",
+        createDriverCommand(
+            b,
+            .{
+                .command = .ctest,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = inherited_cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit orelse default_stage_junit_path,
                 .target = null,
                 .stage = selected_stage,
                 .stage_target = null,
@@ -508,7 +539,7 @@ pub fn build(b: *Build) void {
     install_step.dependOn(selected_stage_step);
     install_step.dependOn(&install_cmd.step);
 
-    _ = addNamedStep(
+    const prepare_bench_stages_step = addNamedStep(
         b,
         "prepare-bench-stages",
         "Copy stage1 into stage2 and stage3 build directories for benchmark-oriented flows",
@@ -531,6 +562,31 @@ pub fn build(b: *Build) void {
             },
         ),
         &.{stage1_step},
+    );
+
+    _ = addNamedStep(
+        b,
+        "bench-stage2",
+        "Prepare benchmark staging directories and then build stage2",
+        createDriverCommand(
+            b,
+            .{
+                .command = .root_target,
+                .profile = profile,
+                .binary_dir = binary_dir,
+                .jobs = jobs,
+                .install_prefix = b.install_path,
+                .cmake_args = inherited_cmake_args,
+                .make_args = make_args,
+                .ctest_args = ctest_args,
+                .ctest_junit = ctest_junit,
+                .target = "stage2",
+                .stage = null,
+                .stage_target = null,
+                .git_commit_message = null,
+            },
+        ),
+        &.{prepare_bench_stages_step},
     );
 
     _ = addNamedStep(
@@ -621,16 +677,18 @@ fn normalizeCmakeArgs(b: *Build, raw_args: []const []const u8, install_prefix: [
 }
 
 fn resolveInheritedCmakeArgs(
-    b: *Build,
-    binary_dir: []const u8,
     raw_args: []const []const u8,
     configured_args: []const []const u8,
+    saved_metadata: ?SavedDriverMetadata,
 ) []const []const u8 {
     if (raw_args.len != 0) return configured_args;
-    return loadSavedCmakeArgs(b, binary_dir) orelse configured_args;
+    if (saved_metadata) |metadata| {
+        if (metadata.cmake_args.len != 0) return metadata.cmake_args;
+    }
+    return configured_args;
 }
 
-fn loadSavedCmakeArgs(b: *Build, binary_dir: []const u8) ?[]const []const u8 {
+fn loadSavedDriverMetadata(b: *Build, binary_dir: []const u8) ?SavedDriverMetadata {
     const metadata_path = b.pathFromRoot(b.pathJoin(&.{ binary_dir, ".zig-driver.json" }));
     const contents = std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
@@ -644,9 +702,8 @@ fn loadSavedCmakeArgs(b: *Build, binary_dir: []const u8) ?[]const []const u8 {
             @errorName(err),
         }),
     };
-    defer b.allocator.free(contents);
 
-    var parsed = json.parseFromSlice(SavedDriverMetadata, b.allocator, contents, .{
+    return json.parseFromSliceLeaky(SavedDriverMetadata, b.allocator, contents, .{
         .ignore_unknown_fields = true,
     }) catch |err| {
         std.debug.panic("failed to parse saved Zig driver metadata at {s}: {s}", .{
@@ -654,9 +711,21 @@ fn loadSavedCmakeArgs(b: *Build, binary_dir: []const u8) ?[]const []const u8 {
             @errorName(err),
         });
     };
-    defer parsed.deinit();
+}
 
-    return b.dupeStrings(parsed.value.cmake_args);
+fn resolveSavedProfile(saved_metadata: ?SavedDriverMetadata) ?BuildProfile {
+    if (saved_metadata) |metadata| return metadata.profile;
+    return null;
+}
+
+fn resolveJobs(requested_jobs: ?usize, saved_metadata: ?SavedDriverMetadata) usize {
+    if (requested_jobs) |jobs| {
+        return if (jobs == 0) defaultJobs() else jobs;
+    }
+    if (saved_metadata) |metadata| {
+        if (metadata.jobs) |jobs| return jobs;
+    }
+    return defaultJobs();
 }
 
 fn hasArgPrefix(args: []const []const u8, prefix: []const u8) bool {

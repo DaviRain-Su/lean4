@@ -25,6 +25,6 @@ for arg in "${prepare_args[@]}"; do
 done
 
 zig build configure "${zig_args[@]}"
-zig build prepare-bench-stages -Dprofile=release -Dbinary-dir=build/release -Djobs="$(nproc)"
-zig build bench-part2 -Dprofile=release -Dbinary-dir=build/release -Djobs="$(nproc)"
+zig build prepare-bench-stages -Dbinary-dir=build/release
+zig build bench-part2 -Dbinary-dir=build/release
 mv tests/part2.measurements.jsonl "$RADAR_OUT"

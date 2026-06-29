@@ -101,7 +101,7 @@ jobs:
         zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
     - if: env.should_update_stage0 == 'yes'
       run: |
-        zig build update-stage0-commit -Dprofile=release -Dbinary-dir=build -Djobs="$NPROC"
+        zig build update-stage0-commit -Dbinary-dir=build
     - if: env.should_update_stage0 == 'yes'
       run: git show --stat
     - if: env.should_update_stage0 == 'yes' && github.event_name == 'push'

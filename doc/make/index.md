@@ -75,6 +75,9 @@ CMake/Make/CTest layers.
   `<binary-dir>/.zig-driver.json`, and later `zig build stage1`, `zig build test`,
   or `zig build install` invocations against that same `-Dbinary-dir` will reuse
   those saved `cmake` arguments unless you override them again on the command line.
+  The same metadata also restores the configured profile and parallelism defaults,
+  so repeated stage/test/install invocations usually only need `-Dbinary-dir=...`
+  plus any step-specific flags.
 
 * `-Dmake-arg=`\
   Extra argv elements forwarded to the underlying `make` invocations. Repeat
@@ -103,11 +106,19 @@ well:
   directories. This is the benchmark-oriented staging flow used by CI and the
   radar helper scripts.
 
+* `zig build bench-stage2`\
+  Run the benchmark-oriented `stage1 -> copied stage2/stage3 -> build stage2`
+  preparation as one step. This is the CI helper used before the benchmark suite.
+
 * `zig build check-rebootstrap`\
   Mirror the CI rebootstrap check locally: refresh `stage0` from `stage1`,
   create the `chore: update-stage0` checkpoint commit, rebuild `stage1`, and
   rerun `stage1` tests. Because this command creates a commit, use it only when
   you are ready for that mutation.
+
+* `zig build test-junit -Dstage=stage2`\
+  Run `ctest` like `zig build test`, but write JUnit XML to the standard
+  `<binary-dir>/<stage>/test-results.xml` path expected by CI.
 
 Troubleshooting
 ---------------
