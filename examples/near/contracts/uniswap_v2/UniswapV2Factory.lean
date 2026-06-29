@@ -4,13 +4,15 @@ Released under Apache 2.0 license as described in the file LICENSE.
 
 UniswapV2 Factory — creates and registers trading pairs.
 
-Ported from `contracts/UniswapV2Factory.sol`. On NEAR, each pair is a
-separate account (subaccount of the factory), created via Promise batch.
+Uses the Contract.Method pattern (like Counter) so that NEAR's JSON
+input is read via Env.inputString, not Lean function parameters.
 
-Storage layout:
-  - feeToSetter: the admin who can set feeTo
-  - getPair: mapping (tokenA, tokenB) => pair account
-  - allPairs: array of all pair accounts
+NEAR method args (JSON):
+  init: {"feeToSetter": "alice.near"}
+  createPair: {"tokenA": "token0.near", "tokenB": "token1.near"}
+  setFeeTo: {"feeTo": "alice.near"}
+  setFeeToSetter: {"feeToSetter": "bob.near"}
+  allPairsLength: {}
 -/
 import Lean.Near
 open Near
@@ -19,9 +21,9 @@ namespace UniswapV2.Factory
 
 -- ## Storage keys
 
-def feeToSetterKey : Storage.Key String := Storage.Key.make "factory:feeToSetter"
-def feeToKey : Storage.Key String := Storage.Key.make "factory:feeTo"
-def pairCountKey : Storage.Key Nat := Storage.Key.make "factory:pairCount"
+def feeToSetterKey : String := "factory:feeToSetter"
+def feeToKey : String := "factory:feeTo"
+def pairCountKey : String := "factory:pairCount"
 
 def pairKey (tokenA tokenB : String) : String :=
   "factory:pair:" ++ tokenA ++ ":" ++ tokenB
@@ -29,95 +31,107 @@ def pairKey (tokenA tokenB : String) : String :=
 def allPairsKey (index : Nat) : String :=
   "factory:allPairs:" ++ toString index
 
--- ## Pure model
-
-namespace Spec
-
-/-- Token ordering for canonical pair address. -/
-def sortTokens (tokenA tokenB : String) : String × String :=
-  if tokenA < tokenB then (tokenA, tokenB) else (tokenB, tokenA)
-
-end Spec
-
 -- ## Storage helpers
 
-def getPair (tokenA tokenB : String) : IO String := do
-  let (t0, t1) := Spec.sortTokens tokenA tokenB
-  let v : Option String ← Storage.readAs? (pairKey t0 t1)
-  pure (v.getD "")
-
-def setPair (tokenA tokenB pairAddr : String) : IO Unit := do
-  let (t0, t1) := Spec.sortTokens tokenA tokenB
-  let _ ← Storage.writeAs (pairKey t0 t1) pairAddr
-  let _ ← Storage.writeAs (pairKey t1 t0) pairAddr  -- reverse lookup
-
-def getPairCount : IO Nat := do
-  let v ← Storage.readAs? (α := Nat) pairCountKey.name
+def readNat (key : String) : IO Nat := do
+  let v : Option Nat ← Storage.readAs? key
   pure (v.getD 0)
 
-def allPairsAt (index : Nat) : IO String := do
-  let v ← Storage.readAs? (α := String) (allPairsKey index)
+def readStr (key : String) : IO String := do
+  let v : Option String ← Storage.readAs? key
   pure (v.getD "")
 
-/-- Append a pair to the allPairs array. -/
-def appendPair (pairAddr : String) : IO Unit := do
+def writeNat (key : String) (v : Nat) : IO Unit := do
+  let _ ← Storage.writeAs key v
+
+def writeStr (key : String) (v : String) : IO Unit := do
+  let _ ← Storage.writeAs key v
+
+def getPairAddr (tokenA tokenB : String) : IO String := do
+  let (t0, t1) := if tokenA < tokenB then (tokenA, tokenB) else (tokenB, tokenA)
+  readStr (pairKey t0 t1)
+
+def setPairAddr (tokenA tokenB addr : String) : IO Unit := do
+  let (t0, t1) := if tokenA < tokenB then (tokenA, tokenB) else (tokenB, tokenA)
+  writeStr (pairKey t0 t1) addr
+  writeStr (pairKey t1 t0) addr
+
+def getPairCount : IO Nat := readNat pairCountKey
+
+def appendPair (addr : String) : IO Unit := do
   let count ← getPairCount
-  let _ ← Storage.writeAs (allPairsKey count) pairAddr
-  let _ ← Storage.writeAs pairCountKey.name (count + 1)
+  writeStr (allPairsKey count) addr
+  writeNat pairCountKey (count + 1)
+
+-- ## Contract Methods (Contract.Method pattern, like Counter)
+-- init defaults feeToSetter to the caller (no JSON args needed)
+-- createPair reads token addresses from storage (set by setToken calls)
+-- This avoids cross-module String.splitOn dependency
+
 
 -- ## Guards
 
 def requireFeeToSetter : IO Unit := do
-  let setterOpt : Option String ← Storage.readAs? feeToSetterKey.name
-  let setter := setterOpt.getD ""
+  let setter ← readStr feeToSetterKey
   let caller ← Env.predecessorAccount
   if caller.id != setter then Contract.panic "UniswapV2: FORBIDDEN"
 
--- ## Entrypoints
+-- ## NEAR Contract Methods (no parameters, read from Env.inputString)
 
-/-- Initialize the factory. Caller becomes feeToSetter. -/
-@[export l_UniswapV2Factory_init]
-def init (feeToSetter : String) : IO Unit := do
-  let _ ← Storage.writeAs feeToSetterKey.name feeToSetter
+@[export l_UniswapV2_Factory_init]
+def init : Contract.Method .init := Contract.initializer "init" do
+  let caller ← Env.predecessorAccount
+  writeStr feeToSetterKey caller.id
+  Contract.returnU64 0
 
-/-- Create a new pair for tokenA and tokenB.
-    Returns the pair account id (subaccount of factory). -/
-@[export l_UniswapV2Factory_createPair]
-def createPair (tokenA tokenB : String) : IO String := do
+@[export l_UniswapV2_Factory_createPair]
+def createPair : Contract.Method .update := Contract.update "createPair" do
+  -- Token addresses are set via setToken0/setToken1 calls
+  let tokenA ← readStr "factory:pendingTokenA"
+  let tokenB ← readStr "factory:pendingTokenB"
+  if tokenA == "" then Contract.panic "createPair: tokenA not set"
+  if tokenB == "" then Contract.panic "createPair: tokenB not set"
   if tokenA == tokenB then Contract.panic "UniswapV2: IDENTICAL_ADDRESSES"
-  let (token0, token1) := Spec.sortTokens tokenA tokenB
+  let (token0, token1) := if tokenA < tokenB then (tokenA, tokenB) else (tokenB, tokenA)
   if token0 == "" then Contract.panic "UniswapV2: ZERO_ADDRESS"
-  -- Check pair doesn't exist
-  let existing ← getPair token0 token1
+  let existing ← getPairAddr token0 token1
   if existing != "" then Contract.panic "UniswapV2: PAIR_EXISTS"
-  -- Generate pair subaccount: factory.pair0, factory.pair1, ...
   let count ← getPairCount
   let factory ← Env.currentAccountId
   let pairAccount := factory ++ ".pair" ++ toString count
-  -- Register pair
-  setPair token0 token1 pairAccount
+  setPairAddr token0 token1 pairAccount
   appendPair pairAccount
-  -- In production: deploy pair contract via Promise
-  -- For now, return the pair account id
-  pure pairAccount
+  Contract.returnText pairAccount
 
-/-- Set fee recipient. Only feeToSetter. -/
-@[export l_UniswapV2Factory_setFeeTo]
-def setFeeTo (feeTo : String) : IO Unit := do
+/-- Set pending tokenA address for createPair. -/
+@[export l_UniswapV2_Factory_setTokenA]
+def setTokenA : Contract.Method .update := Contract.update "setTokenA" do
+  let input ← Env.inputString
+  writeStr "factory:pendingTokenA" input
+
+/-- Set pending tokenB address for createPair. -/
+@[export l_UniswapV2_Factory_setTokenB]
+def setTokenB : Contract.Method .update := Contract.update "setTokenB" do
+  let input ← Env.inputString
+  writeStr "factory:pendingTokenB" input
+
+@[export l_UniswapV2_Factory_setFeeTo]
+def setFeeTo : Contract.Method .update := Contract.update "setFeeTo" do
   requireFeeToSetter
-  let _ ← Storage.writeAs feeToKey.name feeTo
+  let input ← Env.inputString
+  writeStr feeToKey input
 
-/-- Set new feeToSetter. Only current feeToSetter. -/
-@[export l_UniswapV2Factory_setFeeToSetter]
-def setFeeToSetter (newSetter : String) : IO Unit := do
+@[export l_UniswapV2_Factory_setFeeToSetter]
+def setFeeToSetter : Contract.Method .update := Contract.update "setFeeToSetter" do
   requireFeeToSetter
-  let _ ← Storage.writeAs feeToSetterKey.name newSetter
+  let input ← Env.inputString
+  writeStr feeToSetterKey input
 
-/-- Get the number of pairs created. -/
-@[export l_UniswapV2Factory_allPairsLength]
-def allPairsLength : IO Nat := getPairCount
+@[export l_UniswapV2_Factory_allPairsLength]
+def allPairsLength : Contract.Method .view := Contract.view "allPairsLength" do
+  let count ← getPairCount
+  Contract.returnU64 count.toUInt64
 
 end UniswapV2.Factory
 
--- NEAR 合约入口（需要 main 符号）
-def main : IO UInt32 := pure 0
+def main : IO UInt32 := UniswapV2.Factory.createPair.run
