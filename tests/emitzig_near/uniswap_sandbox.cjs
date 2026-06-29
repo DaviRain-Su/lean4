@@ -1,8 +1,17 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
 const { Worker } = require("near-workspaces");
 
 const factoryWasm = "/tmp/factory.wasm";
+
+function numberResult(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") return Number(value);
+  if (Buffer.isBuffer(value)) return Number(value.toString("utf8"));
+  return Number(value);
+}
 
 async function main() {
   if (!fs.existsSync(factoryWasm)) {
@@ -13,25 +22,26 @@ async function main() {
   console.log("=== Uniswap V2 Factory Sandbox Test ===\n");
 
   const worker = await Worker.init();
-  const root = worker.rootAccount;
-  const factory = await root.createSubaccount("factory");
-  
-  console.log("Deploying Factory contract...");
-  await factory.deploy(factoryWasm);
-  console.log("  ✔ Factory deployed");
+  try {
+    const root = worker.rootAccount;
+    const factory = await root.devDeploy(path.resolve(factoryWasm));
 
-  // Initialize factory
-  console.log("Initializing factory...");
-  await factory.callRaw("factory", "init", JSON.stringify({ feeToSetter: "alice.near" }));
-  console.log("  ✔ Factory initialized");
+    console.log("Deploying Factory contract...");
+    console.log("  ✔ Factory deployed:", factory.accountId);
 
-  // Create a pair
-  console.log("Creating pair (tokenA.near, tokenB.near)...");
-  const result = await factory.view("factory", "allPairsLength", "{}");
-  console.log("  allPairsLength:", result);
+    console.log("Initializing factory...");
+    await root.call(factory, "init", { feeToSetter: root.accountId });
+    console.log("  ✔ Factory initialized");
 
-  await worker.terminate();
-  console.log("\n✅ Sandbox test passed");
+    console.log("Checking allPairsLength...");
+    const result = await factory.view("allPairsLength", {});
+    assert.equal(numberResult(result), 0);
+    console.log("  ✔ allPairsLength:", numberResult(result));
+
+    console.log("\n✅ Sandbox test passed");
+  } finally {
+    await worker.tearDown();
+  }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch(e => { console.error(e && e.stack ? e.stack : e); process.exit(1); });
