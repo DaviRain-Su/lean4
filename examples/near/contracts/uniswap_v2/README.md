@@ -6,27 +6,50 @@ A Lean implementation of Uniswap V2 Core for NEAR, with formal verification.
 
 ```
 examples/near/contracts/uniswap_v2/
-├── Math.lean           — sqrt (Babylonian method), min, max
-├── UQ112x112.lean      — Q112.112 fixed-point arithmetic
-├── UniswapV2ERC20.lean — LP token (ERC-20 standard for liquidity tokens)
-├── UniswapV2Pair.lean  — AMM core (mint/burn/swap + K invariant)
-└── UniswapV2Factory.lean — pair creation and registry
+├── Math.lean              — sqrt (Babylonian method), min, max
+├── UQ112x112.lean         — Q112.112 fixed-point arithmetic (price oracle)
+├── FTInterface.lean       — NEAR FT standard cross-contract calls
+├── UniswapV2ERC20.lean    — LP token (ERC-20 for liquidity tokens)
+├── UniswapV2Pair.lean     — AMM core (mint/burn/swap + K invariant)
+├── UniswapV2Factory.lean  — pair creation and registry
+├── scripts/sandbox_test.sh — local sandbox test framework
+└── README.md
 ```
 
-## Solidity → NEAR mapping
+## NEAR FT Integration
 
-| Solidity concept | NEAR adaptation |
-|---|---|
-| `address token0/token1` | Account ID stored in contract storage |
-| `IERC20(token).transfer()` | Promise batch (async cross-contract call) |
-| `balanceOf(address(this))` | Internal balance tracking in storage |
-| `create2` for pair deployment | Subaccount creation (`factory.pair0`) |
-| `unchecked` arithmetic | Lean Nat (no overflow on NEAR) |
-| Reentrancy guard (`unlocked`) | Storage-backed lock flag |
+Unlike Solidity's synchronous `token.transfer()`, NEAR cross-contract calls
+are asynchronous. The Pair contract uses NEAR's `ft_on_transfer` callback
+pattern:
+
+### addLiquidity flow
+
+```
+User → ft_transfer_call(token0, pair, amount0, "addLiquidity")
+     → pair.ft_on_transfer(user, amount0, "addLiquidity")
+User → ft_transfer_call(token1, pair, amount1, "addLiquidity")
+     → pair.ft_on_transfer(user, amount1, "addLiquidity")
+     → pair mints LP tokens to user
+```
+
+### swap flow
+
+```
+User → ft_transfer_call(tokenIn, pair, amountIn, "swap:<outIdx>:<amountOut>")
+     → pair.ft_on_transfer(user, amountIn, "swap:...")
+     → pair validates K invariant
+     → pair sends tokenOut via Promise (ft_transfer)
+```
+
+### removeLiquidity flow
+
+```
+User → pair.burn(to)
+     → pair burns LP tokens
+     → pair sends token0 and token1 back via Promise
+```
 
 ## Formal verification
-
-The Pair contract includes formally proven invariants:
 
 ### K invariant (swap safety)
 
@@ -42,40 +65,30 @@ where `balanceNAdjusted = balanceN * 1000 - amountNIn * 3`.
 **Proven**: `k_non_decreasing` — if the adjusted K invariant holds, then
 the unadjusted product `balance0 * balance1 >= reserve0 * reserve1`.
 
-### Token conservation (ERC20)
+This is the single most important safety property of any AMM: it ensures
+no trader can extract more value than they put in (after fees).
 
-- `mint_preserves_balance`: minting preserves ordering
-- `burn_preserves_balance`: burning keeps balances non-negative
+## Solidity → NEAR mapping
 
-### Pair uniqueness (Factory)
+| Solidity concept | NEAR adaptation |
+|---|---|
+| `IERC20(token).transfer()` | `ft_transfer_call` → `ft_on_transfer` callback |
+| `msg.sender` | `predecessor_account_id` |
+| `block.timestamp` | NEAR block timestamp |
+| `create2` for pair deployment | Subaccount creation (`factory.pair0`) |
+| `uint112` overflow guard | Arbitrary precision `Nat` |
+| Reentrancy guard (`unlocked`) | Storage-backed lock flag |
+| Sync balance check | Internal balance tracking in storage |
 
-- `pair_uniqueness`: two distinct tokens always have a canonical order
-
-## Key differences from Solidity version
-
-1. **Async transfers**: NEAR cross-contract calls are async (Promise).
-   The Pair validates the K invariant synchronously using internal balance
-   tracking, then schedules token transfers via Promise.
-
-2. **No overflow concern**: NEAR uses arbitrary-precision integers, so
-   the Solidity `uint112` overflow checks are unnecessary.
-
-3. **Account-based pairs**: Each pair is a subaccount of the factory
-   rather than a CREATE2 address.
-
-## Usage
-
-Compile via `tools/zigc-near` (same as other NEAR contracts):
+## Sandbox testing
 
 ```bash
-# Build the pair contract
-tools/zigc-near examples/near/contracts/uniswap_v2/UniswapV2Pair.zig \
-  -o build/uniswap_pair.wasm
+# Start local NEAR sandbox
+examples/near/contracts/uniswap_v2/scripts/sandbox_test.sh
 ```
 
 ## Status
 
-This is a structural port demonstrating how Uniswap V2 maps to Lean + NEAR.
-The AMM math (mint/burn/swap) and K invariant are fully implemented and
-formally verified. Full integration with NEAR FT standard (cross-contract
-token transfers via Promise) is the next step.
+- **Complete**: AMM math (mint/burn/swap), K invariant, formal proofs,
+  FT interface, Factory, ERC20 LP token, reentrancy guard
+- **Next**: compile to WASM, full sandbox integration test, testnet deploy
