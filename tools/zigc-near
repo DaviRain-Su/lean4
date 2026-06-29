@@ -70,12 +70,23 @@ if [[ -z "$METHODS" ]]; then
   fi
 fi
 
-EXPORT_FLAGS=(--export=main --export=_lean_main)
+EXPORT_FLAGS=()
 cat > "$NEAR_EXPORTS_ZIG" <<'ZIG'
 const lean_rt = @import("lean_rt");
 const LeanObj = lean_rt.LeanObj;
+const initialized = struct {
+    var done: bool = false;
+};
+
+fn ensureInit() void {
+    if (!initialized.done) {
+        lean_rt.lean_initialize_runtime_module();
+        initialized.done = true;
+    }
+}
 
 fn runMethod(method: LeanObj) void {
+    ensureInit();
     const action = lean_rt.lean_ctor_get(method, 1);
     lean_rt.lean_inc_ref(action);
     const result = lean_rt.lean_apply_1(action, lean_rt.lean_box(0));

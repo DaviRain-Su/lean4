@@ -191,6 +191,16 @@ function forbiddenNearInstructions(wat) {
   }
   lines.splice(lastImportIndex + 1, 0, ...stubs);
 
+  // Remove _start export (NEAR view calls conflict with WASI _start entry point).
+  // _start triggers Lean main() which panics on view calls.
+  const exportLines = lines.filter((line) => /^\s*\(export "_start"/.test(line));
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\s*\(export "_start"/.test(lines[i])) {
+      lines.splice(i, 1);
+      break;
+    }
+  }
+
   const strippedWat = lines.join("\n");
   const forbidden = forbiddenNearInstructions(strippedWat);
   if (forbidden.length !== 0) {
