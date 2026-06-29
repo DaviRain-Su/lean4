@@ -4,7 +4,13 @@ set -euo pipefail
 # run from root build directory in clang64 shell (NOT mingw64) as in
 # ```
 # eval cmake ../.. $(../../script/prepare-llvm-mingw.sh ~/Downloads/lean-llvm-x86_64-w64-windows-gnu.tar.zst)
+# ../../script/prepare-llvm-mingw.sh --format=lines ~/Downloads/lean-llvm-x86_64-w64-windows-gnu.tar.zst
 # ```
+
+# shellcheck source=script/lib/prepare-llvm-output.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/prepare-llvm-output.sh"
+prepare_llvm_parse_cli "$@"
+set -- "${prepare_llvm_positional_args[@]}"
 
 # use full LLVM release for compiling C++ code, but subset for compiling C code and distribution
 
@@ -41,13 +47,20 @@ cp /clang64/lib/{crtbegin,crtend,crt2,dllcrt2}.o stage1/lib/
 # This distinction is relevant specifically for `libicu.a`/`icu.dll` because there we want updates to the time zone database to
 # be delivered to users via Windows Update without having to recompile Lean or Lean programs.
 cp /clang64/lib/lib{m,bcrypt,mingw32,moldname,mingwex,msvcrt,pthread,advapi32,shell32,user32,kernel32,ucrtbase,psapi,iphlpapi,userenv,ws2_32,dbghelp,ole32,icu,crypt32,gdi32}.* /clang64/lib/libgmp.a /clang64/lib/libuv.a /clang64/lib/libssl.a /clang64/lib/libcrypto.a llvm/lib/lib{c++,c++abi,unwind}.a stage1/lib/
-echo -n " -DLEAN_STANDALONE=ON"
-echo -n " -DCMAKE_C_COMPILER=$PWD/stage1/bin/clang.exe -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER=$PWD/llvm/bin/clang++.exe -DCMAKE_CXX_COMPILER_WORKS=1 -DLEAN_CXX_STDLIB='-lc++ -lc++abi'"
-echo -n " -DSTAGE0_CMAKE_C_COMPILER=clang -DSTAGE0_CMAKE_CXX_COMPILER=clang++"
-echo -n " -DLEAN_EXTRA_CXX_FLAGS='--sysroot $PWD/llvm -idirafter /clang64/include/'"
-echo -n " -DLEANC_INTERNAL_FLAGS='--sysroot ROOT -nostdinc -isystem ROOT/include/clang' -DLEANC_CC=ROOT/bin/clang.exe"
-echo -n " -DLEANC_INTERNAL_LINKER_FLAGS='--sysroot ROOT -L ROOT/lib -Wl,-Bstatic -lgmp $(pkg-config --static --libs libuv) -lssl -lcrypto -lunwind -Wl,-Bdynamic -lcrypt32 -lgdi32 -fuse-ld=lld'"
+prepare_llvm_emit_arg "-DLEAN_STANDALONE=ON"
+prepare_llvm_emit_arg "-DCMAKE_C_COMPILER=$PWD/stage1/bin/clang.exe"
+prepare_llvm_emit_arg "-DCMAKE_C_COMPILER_WORKS=1"
+prepare_llvm_emit_arg "-DCMAKE_CXX_COMPILER=$PWD/llvm/bin/clang++.exe"
+prepare_llvm_emit_arg "-DCMAKE_CXX_COMPILER_WORKS=1"
+prepare_llvm_emit_arg "-DLEAN_CXX_STDLIB=-lc++ -lc++abi"
+prepare_llvm_emit_arg "-DSTAGE0_CMAKE_C_COMPILER=clang"
+prepare_llvm_emit_arg "-DSTAGE0_CMAKE_CXX_COMPILER=clang++"
+prepare_llvm_emit_arg "-DLEAN_EXTRA_CXX_FLAGS=--sysroot $PWD/llvm -idirafter /clang64/include/"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_FLAGS=--sysroot ROOT -nostdinc -isystem ROOT/include/clang"
+prepare_llvm_emit_arg "-DLEANC_CC=ROOT/bin/clang.exe"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_LINKER_FLAGS=--sysroot ROOT -L ROOT/lib -Wl,-Bstatic -lgmp $(pkg-config --static --libs libuv) -lssl -lcrypto -lunwind -Wl,-Bdynamic -lcrypt32 -lgdi32 -fuse-ld=lld"
 # when not using the above flags, link GMP/libuv/OpenSSL dynamically/as usual. Always link ICU dynamically.
-echo -n " -DLEAN_EXTRA_LINKER_FLAGS='-lgmp $(pkg-config --libs libuv) -lssl -lcrypto -lcrypt32 -lgdi32 -lucrtbase'"
+prepare_llvm_emit_arg "-DLEAN_EXTRA_LINKER_FLAGS=-lgmp $(pkg-config --libs libuv) -lssl -lcrypto -lcrypt32 -lgdi32 -lucrtbase"
 # do not set `LEAN_CC` for tests
-echo -n " -DLEAN_TEST_VARS=''"
+prepare_llvm_emit_arg "-DLEAN_TEST_VARS="
+prepare_llvm_flush_args

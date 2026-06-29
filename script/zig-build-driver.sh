@@ -15,6 +15,20 @@ source "$CONFIG_PATH"
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+emit_prepare_llvm_args() {
+  [[ -n "$PREPARE_LLVM_SCRIPT" ]] || return 0
+
+  mkdir -p "$BINARY_DIR"
+  pushd "$BINARY_DIR" >/dev/null
+  local -a prepare_cmd=("$PREPARE_LLVM_SCRIPT")
+  if [[ ${#prepare_llvm_args[@]} -gt 0 ]]; then
+    prepare_cmd+=("${prepare_llvm_args[@]}")
+  fi
+  prepare_cmd+=(--format=lines)
+  "${prepare_cmd[@]}"
+  popd >/dev/null
+}
+
 run_make_root_target() {
   local -a args=(make -C "$BINARY_DIR" "-j$JOBS" "$TARGET")
   if [[ ${#make_args[@]} -gt 0 ]]; then
@@ -61,6 +75,11 @@ case "$COMMAND" in
   configure)
     mkdir -p "$BINARY_DIR"
     cmake_cmd=(cmake --preset "$PROFILE" -B "$BINARY_DIR")
+    if [[ -n "$PREPARE_LLVM_SCRIPT" ]]; then
+      while IFS= read -r arg; do
+        cmake_cmd+=("$arg")
+      done < <(emit_prepare_llvm_args)
+    fi
     if [[ ${#cmake_args[@]} -gt 0 ]]; then
       cmake_cmd+=("${cmake_args[@]}")
     fi

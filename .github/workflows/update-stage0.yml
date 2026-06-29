@@ -85,16 +85,13 @@ jobs:
         mkdir -p build
         cd build
         wget -q https://github.com/leanprover/lean-llvm/releases/download/22.1.4/lean-llvm-x86_64-linux-gnu.tar.zst
-        PREPARE="$(../script/prepare-llvm-linux.sh lean-llvm*)"
-        eval "PREPARE_ARGS=($PREPARE)"
         ZIG_CONFIGURE_ARGS=(
           -Dprofile=release
           -Dbinary-dir=build
           "-Djobs=$NPROC"
+          -Dprepare-llvm-script=../script/prepare-llvm-linux.sh
+          -Dprepare-llvm-arg=lean-llvm*
         )
-        for opt in "${PREPARE_ARGS[@]}"; do
-          ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
-        done
         ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DWFAIL=ON)
         ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DLEAN_EXTRA_CXX_FLAGS=-Werror)
         cd ..

@@ -52,6 +52,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: 11.0
       MATRIX_CMAKE_OPTIONS_JSON: ${{ toJson(matrix.CMAKE_OPTIONS) }}
       MATRIX_CTEST_OPTIONS_JSON: ${{ toJson(matrix.CTEST_OPTIONS) }}
+      MATRIX_PREPARE_LLVM_ARGS_JSON: ${{ toJson(matrix.prepare_llvm_args) }}
     steps:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
@@ -137,6 +138,10 @@ jobs:
           while IFS= read -r opt; do
             MATRIX_CMAKE_OPTIONS+=("$opt")
           done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CMAKE_OPTIONS_JSON"]) or [])]')
+          MATRIX_PREPARE_LLVM_ARGS=()
+          while IFS= read -r arg; do
+            MATRIX_PREPARE_LLVM_ARGS+=("$arg")
+          done < <(python3 -c 'import json, os; [print(arg) for arg in (json.loads(os.environ["MATRIX_PREPARE_LLVM_ARGS_JSON"]) or [])]')
           cd build
           # arguments passed to `cmake`
           OPTIONS=(-DWFAIL=ON)
@@ -150,10 +155,8 @@ jobs:
             export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
             OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
           fi
-          if [[ -n '${{ matrix.prepare-llvm }}' ]]; then
+          if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
             wget -q ${{ matrix.llvm-url }}
-            PREPARE="$(${{ matrix.prepare-llvm }})"
-            eval "OPTIONS+=($PREPARE)"
           fi
           if [[ -n '${{ matrix.release }}' && -n '${{ inputs.nightly }}' ]]; then
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.nightly }})
@@ -179,6 +182,12 @@ jobs:
               "-Djobs=$NPROC"
               "-Dcmake-arg=-DLEAN_INSTALL_PREFIX=$PWD/.."
             )
+            if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
+              ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-script=${{ matrix.prepare_llvm_script }}")
+              for arg in "${MATRIX_PREPARE_LLVM_ARGS[@]}"; do
+                ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-arg=$arg")
+              done
+            fi
             for opt in "${OPTIONS[@]}"; do
               ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
             done

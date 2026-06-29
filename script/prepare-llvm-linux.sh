@@ -4,7 +4,13 @@ set -euxo pipefail
 # run from root build directory (from inside nix-shell or otherwise defining GLIBC/ZLIB/GMP/OPENSSL) as in
 # ```
 # eval cmake ../.. $(../../script/prepare-llvm-linux.sh ~/Downloads/lean-llvm-x86_64-linux-gnu.tar.zst)
+# ../../script/prepare-llvm-linux.sh --format=lines ~/Downloads/lean-llvm-x86_64-linux-gnu.tar.zst
 # ```
+
+# shellcheck source=script/lib/prepare-llvm-output.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/prepare-llvm-output.sh"
+prepare_llvm_parse_cli "$@"
+set -- "${prepare_llvm_positional_args[@]}"
 
 # use full LLVM release for compiling C++ code, but subset for compiling C code and distribution
 
@@ -56,28 +62,33 @@ $CP $GLIBC/lib/libc_nonshared.a stage1/lib/glibc
 # libpthread_nonshared.a must be linked in order to be able to use `pthread_atfork(3)`. LibUV uses this function.
 $CP $GLIBC/lib/libpthread_nonshared.a stage1/lib/glibc
 for f in $GLIBC/lib/{ld,lib{c,dl,m,rt,pthread}}-*; do b=$(basename $f); cp $f stage1/lib/glibc/${b%-*}.so; done
-OPTIONS=()
 # We build cadical using the custom toolchain on Linux to avoid glibc versioning issues
-echo -n " -DLEAN_STANDALONE=ON -DCADICAL_USE_CUSTOM_CXX=ON"
-echo -n " -DCMAKE_CXX_COMPILER=$PWD/llvm-host/bin/clang++ -DLEAN_CXX_STDLIB='-Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic'"
+prepare_llvm_emit_arg "-DLEAN_STANDALONE=ON"
+prepare_llvm_emit_arg "-DCADICAL_USE_CUSTOM_CXX=ON"
+prepare_llvm_emit_arg "-DCMAKE_CXX_COMPILER=$PWD/llvm-host/bin/clang++"
+prepare_llvm_emit_arg "-DLEAN_CXX_STDLIB=-Wl,-Bstatic -lc++ -lc++abi -Wl,-Bdynamic"
 # these should also be used for cadical, so do not use `LEAN_EXTRA_CXX_FLAGS` here
-echo -n " -DCMAKE_CXX_FLAGS='--sysroot $PWD/llvm -idirafter $GLIBC_DEV/include ${EXTRA_FLAGS:-}'"
+prepare_llvm_emit_arg "-DCMAKE_CXX_FLAGS=--sysroot $PWD/llvm -idirafter $GLIBC_DEV/include ${EXTRA_FLAGS:-}"
 # the above does not include linker flags which will be added below based on context, so skip the
 # generic check by cmake
-echo -n " -DCMAKE_C_COMPILER_WORKS=1 -DCMAKE_CXX_COMPILER_WORKS=1"
+prepare_llvm_emit_arg "-DCMAKE_C_COMPILER_WORKS=1"
+prepare_llvm_emit_arg "-DCMAKE_CXX_COMPILER_WORKS=1"
 # use target compiler directly when not cross-compiling
 if [[ -L llvm-host ]]; then
-  echo -n " -DCMAKE_C_COMPILER=$PWD/stage1/bin/clang"
+  prepare_llvm_emit_arg "-DCMAKE_C_COMPILER=$PWD/stage1/bin/clang"
 else
-  echo -n " -DCMAKE_C_COMPILER=$PWD/llvm-host/bin/clang -DLEANC_OPTS='--sysroot $PWD/stage1 -resource-dir $PWD/stage1/lib/clang/15.0.1 ${EXTRA_FLAGS:-}'"
+  prepare_llvm_emit_arg "-DCMAKE_C_COMPILER=$PWD/llvm-host/bin/clang"
+  prepare_llvm_emit_arg "-DLEANC_OPTS=--sysroot $PWD/stage1 -resource-dir $PWD/stage1/lib/clang/15.0.1 ${EXTRA_FLAGS:-}"
 fi
 # use `-nostdinc` to make sure headers are not visible by default (in particular, not to `#include_next` in the clang headers),
 # but do not change sysroot so users can still link against system libs
-echo -n " -DLEANC_INTERNAL_FLAGS='--sysroot ROOT -nostdinc -isystem ROOT/include/clang' -DLEANC_CC=ROOT/bin/clang"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_FLAGS=--sysroot ROOT -nostdinc -isystem ROOT/include/clang"
+prepare_llvm_emit_arg "-DLEANC_CC=ROOT/bin/clang"
 # ld.so is usually included by the libc.so linker script but we discard those. Make sure it is linked to only after `libc.so` like in the original
 # linker script so that no libc symbols are bound to it instead.
-echo -n " -DLEANC_INTERNAL_LINKER_FLAGS='--sysroot ROOT -L ROOT/lib -L ROOT/lib/glibc -lc -lc_nonshared -Wl,--as-needed -l:ld.so -Wl,--no-as-needed -lpthread_nonshared -Wl,--as-needed -Wl,-Bstatic -lgmp -lunwind -luv -lssl -lcrypto -Wl,-Bdynamic -Wl,--no-as-needed -fuse-ld=lld'"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_LINKER_FLAGS=--sysroot ROOT -L ROOT/lib -L ROOT/lib/glibc -lc -lc_nonshared -Wl,--as-needed -l:ld.so -Wl,--no-as-needed -lpthread_nonshared -Wl,--as-needed -Wl,-Bstatic -lgmp -lunwind -luv -lssl -lcrypto -Wl,-Bdynamic -Wl,--no-as-needed -fuse-ld=lld"
 # when not using the above flags, link GMP/libuv/OpenSSL dynamically/as usual
-echo -n " -DLEAN_EXTRA_LINKER_FLAGS='-Wl,--as-needed -lgmp -luv -lssl -lcrypto -lpthread -ldl -lrt -Wl,--no-as-needed'"
+prepare_llvm_emit_arg "-DLEAN_EXTRA_LINKER_FLAGS=-Wl,--as-needed -lgmp -luv -lssl -lcrypto -lpthread -ldl -lrt -Wl,--no-as-needed"
 # do not set `LEAN_CC` for tests
-echo -n " -DLEAN_TEST_VARS=''"
+prepare_llvm_emit_arg "-DLEAN_TEST_VARS="
+prepare_llvm_flush_args

@@ -17,12 +17,10 @@ zig_args=(
     -Dprofile=release
     -Dbinary-dir=build/release
     "-Djobs=$(nproc)"
+    -Dprepare-llvm-script=./script/prepare-llvm-linux.sh
+    "-Dprepare-llvm-arg=$LLVM_TARBALL"
     -Dcmake-arg=-DWFAIL=OFF
 )
-eval "prepare_args=($(./script/prepare-llvm-linux.sh "$LLVM_TARBALL"))"
-for arg in "${prepare_args[@]}"; do
-    zig_args+=("-Dcmake-arg=$arg")
-done
 
 zig build configure "${zig_args[@]}"
 zig build prepare-bench-stages -Dbinary-dir=build/release

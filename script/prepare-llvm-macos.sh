@@ -4,7 +4,13 @@ set -uxo pipefail
 # run from root build directory as in
 # ```
 # eval cmake ../.. $(../../script/prepare-llvm-macos.sh)
+# ../../script/prepare-llvm-macos.sh --format=lines ~/Downloads/lean-llvm-aarch64-apple-darwin.tar.zst
 # ```
+
+# shellcheck source=script/lib/prepare-llvm-output.sh
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/prepare-llvm-output.sh"
+prepare_llvm_parse_cli "$@"
+set -- "${prepare_llvm_positional_args[@]}"
 
 # use full LLVM release for compiling C++ code, but subset for compiling C code and distribution
 
@@ -41,20 +47,23 @@ gcp llvm/lib/libc++.dylib stage1/lib/libc
 # make sure we search for the library in /usr/lib instead of the rpath, which should not contain `/usr/lib`
 # and apparently since Sonoma does not do so implicitly either
 install_name_tool -id /usr/lib/libc++.dylib stage1/lib/libc/libc++.dylib
-echo -n " -DLEAN_STANDALONE=ON"
+prepare_llvm_emit_arg "-DLEAN_STANDALONE=ON"
 # do not change C++ compiler; libc++ etc. being system libraries means there's no danger of conflicts,
 # and the custom clang++ outputs a myriad of warnings when consuming the SDK
-echo -n " -DLEAN_EXTRA_CXX_FLAGS='${EXTRA_FLAGS:-}'"
+prepare_llvm_emit_arg "-DLEAN_EXTRA_CXX_FLAGS=${EXTRA_FLAGS:-}"
 if [[ -L llvm-host ]]; then
-  echo -n " -DCMAKE_C_COMPILER=$PWD/stage1/bin/clang"
+  prepare_llvm_emit_arg "-DCMAKE_C_COMPILER=$PWD/stage1/bin/clang"
   gcp $GMP/lib/libgmp.a stage1/lib/
   gcp $LIBUV/lib/libuv.a stage1/lib/
   gcp $OPENSSL/lib/libssl.a $OPENSSL/lib/libcrypto.a stage1/lib/
-  echo -n " -DLEAN_EXTRA_LINKER_FLAGS='-lgmp -luv -lssl -lcrypto'"
+  prepare_llvm_emit_arg "-DLEAN_EXTRA_LINKER_FLAGS=-lgmp -luv -lssl -lcrypto"
 else
-  echo -n " -DCMAKE_C_COMPILER=$PWD/llvm-host/bin/clang -DLEANC_OPTS='--sysroot $PWD/stage1 -resource-dir $PWD/stage1/lib/clang/15.0.1 ${EXTRA_FLAGS:-}'"
+  prepare_llvm_emit_arg "-DCMAKE_C_COMPILER=$PWD/llvm-host/bin/clang"
+  prepare_llvm_emit_arg "-DLEANC_OPTS=--sysroot $PWD/stage1 -resource-dir $PWD/stage1/lib/clang/15.0.1 ${EXTRA_FLAGS:-}"
 fi
-echo -n " -DLEANC_INTERNAL_FLAGS='--sysroot ROOT -nostdinc -isystem ROOT/include/clang' -DLEANC_CC=ROOT/bin/clang"
-echo -n " -DLEANC_INTERNAL_LINKER_FLAGS='--sysroot ROOT -L ROOT/lib -L ROOT/lib/libc -fuse-ld=lld'"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_FLAGS=--sysroot ROOT -nostdinc -isystem ROOT/include/clang"
+prepare_llvm_emit_arg "-DLEANC_CC=ROOT/bin/clang"
+prepare_llvm_emit_arg "-DLEANC_INTERNAL_LINKER_FLAGS=--sysroot ROOT -L ROOT/lib -L ROOT/lib/libc -fuse-ld=lld"
 # do not set `LEAN_CC` for tests
-echo -n " -DLEAN_TEST_VARS=''"
+prepare_llvm_emit_arg "-DLEAN_TEST_VARS="
+prepare_llvm_flush_args
