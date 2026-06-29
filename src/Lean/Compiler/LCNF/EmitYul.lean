@@ -322,7 +322,7 @@ mutual
         let opcode : String := externName.drop "lean_evm_".length |>.toString
         -- EVM externs take/return raw U256; unbox args, box the result.
         let unboxedArgs := argExprs.map leanUnboxExpr
-        if opcode == "returnMem" || opcode == "revertMem" || opcode == "selfdestruct" then
+        if opcode == "return" || opcode == "revert" || opcode == "selfdestruct" then
           -- Terminating builtins: control never returns.
           emit <| sExprStmt (yBuiltin opcode unboxedArgs)
           emit <| sExprStmt (yBuiltin "revert" #[yNum 0, yNum 0])
