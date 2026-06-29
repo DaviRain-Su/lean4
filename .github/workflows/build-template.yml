@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Windows'
       - name: Install Brew Packages
         run: |
-          brew install ccache tree zstd coreutils gmp libuv openssl
+          brew install ccache tree zstd coreutils gmp libuv openssl zig
         if: runner.os == 'macOS'
       - name: Checkout
         uses: actions/checkout@v6
@@ -129,6 +129,9 @@ jobs:
         run: |
           ulimit -c unlimited  # coredumps
           [ -d build ] || mkdir build
+          BUILD_PROFILE="${{ matrix.CMAKE_PRESET || 'release' }}"
+          echo "LEAN_ZIG_PROFILE=$BUILD_PROFILE" >> "$GITHUB_ENV"
+          echo "LEAN_ZIG_BINARY_DIR=build" >> "$GITHUB_ENV"
           cd build
           # arguments passed to `cmake`
           OPTIONS=(-DWFAIL=ON)
@@ -159,12 +162,27 @@ jobs:
             OPTIONS+=(-DLEAN_VERSION_IS_RELEASE=1)
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.LEAN_SPECIAL_VERSION_DESC }})
           fi
-          # contortion to support empty OPTIONS with old macOS bash
-          cmake .. --preset ${{ matrix.CMAKE_PRESET || 'release' }} -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
+          ZIG_CMAKE_ARGS="${OPTIONS[*]} ${{ matrix.CMAKE_OPTIONS }} -DLEAN_INSTALL_PREFIX=$PWD/.."
+          {
+            echo "LEAN_ZIG_CMAKE_ARGS<<EOF"
+            printf '%s\n' "$ZIG_CMAKE_ARGS"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            # contortion to support empty OPTIONS with old macOS bash
+            cmake .. --preset "$BUILD_PROFILE" -B . ${{ matrix.CMAKE_OPTIONS }} ${OPTIONS[@]+"${OPTIONS[@]}"} -DLEAN_INSTALL_PREFIX=$PWD/..
+          else
+            cd ..
+            zig build configure -Dprofile="$BUILD_PROFILE" -Dbinary-dir=build -Djobs="$NPROC"
+          fi
       - name: Build Stage 0 & Configure Stage 1
         run: |
           ulimit -c unlimited  # coredumps
-          time make -C build stage1-configure -j$NPROC
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            time make -C build stage1-configure -j$NPROC
+          else
+            time zig build stage1-configure -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
       - name: Download Lake Cache
         if: matrix.name == 'Linux Lake (Cached)'
         run: |
@@ -175,7 +193,11 @@ jobs:
       - name: Build Target Stage
         run: |
           ulimit -c unlimited  # coredumps
-          time make -C build $TARGET_STAGE -j$NPROC
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            time make -C build $TARGET_STAGE -j$NPROC
+          else
+            time zig build "$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
       # Should be done as early as possible and in particular *before* "Check rebootstrap" which
       # changes the state of stage1/
       - name: Save Cache
@@ -228,7 +250,11 @@ jobs:
           mv build/stage1.bak build/stage1
       - name: Install
         run: |
-          make -C build/$TARGET_STAGE install
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            make -C build/$TARGET_STAGE install
+          else
+            zig build install -Dstage="$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
       - name: Check Binaries
         run: ${{ matrix.binary-check }} lean-*/bin/* || true
       - name: Count binary symbols
@@ -265,7 +291,13 @@ jobs:
         id: test
         run: |
           ulimit -c unlimited  # coredumps
-          time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/$TARGET_STAGE -j$NPROC --output-junit test-results.xml ${{ matrix.CTEST_OPTIONS }}
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/$TARGET_STAGE -j$NPROC --output-junit test-results.xml ${{ matrix.CTEST_OPTIONS }}
+          else
+            export LEAN_ZIG_CTEST_JUNIT="build/$TARGET_STAGE/test-results.xml"
+            export LEAN_ZIG_CTEST_ARGS="${{ matrix.CTEST_OPTIONS }}"
+            time zig build test -Dstage="$TARGET_STAGE" -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
         if: matrix.test
       - name: Test Summary
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
@@ -278,26 +310,47 @@ jobs:
         if: (!matrix.cross) && steps.test.conclusion != 'skipped'
       - name: Build Stage 2
         run: |
-          make -C build -j$NPROC stage2
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            make -C build -j$NPROC stage2
+          else
+            zig build stage2 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
         if: matrix.test-bench
       - name: Check Stage 3
         run: |
-          make -C build -j$NPROC check-stage3
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            make -C build -j$NPROC check-stage3
+          else
+            zig build check-stage3 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
         if: matrix.check-stage3
       - name: Test Benchmarks
         run: |
-          cd tests
-          nix develop -c make -C ../build -j$NPROC bench
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            make -C build -j$NPROC bench
+          else
+            zig build bench -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
         if: matrix.test-bench
       - name: Check rebootstrap
         run: |
           set -e
           git config user.email "stage0@lean-fro.org"
           git config user.name "update-stage0"
-          make -C build update-stage0
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            make -C build update-stage0
+          else
+            zig build update-stage0 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
           git commit --allow-empty -m "chore: update-stage0"
-          time make -C build -j$NPROC
-          time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/stage1 -j$NPROC
+          if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            time make -C build -j$NPROC
+            time ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir build/stage1 -j$NPROC
+          else
+            unset LEAN_ZIG_CTEST_ARGS
+            time zig build -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+            time zig build test -Dstage=stage1 -Dprofile="$LEAN_ZIG_PROFILE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR" -Djobs="$NPROC"
+          fi
         if: matrix.check-rebootstrap
       - name: CCache stats
         if: always()

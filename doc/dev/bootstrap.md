@@ -77,7 +77,7 @@ a comment). When `update-stage0` runs, it will overwrite `stage0/src/stdlib_flag
 with the contents of `src/stdlib_flags.h`, bringing them back in sync.
 
 NOTE: A full rebuild of stage 1 will only be triggered when the *committed* contents of `stage0/` are changed.
-Thus if you change files in it manually instead of through `update-stage0-commit` (see below) or fetching updates from git, you either need to commit those changes first or run `make -C build/release clean-stdlib`.
+Thus if you change files in it manually instead of through `update-stage0-commit` (see below) or fetching updates from git, you either need to commit those changes first or run `zig build clean-stdlib`.
 The same is true for further stages except that a rebuild of them is retriggered on any committed change, not just to a specific directory.
 Thus when debugging e.g. stage 2 failures, you can resume the build from these failures on but you may want to explicitly call `clean-stdlib` to either observe changes from `.olean` files of modules that built successfully or to check that you did not break modules that built successfully at some prior point.
 
@@ -90,9 +90,9 @@ gh workflow run update-stage0.yml
 ```
 
 Leaving stage0 updates to the CI automation is preferable, but should you need
-to do it locally, you can use `make -C build/release update-stage0-commit` to
-update `stage0` from `stage1` or `make -C build/release/stageN update-stage0-commit` to
-update from another stage. This command will automatically stage the updated files
+to do it locally, you can use `zig build update-stage0-commit` to
+update `stage0` from `stage1`, or `zig build update-stage0-commit -Dstage=stage2`
+to update from another stage. This command will automatically stage the updated files
 and introduce a commit, so make sure to commit your work before that.
 
 If you rebased the branch (either onto a newer version of `master`, or fixing

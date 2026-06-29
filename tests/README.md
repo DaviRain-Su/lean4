@@ -66,15 +66,15 @@ Benchmarks belonging to the old framework are not included in this description.
 Run all tests using
 
 ```sh
-CTEST_PARALLEL_LEVEL="$(nproc)" CTEST_OUTPUT_ON_FAILURE=1 \
-make -C build/release -j "$(nproc)" test
+CTEST_OUTPUT_ON_FAILURE=1 \
+zig build test -Djobs="$(nproc)"
 ```
 
 Or rerun only the failed tests using
 
 ```sh
-CTEST_PARALLEL_LEVEL="$(nproc)" CTEST_OUTPUT_ON_FAILURE=1 \
-make -C build/release -j "$(nproc)" test ARGS="--rerun-failed"
+CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="--rerun-failed" \
+zig build test -Djobs="$(nproc)"
 ```
 
 Run an individual test using one of these commands.
@@ -82,12 +82,12 @@ Note that regex arguments to `-R` need to be double-quoted
 if they contain any special shell characters like `|`.
 
 ```sh
-CTEST_PARALLEL_LEVEL="$(nproc)" CTEST_OUTPUT_ON_FAILURE=1 \
-make -C build/release -j "$(nproc)" test ARGS="-R '<regex>'"
+CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="-R '<regex>'" \
+zig build test -Djobs="$(nproc)"
 
-# For a specific stage
-CTEST_PARALLEL_LEVEL="$(nproc)" CTEST_OUTPUT_ON_FAILURE=1 \
-make -C build/release/stage1 -j "$(nproc)" test ARGS="-R '<regex>'"
+# For a non-default stage, for example stage2
+CTEST_OUTPUT_ON_FAILURE=1 LEAN_ZIG_CTEST_ARGS="-R '<regex>'" \
+zig build test -Dstage=stage2 -Djobs="$(nproc)"
 
 # Manually, without ctest
 tests/with_stage1_test_env.sh path/to/test/directory/run_test.sh
@@ -99,15 +99,15 @@ tests/with_stage1_test_env.sh path/to/test/pile/run_test.sh testfile
 Run the full benchmark suite using
 
 ```sh
-make -C build/release -j "$(nproc)" bench # produces tests/measurements.jsonl
+zig build bench -Djobs="$(nproc)" # produces tests/measurements.jsonl
 ```
 
 It is split into two roughly equal parts so it can be split among the benchmark runner machines.
 Run each individual part using
 
 ```sh
-make -C build/release -j "$(nproc)" bench-part1 # produces tests/part1.measurements.jsonl
-make -C build/release -j "$(nproc)" bench-part2 # produces tests/part2.measurements.jsonl
+zig build bench-part1 -Djobs="$(nproc)" # produces tests/part1.measurements.jsonl
+zig build bench-part2 -Djobs="$(nproc)" # produces tests/part2.measurements.jsonl
 ```
 
 Make sure not to specify `-j "$(nproc)"` when running the bench suite manually inside `build/release/stage<n>`.

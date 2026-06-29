@@ -13,17 +13,15 @@ if [ ! -f "$LLVM_TARBALL" ]; then
     curl --location -o "$LLVM_TARBALL" "https://github.com/leanprover/lean-llvm/releases/download/$LLVM_RELEASE/lean-llvm-x86_64-linux-gnu.tar.zst"
 fi
 
-mkdir -p build/release
-cd build/release
-eval cmake ../.. \
-    --preset release $(../../script/prepare-llvm-linux.sh $LLVM_TARBALL) \
-    -DWFAIL=OFF
-rm -rf stage2
-cp -r stage1 stage2
-rm -rf stage3
-cp -r stage1 stage3
-cd ../..
-make -C build/release -j"$(nproc)" bench-part1
+export LEAN_ZIG_CMAKE_ARGS
+LEAN_ZIG_CMAKE_ARGS="$(./script/prepare-llvm-linux.sh "$LLVM_TARBALL") -DWFAIL=OFF"
+
+zig build configure -Dprofile=release -Dbinary-dir=build/release -Djobs="$(nproc)"
+rm -rf build/release/stage2
+cp -r build/release/stage1 build/release/stage2
+rm -rf build/release/stage3
+cp -r build/release/stage1 build/release/stage3
+zig build bench-part1 -Dprofile=release -Dbinary-dir=build/release -Djobs="$(nproc)"
 mv tests/part1.measurements.jsonl "$RADAR_OUT"
 
 tests/bench/build/lakeprof_report_upload.py

@@ -4,6 +4,8 @@
 .lake
 lake-manifest.json
 /build
+/zig-out
+/.zig-cache
 /src/lakefile.toml
 /lakefile.toml
 GPATH

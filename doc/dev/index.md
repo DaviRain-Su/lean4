@@ -13,6 +13,10 @@ You should not edit the `stage0` directory except using the commands described i
 You can use any of the [supported editors](https://lean-lang.org/install/manual/) for editing the Lean source code.
 Please see below for specific instructions for VS Code.
 
+The documented build driver is `zig build`; it still delegates to the existing
+CMake/Make bootstrap pipeline underneath, but it is the primary command surface
+for local development and CI.
+
 ### Dev setup using elan
 
 You can use [`elan`](https://github.com/leanprover/elan) to easily
@@ -71,7 +75,7 @@ code .
 on the command line.
 
 You can use the `Refresh File Dependencies` command as in other projects to rebuild modules from inside VS Code but be aware that this does not trigger any non-Lake build targets.
-In particular, after updating `stage0/` (or fetching an update to it), you will want to invoke `make` directly to rebuild `stage0/bin/lean` as described in [building Lean](../make/index.md).
+In particular, after updating `stage0/` (or fetching an update to it), you will want to invoke `zig build` directly to rebuild `stage0/bin/lean` as described in [building Lean](../make/index.md).
 You should then run the `Restart Server` command to update all open files and the server watchdog process as well.
 
 ### `ccache`
