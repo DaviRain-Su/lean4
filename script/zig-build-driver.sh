@@ -48,14 +48,17 @@ run_build_target() {
 }
 
 run_install_stage() {
-  local -a args=(cmake --install "$BINARY_DIR/$STAGE")
+  local stage=${1:?missing install stage}
+  local -a args=(cmake --install "$BINARY_DIR/$stage")
   "${args[@]}"
 }
 
 run_ctest_stage() {
-  local -a args=(ctest --preset "$PROFILE" --test-dir "$BINARY_DIR/$STAGE" "-j$JOBS")
-  if [[ -n "$CTEST_JUNIT" ]]; then
-    args+=(--output-junit "$CTEST_JUNIT")
+  local stage=${1:?missing test stage}
+  local junit_path=${2-}
+  local -a args=(ctest --preset "$PROFILE" --test-dir "$BINARY_DIR/$stage" "-j$JOBS")
+  if [[ -n "$junit_path" ]]; then
+    args+=(--output-junit "$junit_path")
   fi
   if [[ ${#ctest_args[@]} -gt 0 ]]; then
     args+=("${ctest_args[@]}")
@@ -64,7 +67,8 @@ run_ctest_stage() {
 }
 
 run_prepare_bench_stages() {
-  local source_dir="$BINARY_DIR/$STAGE"
+  local source_stage=${1:?missing prepare-bench-stages source stage}
+  local source_dir="$BINARY_DIR/$source_stage"
   rm -rf "$BINARY_DIR/stage2"
   cp -r "$source_dir" "$BINARY_DIR/stage2"
   rm -rf "$BINARY_DIR/stage3"
@@ -72,13 +76,13 @@ run_prepare_bench_stages() {
 }
 
 run_check_rebootstrap() {
-  run_build_target "$STAGE" "$STAGE_TARGET"
-  git commit --allow-empty -m "$GIT_COMMIT_MESSAGE"
-  run_build_target "" "$TARGET"
-  run_ctest_stage
+  run_build_target "$ACTION_UPDATE_STAGE" "$ACTION_UPDATE_TARGET"
+  git commit --allow-empty -m "$ACTION_GIT_COMMIT_MESSAGE"
+  run_build_target "" "$ACTION_REBUILD_TARGET"
+  run_ctest_stage "$ACTION_TEST_STAGE" ""
 }
 
-case "$COMMAND" in
+case "$ACTION" in
   configure)
     mkdir -p "$BINARY_DIR"
     cmake_cmd=(cmake --preset "$PROFILE" -B "$BINARY_DIR")
@@ -94,22 +98,22 @@ case "$COMMAND" in
     cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
     ;;
   build-target)
-    run_build_target "$STAGE" "$TARGET"
+    run_build_target "$ACTION_STAGE" "$ACTION_TARGET"
     ;;
   install)
-    run_install_stage
+    run_install_stage "$ACTION_STAGE"
     ;;
   ctest)
-    run_ctest_stage
+    run_ctest_stage "$ACTION_STAGE" "$ACTION_CTEST_JUNIT"
     ;;
   prepare-bench-stages)
-    run_prepare_bench_stages
+    run_prepare_bench_stages "$ACTION_STAGE"
     ;;
   check-rebootstrap)
     run_check_rebootstrap
     ;;
   *)
-    echo "unknown command: $COMMAND" >&2
+    echo "unknown action: $ACTION" >&2
     exit 1
     ;;
 esac

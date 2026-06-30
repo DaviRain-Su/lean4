@@ -45,15 +45,41 @@ const StageName = enum {
     }
 };
 
-const DriverCommand = enum {
-    configure,
-    build_target,
-    install,
-    ctest,
-    prepare_bench_stages,
-    check_rebootstrap,
+const BuildTargetAction = struct {
+    stage: ?StageName,
+    target: []const u8,
+};
 
-    fn asString(self: DriverCommand) []const u8 {
+const InstallAction = struct {
+    stage: StageName,
+};
+
+const CTestAction = struct {
+    stage: StageName,
+    junit_path: ?[]const u8,
+};
+
+const PrepareBenchStagesAction = struct {
+    source_stage: StageName,
+};
+
+const RebootstrapAction = struct {
+    update_stage: StageName,
+    update_target: []const u8,
+    rebuild_target: []const u8,
+    test_stage: StageName,
+    git_commit_message: []const u8,
+};
+
+const DriverAction = union(enum) {
+    configure,
+    build_target: BuildTargetAction,
+    install: InstallAction,
+    ctest: CTestAction,
+    prepare_bench_stages: PrepareBenchStagesAction,
+    check_rebootstrap: RebootstrapAction,
+
+    fn asString(self: DriverAction) []const u8 {
         return switch (self) {
             .configure => "configure",
             .build_target => "build-target",
@@ -77,7 +103,7 @@ const CollectedArgs = struct {
 };
 
 const DriverConfig = struct {
-    command: DriverCommand,
+    action: DriverAction,
     profile: BuildProfile,
     binary_dir: []const u8,
     jobs: usize,
@@ -88,11 +114,6 @@ const DriverConfig = struct {
     cmake_args: []const []const u8,
     build_args: []const []const u8,
     ctest_args: []const []const u8,
-    ctest_junit: ?[]const u8,
-    target: ?[]const u8,
-    stage: ?StageName,
-    stage_target: ?[]const u8,
-    git_commit_message: ?[]const u8,
 };
 
 const DriverFiles = struct {
@@ -122,9 +143,9 @@ const DriverDefaults = struct {
     ctest_args: []const []const u8,
     ctest_junit: ?[]const u8,
 
-    fn config(self: DriverDefaults, command: DriverCommand) DriverConfig {
+    fn config(self: DriverDefaults, action: DriverAction) DriverConfig {
         return .{
-            .command = command,
+            .action = action,
             .profile = self.profile,
             .binary_dir = self.binary_dir,
             .jobs = self.jobs,
@@ -135,47 +156,39 @@ const DriverDefaults = struct {
             .cmake_args = self.cmake_args,
             .build_args = self.build_args,
             .ctest_args = self.ctest_args,
-            .ctest_junit = self.ctest_junit,
-            .target = null,
-            .stage = null,
-            .stage_target = null,
-            .git_commit_message = null,
         };
     }
 
     fn buildTargetConfig(self: DriverDefaults, stage: ?StageName, target: []const u8) DriverConfig {
-        var cfg = self.config(.build_target);
-        cfg.stage = stage;
-        cfg.target = target;
-        return cfg;
+        return self.config(.{ .build_target = .{
+            .stage = stage,
+            .target = target,
+        } });
     }
 
     fn ctestConfig(self: DriverDefaults, stage: StageName, junit_path: ?[]const u8) DriverConfig {
-        var cfg = self.config(.ctest);
-        cfg.stage = stage;
-        cfg.ctest_junit = junit_path;
-        return cfg;
+        return self.config(.{ .ctest = .{
+            .stage = stage,
+            .junit_path = junit_path,
+        } });
     }
 
     fn installConfig(self: DriverDefaults, stage: StageName) DriverConfig {
-        var cfg = self.config(.install);
-        cfg.stage = stage;
-        return cfg;
+        return self.config(.{ .install = .{ .stage = stage } });
     }
 
     fn prepareBenchStagesConfig(self: DriverDefaults) DriverConfig {
-        var cfg = self.config(.prepare_bench_stages);
-        cfg.stage = .stage1;
-        return cfg;
+        return self.config(.{ .prepare_bench_stages = .{ .source_stage = .stage1 } });
     }
 
     fn checkRebootstrapConfig(self: DriverDefaults) DriverConfig {
-        var cfg = self.config(.check_rebootstrap);
-        cfg.target = "stage1";
-        cfg.stage = .stage1;
-        cfg.stage_target = "update-stage0";
-        cfg.git_commit_message = "chore: update-stage0";
-        return cfg;
+        return self.config(.{ .check_rebootstrap = .{
+            .update_stage = .stage1,
+            .update_target = "update-stage0",
+            .rebuild_target = "stage1",
+            .test_stage = .stage1,
+            .git_commit_message = "chore: update-stage0",
+        } });
     }
 };
 
@@ -312,7 +325,11 @@ pub fn build(b: *Build) void {
         .stage3 = stage3_step,
     };
     const selected_stage_step = stageStep(selected_stage, stages);
-    const default_stage_junit_path = b.fmt("{s}/{s}/test-results.xml", .{ runtime_defaults.binary_dir, selected_stage.asString() });
+    const default_stage_junit_path = b.pathFromRoot(b.pathJoin(&.{
+        runtime_defaults.binary_dir,
+        selected_stage.asString(),
+        "test-results.xml",
+    }));
 
     _ = addCTestStep(
         b,
@@ -458,14 +475,14 @@ fn createDriverFiles(b: *Build, config: DriverConfig) DriverFiles {
 }
 
 fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
-    return switch (config.command) {
+    return switch (config.action) {
         .configure => "driver-configure",
-        .ctest => b.fmt("driver-ctest-{s}", .{config.stage.?.asString()}),
-        .install => b.fmt("driver-install-{s}", .{config.stage.?.asString()}),
-        .build_target => if (config.stage) |stage|
-            b.fmt("driver-stage-{s}-{s}", .{ stage.asString(), config.target.? })
+        .ctest => |action| b.fmt("driver-ctest-{s}", .{action.stage.asString()}),
+        .install => |action| b.fmt("driver-install-{s}", .{action.stage.asString()}),
+        .build_target => |action| if (action.stage) |stage|
+            b.fmt("driver-stage-{s}-{s}", .{ stage.asString(), action.target })
         else
-            b.fmt("driver-root-{s}", .{config.target.?}),
+            b.fmt("driver-root-{s}", .{action.target}),
         .prepare_bench_stages => "driver-prepare-bench-stages",
         .check_rebootstrap => "driver-check-rebootstrap",
     };
@@ -668,18 +685,21 @@ fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
     var out: std.Io.Writer.Allocating = .init(b.allocator);
     const w = &out.writer;
 
-    writeShellAssignment(w, "COMMAND", config.command.asString());
+    writeShellAssignment(w, "ACTION", config.action.asString());
     writeShellAssignment(w, "PROFILE", config.profile.presetName());
     writeShellAssignment(w, "BINARY_DIR", config.binary_dir);
     writeShellAssignment(w, "JOBS", b.fmt("{}", .{config.jobs}));
     writeShellAssignment(w, "INSTALL_PREFIX", config.install_prefix);
     writeOptionalShellAssignment(w, "PLATFORM_TARGET", config.platform_target);
     writeOptionalShellAssignment(w, "PREPARE_LLVM_SCRIPT", config.prepare_llvm_script);
-    writeOptionalShellAssignment(w, "TARGET", config.target);
-    writeOptionalShellAssignment(w, "STAGE", if (config.stage) |stage| stage.asString() else null);
-    writeOptionalShellAssignment(w, "STAGE_TARGET", config.stage_target);
-    writeOptionalShellAssignment(w, "CTEST_JUNIT", config.ctest_junit);
-    writeOptionalShellAssignment(w, "GIT_COMMIT_MESSAGE", config.git_commit_message);
+    writeOptionalShellAssignment(w, "ACTION_STAGE", actionStage(config.action));
+    writeOptionalShellAssignment(w, "ACTION_TARGET", actionTarget(config.action));
+    writeOptionalShellAssignment(w, "ACTION_CTEST_JUNIT", actionCtestJunit(config.action));
+    writeOptionalShellAssignment(w, "ACTION_UPDATE_STAGE", actionUpdateStage(config.action));
+    writeOptionalShellAssignment(w, "ACTION_UPDATE_TARGET", actionUpdateTarget(config.action));
+    writeOptionalShellAssignment(w, "ACTION_REBUILD_TARGET", actionRebuildTarget(config.action));
+    writeOptionalShellAssignment(w, "ACTION_TEST_STAGE", actionTestStage(config.action));
+    writeOptionalShellAssignment(w, "ACTION_GIT_COMMIT_MESSAGE", actionGitCommitMessage(config.action));
     writeShellArray(w, "prepare_llvm_args", config.prepare_llvm_args);
     writeShellArray(w, "cmake_args", config.cmake_args);
     writeShellArray(w, "build_args", config.build_args);
@@ -722,6 +742,65 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
         w.writeAll(value[start..]) catch @panic("OOM");
     }
     w.writeByte('\'') catch @panic("OOM");
+}
+
+fn actionStage(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .build_target => |build_target| if (build_target.stage) |stage| stage.asString() else null,
+        .install => |install| install.stage.asString(),
+        .ctest => |ctest| ctest.stage.asString(),
+        .prepare_bench_stages => |prepare| prepare.source_stage.asString(),
+        else => null,
+    };
+}
+
+fn actionTarget(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .build_target => |build_target| build_target.target,
+        else => null,
+    };
+}
+
+fn actionCtestJunit(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .ctest => |ctest| ctest.junit_path,
+        else => null,
+    };
+}
+
+fn actionUpdateStage(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .check_rebootstrap => |rebootstrap| rebootstrap.update_stage.asString(),
+        else => null,
+    };
+}
+
+fn actionUpdateTarget(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .check_rebootstrap => |rebootstrap| rebootstrap.update_target,
+        else => null,
+    };
+}
+
+fn actionRebuildTarget(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .check_rebootstrap => |rebootstrap| rebootstrap.rebuild_target,
+        else => null,
+    };
+}
+
+fn actionTestStage(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .check_rebootstrap => |rebootstrap| rebootstrap.test_stage.asString(),
+        else => null,
+    };
+}
+
+fn actionGitCommitMessage(action: DriverAction) ?[]const u8 {
+    return switch (action) {
+        .check_rebootstrap => |rebootstrap| rebootstrap.git_commit_message,
+        else => null,
+    };
 }
 
 fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
