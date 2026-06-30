@@ -25,7 +25,11 @@ emit_prepare_llvm_args() {
     prepare_cmd+=("${prepare_llvm_args[@]}")
   fi
   prepare_cmd+=(--format=lines)
-  "${prepare_cmd[@]}"
+  if [[ -n "$PLATFORM_TARGET" ]]; then
+    EXTRA_FLAGS="--target=$PLATFORM_TARGET" "${prepare_cmd[@]}"
+  else
+    "${prepare_cmd[@]}"
+  fi
   popd >/dev/null
 }
 

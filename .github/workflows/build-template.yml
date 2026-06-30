@@ -134,14 +134,6 @@ jobs:
           [ -d build ] || mkdir build
           BUILD_PROFILE="${{ matrix.CMAKE_PRESET || 'release' }}"
           echo "LEAN_ZIG_BINARY_DIR=build" >> "$GITHUB_ENV"
-          MATRIX_CMAKE_OPTIONS=()
-          while IFS= read -r opt; do
-            MATRIX_CMAKE_OPTIONS+=("$opt")
-          done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CMAKE_OPTIONS_JSON"]) or [])]')
-          MATRIX_PREPARE_LLVM_ARGS=()
-          while IFS= read -r arg; do
-            MATRIX_PREPARE_LLVM_ARGS+=("$arg")
-          done < <(python3 -c 'import json, os; [print(arg) for arg in (json.loads(os.environ["MATRIX_PREPARE_LLVM_ARGS_JSON"]) or [])]')
           cd build
           # arguments passed to `cmake`
           OPTIONS=(-DWFAIL=ON)
@@ -149,11 +141,6 @@ jobs:
             # this also enables githash embedding into stage 1 library, which prohibits reusing
             # `.olean`s across commits, so we don't do it in the fast non-release CI
             OPTIONS+=(-DCHECK_OLEAN_VERSION=ON)
-          fi
-          if [[ -n '${{ matrix.cross_target }}' ]]; then
-            # used by `prepare-llvm`
-            export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
-            OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
           fi
           if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
             wget -q ${{ matrix.llvm-url }}
@@ -169,6 +156,14 @@ jobs:
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.LEAN_SPECIAL_VERSION_DESC }})
           fi
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            MATRIX_CMAKE_OPTIONS=()
+            while IFS= read -r opt; do
+              MATRIX_CMAKE_OPTIONS+=("$opt")
+            done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CMAKE_OPTIONS_JSON"]) or [])]')
+            if [[ -n '${{ matrix.cross_target }}' ]]; then
+              export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
+              OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
+            fi
             cmake_cmd=(cmake .. --preset "$BUILD_PROFILE" -B .)
             if [[ ${#MATRIX_CMAKE_OPTIONS[@]} -gt 0 ]]; then
               cmake_cmd+=("${MATRIX_CMAKE_OPTIONS[@]}")
@@ -181,19 +176,18 @@ jobs:
               "-Dbinary-dir=build"
               "-Djobs=$NPROC"
               "-Dcmake-arg=-DLEAN_INSTALL_PREFIX=$PWD/.."
+              "-Dcmake-args-json=$MATRIX_CMAKE_OPTIONS_JSON"
+              "-Dprepare-llvm-args-json=$MATRIX_PREPARE_LLVM_ARGS_JSON"
             )
             if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
               ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-script=${{ matrix.prepare_llvm_script }}")
-              for arg in "${MATRIX_PREPARE_LLVM_ARGS[@]}"; do
-                ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-arg=$arg")
-              done
+            fi
+            if [[ -n '${{ matrix.cross_target }}' ]]; then
+              ZIG_CONFIGURE_ARGS+=("-Dplatform-target=${{ matrix.cross_target }}")
             fi
             for opt in "${OPTIONS[@]}"; do
               ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
             done
-            for opt in "${MATRIX_CMAKE_OPTIONS[@]}"; do
-              ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
-            fi
             cd ..
             zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
           fi
@@ -313,11 +307,11 @@ jobs:
         id: test
         run: |
           ulimit -c unlimited  # coredumps
-          MATRIX_CTEST_OPTIONS=()
-          while IFS= read -r opt; do
-            MATRIX_CTEST_OPTIONS+=("$opt")
-          done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CTEST_OPTIONS_JSON"]) or [])]')
           if [[ '${{ runner.os }}' == 'Windows' ]]; then
+            MATRIX_CTEST_OPTIONS=()
+            while IFS= read -r opt; do
+              MATRIX_CTEST_OPTIONS+=("$opt")
+            done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CTEST_OPTIONS_JSON"]) or [])]')
             ctest_cmd=(ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir "build/$TARGET_STAGE" "-j$NPROC" --output-junit test-results.xml)
             if [[ ${#MATRIX_CTEST_OPTIONS[@]} -gt 0 ]]; then
               ctest_cmd+=("${MATRIX_CTEST_OPTIONS[@]}")
@@ -327,10 +321,8 @@ jobs:
             ZIG_TEST_ARGS=(
               "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
               "-Dstage=$TARGET_STAGE"
+              "-Dctest-args-json=$MATRIX_CTEST_OPTIONS_JSON"
             )
-            for opt in "${MATRIX_CTEST_OPTIONS[@]}"; do
-              ZIG_TEST_ARGS+=("-Dctest-arg=$opt")
-            fi
             time zig build test-junit "${ZIG_TEST_ARGS[@]}"
           fi
         if: matrix.test

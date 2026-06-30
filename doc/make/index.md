@@ -71,10 +71,14 @@ CMake/Make/CTest layers.
   this option once per argument, for example
   `-Dcmake-arg=-DUSE_LAKE_CACHE=ON` or
   `-Dcmake-arg=-DCMAKE_CXX_COMPILER=clang++`.
+  For CI- or script-generated argument lists, you can instead pass a JSON array
+  via `-Dcmake-args-json='["-DUSE_LAKE_CACHE=ON","-DCMAKE_CXX_COMPILER=clang++"]'`.
   The driver saves the most recent configure-time argv in
   `<binary-dir>/.zig-driver.json`, and later `zig build stage1`, `zig build test`,
   or `zig build install` invocations against that same `-Dbinary-dir` will reuse
   those saved `cmake` arguments unless you override them again on the command line.
+  Passing `-Dcmake-args-json=[]` counts as an explicit override and clears any
+  previously saved extra `cmake` arguments for that `-Dbinary-dir`.
   The same metadata also restores the configured profile and parallelism defaults,
   so repeated stage/test/install invocations usually only need `-Dbinary-dir=...`
   plus any step-specific flags.
@@ -82,15 +86,31 @@ CMake/Make/CTest layers.
 * `-Dmake-arg=`\
   Extra argv elements forwarded to the underlying `make` invocations. Repeat
   this option once per argument, for example `-Dmake-arg=VERBOSE=1`.
+  CI-style JSON arrays are also accepted via
+  `-Dmake-args-json='["VERBOSE=1"]'`.
 
 * `-Dctest-arg=`\
   Extra argv elements forwarded to `ctest` when running `zig build test`.
   Repeat this option once per argument, for example
   `-Dctest-arg=--rerun-failed` or
   `-Dctest-arg=-R "-Dctest-arg=<regex>"`.
+  CI-style JSON arrays are also accepted via
+  `-Dctest-args-json='["-R","<regex>"]'`.
 
 * `-Dctest-junit=`\
   Path forwarded to `ctest --output-junit` when running `zig build test`.
+
+* `-Dprepare-llvm-arg=`\
+  Extra positional argv passed to the `prepare-llvm` helper. Repeat this once
+  per argument, or pass a JSON array via
+  `-Dprepare-llvm-args-json='["lean-llvm*"]'`.
+  Passing `-Dprepare-llvm-args-json=[]` explicitly clears any saved helper argv
+  for that `-Dbinary-dir`.
+
+* `-Dplatform-target=`\
+  Target triple forwarded both to CMake as `-DLEAN_PLATFORM_TARGET=...` and to
+  `prepare-llvm` helpers via `EXTRA_FLAGS=--target=...`. This is the preferred
+  Zig-driver entrypoint for cross-target configure flows.
 
 Lean will automatically use [CCache](https://ccache.dev/) if available to avoid
 redundant builds, especially after stage 0 has been updated.

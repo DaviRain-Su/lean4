@@ -71,12 +71,18 @@ const StageSteps = struct {
     stage3: *Step,
 };
 
+const CollectedArgs = struct {
+    values: []const []const u8,
+    specified: bool,
+};
+
 const DriverConfig = struct {
     command: DriverCommand,
     profile: BuildProfile,
     binary_dir: []const u8,
     jobs: usize,
     install_prefix: []const u8,
+    platform_target: ?[]const u8,
     prepare_llvm_script: ?[]const u8,
     prepare_llvm_args: []const []const u8,
     cmake_args: []const []const u8,
@@ -97,6 +103,7 @@ const DriverFiles = struct {
 const SavedDriverMetadata = struct {
     profile: ?BuildProfile = null,
     jobs: ?usize = null,
+    platform_target: ?[]const u8 = null,
     prepare_llvm_script: ?[]const u8 = null,
     prepare_llvm_args: []const []const u8 = &.{},
     cmake_args: []const []const u8 = &.{},
@@ -107,6 +114,7 @@ const DriverDefaults = struct {
     binary_dir: []const u8,
     jobs: usize,
     install_prefix: []const u8,
+    platform_target: ?[]const u8,
     prepare_llvm_script: ?[]const u8,
     prepare_llvm_args: []const []const u8,
     cmake_args: []const []const u8,
@@ -121,6 +129,7 @@ const DriverDefaults = struct {
             .binary_dir = self.binary_dir,
             .jobs = self.jobs,
             .install_prefix = self.install_prefix,
+            .platform_target = self.platform_target,
             .prepare_llvm_script = self.prepare_llvm_script,
             .prepare_llvm_args = self.prepare_llvm_args,
             .cmake_args = self.cmake_args,
@@ -180,26 +189,53 @@ pub fn build(b: *Build) void {
     const jobs = resolveJobs(requested_jobs, saved_metadata);
     const selected_stage = b.option(StageName, "stage", "Stage to use for stage-local commands such as test, install, and update-stage0. Default: stage1.") orelse .stage1;
     const ctest_junit = b.option([]const u8, "ctest-junit", "Path passed to ctest --output-junit.");
+    const requested_platform_target = b.option([]const u8, "platform-target", "Target triple forwarded to prepare-llvm via EXTRA_FLAGS and to CMake as -DLEAN_PLATFORM_TARGET.");
     const requested_prepare_llvm_script = b.option([]const u8, "prepare-llvm-script", "Optional helper invoked from the build directory during configure to append platform-specific CMake flags.");
-    const raw_prepare_llvm_args = b.option([]const []const u8, "prepare-llvm-arg", "Extra positional argv passed to the prepare-llvm helper. Repeat once per argument.") orelse &.{};
-    const raw_cmake_args = b.option([]const []const u8, "cmake-arg", "Extra argv element passed to cmake --preset. Repeat once per argument.") orelse &.{};
-    const make_args = b.option([]const []const u8, "make-arg", "Extra argv element passed to make. Repeat once per argument.") orelse &.{};
-    const ctest_args = b.option([]const []const u8, "ctest-arg", "Extra argv element passed to ctest. Repeat once per argument.") orelse &.{};
+    const prepare_llvm_args_request = collectArgs(
+        b,
+        "prepare-llvm-arg",
+        "Extra positional argv passed to the prepare-llvm helper. Repeat once per argument.",
+        "prepare-llvm-args-json",
+        "JSON array of extra positional argv passed to the prepare-llvm helper.",
+    );
+    const cmake_args_request = collectArgs(
+        b,
+        "cmake-arg",
+        "Extra argv element passed to cmake --preset. Repeat once per argument.",
+        "cmake-args-json",
+        "JSON array of extra argv elements passed to cmake --preset.",
+    );
+    const make_args_request = collectArgs(
+        b,
+        "make-arg",
+        "Extra argv element passed to make. Repeat once per argument.",
+        "make-args-json",
+        "JSON array of extra argv elements passed to make.",
+    );
+    const ctest_args_request = collectArgs(
+        b,
+        "ctest-arg",
+        "Extra argv element passed to ctest. Repeat once per argument.",
+        "ctest-args-json",
+        "JSON array of extra argv elements passed to ctest.",
+    );
 
+    const platform_target = resolvePlatformTarget(requested_platform_target, saved_metadata);
     const prepare_llvm_script = resolvePrepareLlvmScript(requested_prepare_llvm_script, saved_metadata);
-    const prepare_llvm_args = resolvePrepareLlvmArgs(requested_prepare_llvm_script, raw_prepare_llvm_args, saved_metadata);
-    const configure_cmake_args = normalizeCmakeArgs(b, raw_cmake_args, b.install_path);
-    const inherited_cmake_args = resolveInheritedCmakeArgs(raw_cmake_args, configure_cmake_args, saved_metadata);
+    const prepare_llvm_args = resolvePrepareLlvmArgs(requested_prepare_llvm_script, prepare_llvm_args_request, saved_metadata);
+    const configure_cmake_args = normalizeCmakeArgs(b, cmake_args_request.values, b.install_path, platform_target);
+    const inherited_cmake_args = resolveInheritedCmakeArgs(cmake_args_request, configure_cmake_args, saved_metadata);
     const configure_defaults: DriverDefaults = .{
         .profile = profile,
         .binary_dir = binary_dir,
         .jobs = jobs,
         .install_prefix = b.install_path,
+        .platform_target = platform_target,
         .prepare_llvm_script = prepare_llvm_script,
         .prepare_llvm_args = prepare_llvm_args,
         .cmake_args = configure_cmake_args,
-        .make_args = make_args,
-        .ctest_args = ctest_args,
+        .make_args = make_args_request.values,
+        .ctest_args = ctest_args_request.values,
         .ctest_junit = ctest_junit,
     };
     const runtime_defaults: DriverDefaults = .{
@@ -207,11 +243,12 @@ pub fn build(b: *Build) void {
         .binary_dir = binary_dir,
         .jobs = jobs,
         .install_prefix = b.install_path,
+        .platform_target = platform_target,
         .prepare_llvm_script = prepare_llvm_script,
         .prepare_llvm_args = prepare_llvm_args,
         .cmake_args = inherited_cmake_args,
-        .make_args = make_args,
-        .ctest_args = ctest_args,
+        .make_args = make_args_request.values,
+        .ctest_args = ctest_args_request.values,
         .ctest_junit = ctest_junit,
     };
 
@@ -433,24 +470,37 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
     };
 }
 
-fn normalizeCmakeArgs(b: *Build, raw_args: []const []const u8, install_prefix: []const u8) []const []const u8 {
-    if (hasArgPrefix(raw_args, "-DLEAN_INSTALL_PREFIX=")) {
+fn normalizeCmakeArgs(
+    b: *Build,
+    raw_args: []const []const u8,
+    install_prefix: []const u8,
+    platform_target: ?[]const u8,
+) []const []const u8 {
+    const needs_install_prefix = !hasArgPrefix(raw_args, "-DLEAN_INSTALL_PREFIX=");
+    const needs_platform_target = platform_target != null and !hasArgPrefix(raw_args, "-DLEAN_PLATFORM_TARGET=");
+
+    if (!needs_install_prefix and !needs_platform_target) {
         return raw_args;
     }
 
     var args = std.array_list.Managed([]const u8).init(b.allocator);
     defer args.deinit();
     args.appendSlice(raw_args) catch @panic("OOM");
-    args.append(b.fmt("-DLEAN_INSTALL_PREFIX={s}", .{install_prefix})) catch @panic("OOM");
+    if (needs_install_prefix) {
+        args.append(b.fmt("-DLEAN_INSTALL_PREFIX={s}", .{install_prefix})) catch @panic("OOM");
+    }
+    if (needs_platform_target) {
+        args.append(b.fmt("-DLEAN_PLATFORM_TARGET={s}", .{platform_target.?})) catch @panic("OOM");
+    }
     return args.toOwnedSlice() catch @panic("OOM");
 }
 
 fn resolveInheritedCmakeArgs(
-    raw_args: []const []const u8,
+    requested_args: CollectedArgs,
     configured_args: []const []const u8,
     saved_metadata: ?SavedDriverMetadata,
 ) []const []const u8 {
-    if (raw_args.len != 0) return configured_args;
+    if (requested_args.specified) return configured_args;
     if (saved_metadata) |metadata| {
         if (metadata.cmake_args.len != 0) return metadata.cmake_args;
     }
@@ -493,12 +543,18 @@ fn resolvePrepareLlvmScript(requested_script: ?[]const u8, saved_metadata: ?Save
     return null;
 }
 
+fn resolvePlatformTarget(requested_target: ?[]const u8, saved_metadata: ?SavedDriverMetadata) ?[]const u8 {
+    if (requested_target) |target| return target;
+    if (saved_metadata) |metadata| return metadata.platform_target;
+    return null;
+}
+
 fn resolvePrepareLlvmArgs(
     requested_script: ?[]const u8,
-    raw_args: []const []const u8,
+    requested_args: CollectedArgs,
     saved_metadata: ?SavedDriverMetadata,
 ) []const []const u8 {
-    if (requested_script != null or raw_args.len != 0) return raw_args;
+    if (requested_script != null or requested_args.specified) return requested_args.values;
     if (saved_metadata) |metadata| {
         if (metadata.prepare_llvm_script != null) return metadata.prepare_llvm_args;
     }
@@ -522,6 +578,50 @@ fn hasArgPrefix(args: []const []const u8, prefix: []const u8) bool {
     return false;
 }
 
+fn collectArgs(
+    b: *Build,
+    repeated_name: []const u8,
+    repeated_help: []const u8,
+    json_name: []const u8,
+    json_help: []const u8,
+) CollectedArgs {
+    const repeated = b.option([]const []const u8, repeated_name, repeated_help) orelse &.{};
+    const json_source = b.option([]const u8, json_name, json_help);
+    const json_values = if (json_source) |source| parseJsonStringArray(b, json_name, source) else &.{};
+
+    if (json_values.len == 0) {
+        return .{
+            .values = repeated,
+            .specified = json_source != null or repeated.len != 0,
+        };
+    }
+    if (repeated.len == 0) {
+        return .{
+            .values = json_values,
+            .specified = true,
+        };
+    }
+
+    var merged = std.array_list.Managed([]const u8).init(b.allocator);
+    defer merged.deinit();
+    merged.appendSlice(json_values) catch @panic("OOM");
+    merged.appendSlice(repeated) catch @panic("OOM");
+    return .{
+        .values = merged.toOwnedSlice() catch @panic("OOM"),
+        .specified = true,
+    };
+}
+
+fn parseJsonStringArray(b: *Build, option_name: []const u8, source: []const u8) []const []const u8 {
+    const parsed = json.parseFromSliceLeaky(?[]const []const u8, b.allocator, source, .{}) catch |err| {
+        std.debug.panic("failed to parse -D{s} as a JSON string array: {s}", .{
+            option_name,
+            @errorName(err),
+        });
+    };
+    return parsed orelse &.{};
+}
+
 fn defaultJobs() usize {
     return std.Thread.getCpuCount() catch 1;
 }
@@ -543,6 +643,7 @@ fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
     writeShellAssignment(w, "BINARY_DIR", config.binary_dir);
     writeShellAssignment(w, "JOBS", b.fmt("{}", .{config.jobs}));
     writeShellAssignment(w, "INSTALL_PREFIX", config.install_prefix);
+    writeOptionalShellAssignment(w, "PLATFORM_TARGET", config.platform_target);
     writeOptionalShellAssignment(w, "PREPARE_LLVM_SCRIPT", config.prepare_llvm_script);
     writeOptionalShellAssignment(w, "TARGET", config.target);
     writeOptionalShellAssignment(w, "STAGE", if (config.stage) |stage| stage.asString() else null);
@@ -604,6 +705,7 @@ fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
         .install_prefix = config.install_prefix,
         .jobs = config.jobs,
         .make_args = config.make_args,
+        .platform_target = config.platform_target,
         .prepare_llvm_args = config.prepare_llvm_args,
         .prepare_llvm_script = config.prepare_llvm_script,
         .profile = config.profile.presetName(),

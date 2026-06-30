@@ -90,10 +90,9 @@ jobs:
           -Dbinary-dir=build
           "-Djobs=$NPROC"
           -Dprepare-llvm-script=../script/prepare-llvm-linux.sh
-          -Dprepare-llvm-arg=lean-llvm*
+          '-Dprepare-llvm-args-json=["lean-llvm*"]'
         )
-        ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DWFAIL=ON)
-        ZIG_CONFIGURE_ARGS+=(-Dcmake-arg=-DLEAN_EXTRA_CXX_FLAGS=-Werror)
+        ZIG_CONFIGURE_ARGS+=('-Dcmake-args-json=["-DWFAIL=ON","-DLEAN_EXTRA_CXX_FLAGS=-Werror"]')
         cd ..
         zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
     - if: env.should_update_stage0 == 'yes'
