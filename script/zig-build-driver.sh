@@ -35,16 +35,16 @@ emit_prepare_llvm_args() {
 
 run_build_root_target() {
   local -a args=(cmake --build "$BINARY_DIR" --parallel "$JOBS" --target "$TARGET")
-  if [[ ${#make_args[@]} -gt 0 ]]; then
-    args+=(-- "${make_args[@]}")
+  if [[ ${#build_args[@]} -gt 0 ]]; then
+    args+=(-- "${build_args[@]}")
   fi
   "${args[@]}"
 }
 
 run_build_stage_target() {
   local -a args=(cmake --build "$BINARY_DIR/$STAGE" --parallel "$JOBS" --target "$STAGE_TARGET")
-  if [[ ${#make_args[@]} -gt 0 ]]; then
-    args+=(-- "${make_args[@]}")
+  if [[ ${#build_args[@]} -gt 0 ]]; then
+    args+=(-- "${build_args[@]}")
   fi
   "${args[@]}"
 }

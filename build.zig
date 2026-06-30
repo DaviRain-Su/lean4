@@ -88,7 +88,7 @@ const DriverConfig = struct {
     prepare_llvm_script: ?[]const u8,
     prepare_llvm_args: []const []const u8,
     cmake_args: []const []const u8,
-    make_args: []const []const u8,
+    build_args: []const []const u8,
     ctest_args: []const []const u8,
     ctest_junit: ?[]const u8,
     target: ?[]const u8,
@@ -120,7 +120,7 @@ const DriverDefaults = struct {
     prepare_llvm_script: ?[]const u8,
     prepare_llvm_args: []const []const u8,
     cmake_args: []const []const u8,
-    make_args: []const []const u8,
+    build_args: []const []const u8,
     ctest_args: []const []const u8,
     ctest_junit: ?[]const u8,
 
@@ -135,7 +135,7 @@ const DriverDefaults = struct {
             .prepare_llvm_script = self.prepare_llvm_script,
             .prepare_llvm_args = self.prepare_llvm_args,
             .cmake_args = self.cmake_args,
-            .make_args = self.make_args,
+            .build_args = self.build_args,
             .ctest_args = self.ctest_args,
             .ctest_junit = self.ctest_junit,
             .target = null,
@@ -213,12 +213,16 @@ pub fn build(b: *Build) void {
         "cmake-args-json",
         "JSON array of extra argv elements passed to cmake --preset.",
     );
-    const make_args_request = collectArgs(
+    const build_args_request = collectArgsWithLegacy(
         b,
-        "make-arg",
+        "build-arg",
         "Extra native-build-tool argv element passed after cmake --build --. Repeat once per argument.",
-        "make-args-json",
+        "build-args-json",
         "JSON array of extra native-build-tool argv elements passed after cmake --build --.",
+        "make-arg",
+        "Legacy alias for -Dbuild-arg.",
+        "make-args-json",
+        "Legacy alias for -Dbuild-args-json.",
     );
     const ctest_args_request = collectArgs(
         b,
@@ -242,7 +246,7 @@ pub fn build(b: *Build) void {
         .prepare_llvm_script = prepare_llvm_script,
         .prepare_llvm_args = prepare_llvm_args,
         .cmake_args = configure_cmake_args,
-        .make_args = make_args_request.values,
+        .build_args = build_args_request.values,
         .ctest_args = ctest_args_request.values,
         .ctest_junit = ctest_junit,
     };
@@ -255,7 +259,7 @@ pub fn build(b: *Build) void {
         .prepare_llvm_script = prepare_llvm_script,
         .prepare_llvm_args = prepare_llvm_args,
         .cmake_args = inherited_cmake_args,
-        .make_args = make_args_request.values,
+        .build_args = build_args_request.values,
         .ctest_args = ctest_args_request.values,
         .ctest_junit = ctest_junit,
     };
@@ -621,6 +625,35 @@ fn collectArgs(
     };
 }
 
+fn collectArgsWithLegacy(
+    b: *Build,
+    repeated_name: []const u8,
+    repeated_help: []const u8,
+    json_name: []const u8,
+    json_help: []const u8,
+    legacy_repeated_name: []const u8,
+    legacy_repeated_help: []const u8,
+    legacy_json_name: []const u8,
+    legacy_json_help: []const u8,
+) CollectedArgs {
+    const primary = collectArgs(b, repeated_name, repeated_help, json_name, json_help);
+    const legacy = collectArgs(b, legacy_repeated_name, legacy_repeated_help, legacy_json_name, legacy_json_help);
+
+    if (!legacy.specified) return primary;
+    if (!primary.specified) return legacy;
+    if (legacy.values.len == 0) return primary;
+    if (primary.values.len == 0) return legacy;
+
+    var merged = std.array_list.Managed([]const u8).init(b.allocator);
+    defer merged.deinit();
+    merged.appendSlice(legacy.values) catch @panic("OOM");
+    merged.appendSlice(primary.values) catch @panic("OOM");
+    return .{
+        .values = merged.toOwnedSlice() catch @panic("OOM"),
+        .specified = true,
+    };
+}
+
 fn parseJsonStringArray(b: *Build, option_name: []const u8, source: []const u8) []const []const u8 {
     const parsed = json.parseFromSliceLeaky(?[]const []const u8, b.allocator, source, .{}) catch |err| {
         std.debug.panic("failed to parse -D{s} as a JSON string array: {s}", .{
@@ -661,7 +694,7 @@ fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
     writeOptionalShellAssignment(w, "GIT_COMMIT_MESSAGE", config.git_commit_message);
     writeShellArray(w, "prepare_llvm_args", config.prepare_llvm_args);
     writeShellArray(w, "cmake_args", config.cmake_args);
-    writeShellArray(w, "make_args", config.make_args);
+    writeShellArray(w, "build_args", config.build_args);
     writeShellArray(w, "ctest_args", config.ctest_args);
 
     return out.toOwnedSlice() catch @panic("OOM");
@@ -707,13 +740,14 @@ fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
     const stage_name = if (config.stage) |stage| stage.asString() else null;
     const payload = .{
         .binary_dir = config.binary_dir,
+        .build_args = config.build_args,
         .cmake_args = config.cmake_args,
         .command = config.command.asString(),
         .ctest_args = config.ctest_args,
         .ctest_junit = config.ctest_junit,
         .install_prefix = config.install_prefix,
         .jobs = config.jobs,
-        .make_args = config.make_args,
+        .make_args = config.build_args,
         .platform_target = config.platform_target,
         .prepare_llvm_args = config.prepare_llvm_args,
         .prepare_llvm_script = config.prepare_llvm_script,

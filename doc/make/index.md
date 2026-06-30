@@ -83,12 +83,14 @@ CMake/Make/CTest layers.
   so repeated stage/test/install invocations usually only need `-Dbinary-dir=...`
   plus any step-specific flags.
 
-* `-Dmake-arg=`\
+* `-Dbuild-arg=`\
   Extra argv elements forwarded to the native build tool launched by
   `cmake --build -- ...`. Repeat this option once per argument, for example
-  `-Dmake-arg=VERBOSE=1`.
+  `-Dbuild-arg=VERBOSE=1`.
   CI-style JSON arrays are also accepted via
-  `-Dmake-args-json='["VERBOSE=1"]'`.
+  `-Dbuild-args-json='["VERBOSE=1"]'`.
+  The legacy spellings `-Dmake-arg=` and `-Dmake-args-json=` are still accepted
+  as compatibility aliases.
 
 * `-Dctest-arg=`\
   Extra argv elements forwarded to `ctest` when running `zig build test`.
@@ -144,7 +146,7 @@ well:
 Troubleshooting
 ---------------
 
-* Use `zig build -Dmake-arg=VERBOSE=1 ...` to print verbose native build-tool
+* Use `zig build -Dbuild-arg=VERBOSE=1 ...` to print verbose native build-tool
   commands when the selected generator supports it (for example Unix
   Makefiles).
 * If you need to bypass the Zig driver entirely, the legacy `cmake --preset ...`
