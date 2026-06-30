@@ -22,7 +22,6 @@ zig_args=(
     -Dcmake-arg=-DWFAIL=OFF
 )
 
-zig build configure "${zig_args[@]}"
-zig build prepare-bench-stages -Dbinary-dir=build/release
+zig build prepare-bench-stages "${zig_args[@]}"
 zig build bench-part2 -Dbinary-dir=build/release
 mv tests/part2.measurements.jsonl "$RADAR_OUT"

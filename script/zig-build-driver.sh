@@ -96,6 +96,11 @@ write_stamp() {
   printf '%s\n' "$value" >"$stamp_path"
 }
 
+persist_driver_metadata() {
+  mkdir -p "$BINARY_DIR"
+  cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
+}
+
 emit_prepare_llvm_args() {
   [[ -n "$PREPARE_LLVM_SCRIPT" ]] || return 0
 
@@ -119,6 +124,21 @@ host_executable_suffix() {
     CYGWIN*|MINGW*|MSYS*|Windows_NT) printf '.exe' ;;
     *) printf '' ;;
   esac
+}
+
+staged_binary_path() {
+  local tool=${1:?missing staged tool name}
+  local executable_suffix
+  executable_suffix=$(host_executable_suffix)
+  local stage
+  for stage in stage1 stage2 stage3; do
+    local path="$BINARY_DIR/$stage/bin/$tool$executable_suffix"
+    if [[ -x "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+  return 1
 }
 
 copy_program_if_needed() {
@@ -205,7 +225,6 @@ cadical_binary_path() {
 }
 
 prepare_leantar() {
-  local force=${1:-0}
   local version=v0.1.19
   local executable_suffix
   executable_suffix=$(host_executable_suffix)
@@ -234,7 +253,14 @@ prepare_leantar() {
 
   local target_dir="$BINARY_DIR/leantar/leantar-$version-$target"
   local leantar_bin="$target_dir/leantar$executable_suffix"
-  if [[ "$force" != 1 && -x "$leantar_bin" ]]; then
+  if [[ -x "$leantar_bin" ]]; then
+    return 0
+  fi
+
+  local staged_leantar=
+  staged_leantar=$(staged_binary_path leantar) || true
+  if [[ -n "$staged_leantar" ]]; then
+    copy_program_if_needed "$staged_leantar" "$leantar_bin"
     return 0
   fi
 
@@ -275,11 +301,17 @@ PY
 }
 
 prepare_cadical() {
-  local force=${1:-0}
   local executable_suffix
   executable_suffix=$(host_executable_suffix)
   local cadical_bin="$BINARY_DIR/cadical/cadical$executable_suffix"
-  if [[ "$force" != 1 && -x "$cadical_bin" ]]; then
+  if [[ -x "$cadical_bin" ]]; then
+    return 0
+  fi
+
+  local staged_cadical=
+  staged_cadical=$(staged_binary_path cadical) || true
+  if [[ -n "$staged_cadical" ]]; then
+    copy_program_if_needed "$staged_cadical" "$cadical_bin"
     return 0
   fi
 
@@ -293,11 +325,6 @@ prepare_cadical() {
     rm -rf "$source_dir"
     mkdir -p "$(dirname "$source_dir")"
     git clone --depth 1 --branch rel-2.1.2 https://github.com/arminbiere/cadical "$source_dir"
-  fi
-
-  if [[ "$force" == 1 ]]; then
-    rm -f "$cadical_bin"
-    find "$source_dir" -maxdepth 1 -type f \( -name '*.o' -o -name "cadical$executable_suffix" \) -delete
   fi
 
   local cadical_cxx=c++
@@ -329,19 +356,20 @@ run_prepare_host_tools() {
   fingerprint=$(prepare_host_tools_fingerprint)
   local stamp_path
   stamp_path=$(stamp_path_for "prepare-host-tools")
-  local force=0
 
   if host_tools_ready && stamp_matches "$stamp_path" "$fingerprint"; then
     printf '[zig-build-driver] prepare-host-tools is up-to-date; skipping\n'
     return 0
   fi
 
-  if [[ -f "$stamp_path" ]]; then
-    force=1
+  if host_tools_ready; then
+    printf '[zig-build-driver] prepare-host-tools inputs changed; refreshing stamp without rebuilding existing tools\n'
+    write_stamp "$stamp_path" "$fingerprint"
+    return 0
   fi
 
-  prepare_leantar "$force"
-  prepare_cadical "$force"
+  prepare_leantar
+  prepare_cadical
   write_stamp "$stamp_path" "$fingerprint"
 }
 
@@ -411,7 +439,6 @@ run_root_configure() {
 
   if configure_outputs_ready "$BINARY_DIR" && stamp_matches "$stamp_path" "$fingerprint"; then
     printf '[zig-build-driver] configure-root is up-to-date; skipping configure\n'
-    cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
     return 0
   fi
 
@@ -426,7 +453,6 @@ run_root_configure() {
     cmake_cmd+=("${cmake_args[@]}")
   fi
   "${cmake_cmd[@]}"
-  cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
   write_stamp "$stamp_path" "$fingerprint"
 }
 
@@ -469,3 +495,5 @@ case "$ACTION" in
     exit 1
     ;;
 esac
+
+persist_driver_metadata

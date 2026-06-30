@@ -42,6 +42,9 @@ zig build -Dprofile=release -Djobs=$(nproc || sysctl -n hw.logicalcpu)
 
 The legacy CMake/Make entrypoints still work and remain useful for low-level
 debugging, but the rest of this guide assumes `zig build`.
+If you specifically need the top-level preset build directory configured for a
+legacy `make -C <binary-dir> ...` flow, use `zig build configure`; otherwise
+the stage-local `zig build` steps are the preferred entrypoints.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 
@@ -73,10 +76,11 @@ CMake/Make/CTest layers.
   `-Dcmake-arg=-DCMAKE_CXX_COMPILER=clang++`.
   For CI- or script-generated argument lists, you can instead pass a JSON array
   via `-Dcmake-args-json='["-DUSE_LAKE_CACHE=ON","-DCMAKE_CXX_COMPILER=clang++"]'`.
-  The driver saves the most recent configure-time argv in
-  `<binary-dir>/.zig-driver.json`, and later `zig build stage1`, `zig build test`,
-  or `zig build install` invocations against that same `-Dbinary-dir` will reuse
-  those saved `cmake` arguments unless you override them again on the command line.
+  Any successful `zig build` driver step saves the most recent configure-time
+  argv in `<binary-dir>/.zig-driver.json`, and later `zig build stage1`,
+  `zig build test`, `zig build install`, or benchmark-helper invocations against
+  that same `-Dbinary-dir` will reuse those saved `cmake` arguments unless you
+  override them again on the command line.
   Passing `-Dcmake-args-json=[]` counts as an explicit override and clears any
   previously saved extra `cmake` arguments for that `-Dbinary-dir`.
   The same metadata also restores the configured profile and parallelism defaults,
@@ -127,7 +131,8 @@ well:
 * `zig build prepare-bench-stages`\
   Build `stage1` if needed, then copy it into `stage2` and `stage3` build
   directories. This is the benchmark-oriented staging flow used by CI and the
-  radar helper scripts.
+  radar helper scripts. Like other successful driver steps, it also refreshes
+  `<binary-dir>/.zig-driver.json` for follow-up benchmark invocations.
 
 * `zig build bench-stage2`\
   Run the benchmark-oriented `stage1 -> copied stage2/stage3 -> build stage2`
