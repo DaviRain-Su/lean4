@@ -106,6 +106,14 @@ case "$ACTION" in
     "${cmake_cmd[@]}"
     cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
     ;;
+  configure-stage)
+    mkdir -p "$BINARY_DIR/$ACTION_STAGE"
+    cmake_cmd=(cmake "-GUnix Makefiles" -S "$REPO_ROOT/src" -B "$BINARY_DIR/$ACTION_STAGE")
+    if [[ ${#cmake_args[@]} -gt 0 ]]; then
+      cmake_cmd+=("${cmake_args[@]}")
+    fi
+    "${cmake_cmd[@]}"
+    ;;
   build-target)
     run_build_target "$ACTION_STAGE" "$ACTION_TARGET"
     ;;

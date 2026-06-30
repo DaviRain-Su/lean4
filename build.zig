@@ -46,6 +46,7 @@ const StageName = enum {
 };
 
 const RootBuildTarget = enum {
+    stage0,
     stage1_configure,
     stage1,
     stage2,
@@ -59,6 +60,7 @@ const RootBuildTarget = enum {
 
     fn cmakeTargetName(self: RootBuildTarget) []const u8 {
         return switch (self) {
+            .stage0 => "stage0",
             .stage1_configure => "stage1-configure",
             .stage1 => "stage1",
             .stage2 => "stage2",
@@ -91,6 +93,10 @@ const StageBuildAction = struct {
 };
 
 const BuildStageAction = struct {
+    stage: StageName,
+};
+
+const ConfigureStageAction = struct {
     stage: StageName,
 };
 
@@ -136,6 +142,7 @@ const RebootstrapAction = struct {
 
 const DriverAction = union(enum) {
     configure,
+    configure_stage: ConfigureStageAction,
     build_target: BuildTargetAction,
     build_stage: BuildStageAction,
     install: InstallAction,
@@ -146,6 +153,7 @@ const DriverAction = union(enum) {
     fn asString(self: DriverAction) []const u8 {
         return switch (self) {
             .configure => "configure",
+            .configure_stage => "configure-stage",
             .build_target => "build-target",
             .build_stage => "build-stage",
             .install => "install",
@@ -237,6 +245,12 @@ const DriverDefaults = struct {
 
     fn buildStageConfig(self: DriverDefaults, stage: StageName) DriverConfig {
         return self.config(.{ .build_stage = .{ .stage = stage } });
+    }
+
+    fn configureStageConfig(self: DriverDefaults, stage: StageName, cmake_args: []const []const u8) DriverConfig {
+        var cfg = self.config(.{ .configure_stage = .{ .stage = stage } });
+        cfg.cmake_args = cmake_args;
+        return cfg;
     }
 
     fn ctestConfig(self: DriverDefaults, stage: StageName, junit_path: ?[]const u8) DriverConfig {
@@ -352,13 +366,23 @@ pub fn build(b: *Build) void {
 
     const configure_dependency_cmd = createDriverCommand(b, runtime_defaults.config(.configure));
 
-    const stage1_configure_step = addRootBuildTargetStep(
+    const stage0_step = addRootBuildTargetStep(
         b,
         runtime_defaults,
+        "stage0",
+        "Build stage0",
+        .stage0,
+        &.{&configure_dependency_cmd.step},
+    );
+
+    const stage1_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage1);
+
+    const stage1_configure_step = addDriverStep(
+        b,
         "stage1-configure",
         "Build stage0 and configure the stage1 sub-build",
-        .stage1_configure,
-        &.{&configure_dependency_cmd.step},
+        runtime_defaults.configureStageConfig(.stage1, stage1_configure_args),
+        &.{stage0_step},
     );
 
     const stage1_step = addBuildStageStep(
@@ -523,7 +547,7 @@ fn attachInstallStep(
     const install_cmd = createDriverCommand(b, defaults.installConfig(stage));
     const install_step = b.getInstallStep();
     for (deps) |dep| {
-        install_step.dependOn(dep);
+        install_cmd.step.dependOn(dep);
     }
     install_step.dependOn(&install_cmd.step);
 }
@@ -537,7 +561,7 @@ fn addNamedStep(
 ) *Step {
     const step = b.step(name, description);
     for (deps) |dep| {
-        step.dependOn(dep);
+        cmd.step.dependOn(dep);
     }
     step.dependOn(&cmd.step);
     return step;
@@ -567,6 +591,7 @@ fn createDriverFiles(b: *Build, config: DriverConfig) DriverFiles {
 fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
     return switch (config.action) {
         .configure => "driver-configure",
+        .configure_stage => |action| b.fmt("driver-configure-stage-{s}", .{action.stage.asString()}),
         .ctest => |action| b.fmt("driver-ctest-{s}", .{action.stage.asString()}),
         .install => |action| b.fmt("driver-install-{s}", .{action.stage.asString()}),
         .build_stage => |action| b.fmt("driver-build-stage-{s}", .{action.stage.asString()}),
@@ -614,6 +639,121 @@ fn resolveInheritedCmakeArgs(
         if (metadata.cmake_args.len != 0) return metadata.cmake_args;
     }
     return configured_args;
+}
+
+fn buildStageConfigureArgs(
+    b: *Build,
+    defaults: DriverDefaults,
+    stage: StageName,
+) []const []const u8 {
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+
+    args.appendSlice(profilePresetCmakeArgs(defaults.profile)) catch @panic("OOM");
+    args.appendSlice(defaults.cmake_args) catch @panic("OOM");
+    args.append(b.fmt("-DSTAGE={d}", .{stageNumber(stage)})) catch @panic("OOM");
+    args.append(b.fmt("-DPREV_STAGE={s}", .{previousStagePath(b, defaults.binary_dir, stage)})) catch @panic("OOM");
+    args.append(b.fmt("-DPREV_STAGE_CMAKE_EXECUTABLE_SUFFIX={s}", .{hostExecutableSuffix()})) catch @panic("OOM");
+    if (stage == .stage1) {
+        args.append(b.fmt("-DCADICAL={s}", .{cadicalPath(b, defaults.binary_dir)})) catch @panic("OOM");
+        args.append(b.fmt("-DLEANTAR={s}", .{leantarPath(b, defaults.binary_dir)})) catch @panic("OOM");
+    }
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn profilePresetCmakeArgs(profile: BuildProfile) []const []const u8 {
+    return switch (profile) {
+        .release => &.{},
+        .@"dev-release" => &.{
+            "-DSTRIP_BINARIES=OFF",
+            "-DWFAIL=OFF",
+        },
+        .debug => &.{
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DLEAN_EXTRA_CXX_FLAGS=-DLEAN_DEFAULT_THREAD_STACK_SIZE=16*1024*1024",
+            "-DSTRIP_BINARIES=OFF",
+        },
+        .relwithassert => &.{
+            "-DCMAKE_BUILD_TYPE=RelWithAssert",
+            "-DSTRIP_BINARIES=OFF",
+        },
+        .sanitize => &.{
+            "-DLEAN_EXTRA_CXX_FLAGS=-fsanitize=address,undefined -DLEAN_DEFAULT_THREAD_STACK_SIZE=16*1024*1024",
+            "-DLEANC_EXTRA_CC_FLAGS=-fsanitize=address,undefined",
+            "-DLEAN_EXTRA_LINKER_FLAGS=-fsanitize=address,undefined -fsanitize-link-c++-runtime",
+            "-DSTRIP_BINARIES=OFF",
+            "-DSMALL_ALLOCATOR=OFF",
+            "-DUSE_MIMALLOC=OFF",
+            "-DBSYMBOLIC=OFF",
+            "-DLEAN_TEST_VARS=MAIN_STACK_SIZE=16000 TEST_STACK_SIZE=16000 LSAN_OPTIONS=max_leaks=10",
+        },
+        .sandebug => &.{
+            "-DCMAKE_BUILD_TYPE=Debug",
+            "-DLEAN_EXTRA_CXX_FLAGS=-fsanitize=address,undefined -DLEAN_DEFAULT_THREAD_STACK_SIZE=16*1024*1024",
+            "-DLEANC_EXTRA_CC_FLAGS=-fsanitize=address,undefined",
+            "-DLEAN_EXTRA_LINKER_FLAGS=-fsanitize=address,undefined -fsanitize-link-c++-runtime",
+            "-DSTRIP_BINARIES=OFF",
+            "-DSMALL_ALLOCATOR=OFF",
+            "-DUSE_MIMALLOC=OFF",
+            "-DBSYMBOLIC=OFF",
+            "-DLEAN_TEST_VARS=MAIN_STACK_SIZE=16000 TEST_STACK_SIZE=16000 LSAN_OPTIONS=max_leaks=10",
+        },
+    };
+}
+
+fn stageNumber(stage: StageName) u8 {
+    return switch (stage) {
+        .stage1 => 1,
+        .stage2 => 2,
+        .stage3 => 3,
+    };
+}
+
+fn previousStagePath(b: *Build, binary_dir: []const u8, stage: StageName) []const u8 {
+    const prev_stage_name = switch (stage) {
+        .stage1 => "stage0",
+        .stage2 => "stage1",
+        .stage3 => "stage2",
+    };
+    return absoluteBuildPath(b, binary_dir, &.{prev_stage_name});
+}
+
+fn hostExecutableSuffix() []const u8 {
+    const builtin = @import("builtin");
+    return if (builtin.os.tag == .windows) ".exe" else "";
+}
+
+fn cadicalPath(b: *Build, binary_dir: []const u8) []const u8 {
+    return absoluteBuildPath(b, binary_dir, &.{
+        "cadical",
+        b.fmt("cadical{s}", .{hostExecutableSuffix()}),
+    });
+}
+
+fn leantarPath(b: *Build, binary_dir: []const u8) []const u8 {
+    const builtin = @import("builtin");
+    const version = "v0.1.19";
+    const target = if (builtin.os.tag == .windows)
+        "x86_64-pc-windows-msvc"
+    else if (builtin.cpu.arch == .aarch64)
+        if (builtin.os.tag == .macos) "aarch64-apple-darwin" else "aarch64-unknown-linux-musl"
+    else if (builtin.os.tag == .macos)
+        "x86_64-apple-darwin"
+    else
+        "x86_64-unknown-linux-musl";
+    return absoluteBuildPath(b, binary_dir, &.{
+        "leantar",
+        b.fmt("leantar-{s}-{s}", .{ version, target }),
+        b.fmt("leantar{s}", .{hostExecutableSuffix()}),
+    });
+}
+
+fn absoluteBuildPath(b: *Build, binary_dir: []const u8, parts: []const []const u8) []const u8 {
+    var full_parts = std.array_list.Managed([]const u8).init(b.allocator);
+    defer full_parts.deinit();
+    full_parts.append(binary_dir) catch @panic("OOM");
+    full_parts.appendSlice(parts) catch @panic("OOM");
+    return b.pathFromRoot(b.pathJoin(full_parts.items));
 }
 
 fn loadSavedDriverMetadata(b: *Build, binary_dir: []const u8) ?SavedDriverMetadata {
@@ -837,6 +977,7 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
 
 fn actionStage(action: DriverAction) ?[]const u8 {
     return switch (action) {
+        .configure_stage => |configure_stage| configure_stage.stage.asString(),
         .build_target => |build_target| build_target.stageName(),
         .build_stage => |build_stage| build_stage.stage.asString(),
         .install => |install| install.stage.asString(),
