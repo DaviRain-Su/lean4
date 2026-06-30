@@ -258,8 +258,9 @@ run_configure_dir() {
     "$build_dir/Makefile" \
     "$build_dir/cmake_install.cmake"
   local -a cmake_cmd=(cmake "-GUnix Makefiles" -S "$source_dir" -B "$build_dir")
-  if [[ ${#cmake_args[@]} -gt 0 ]]; then
-    cmake_cmd+=("${cmake_args[@]}")
+  refresh_effective_cmake_args
+  if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
+    cmake_cmd+=("${effective_cmake_args[@]}")
   fi
   "${cmake_cmd[@]}"
   write_stamp "$stamp_path" "$fingerprint"
@@ -558,13 +559,9 @@ run_root_configure() {
 
   mkdir -p "$BINARY_DIR"
   local -a cmake_cmd=(cmake --preset "$PROFILE" -B "$BINARY_DIR")
-  if [[ -n "$PREPARE_LLVM_SCRIPT" ]]; then
-    while IFS= read -r arg; do
-      cmake_cmd+=("$arg")
-    done < <(emit_prepare_llvm_args)
-  fi
-  if [[ ${#cmake_args[@]} -gt 0 ]]; then
-    cmake_cmd+=("${cmake_args[@]}")
+  refresh_effective_cmake_args
+  if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
+    cmake_cmd+=("${effective_cmake_args[@]}")
   fi
   "${cmake_cmd[@]}"
   write_stamp "$stamp_path" "$fingerprint"

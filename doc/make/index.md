@@ -116,6 +116,9 @@ CMake/Make/CTest layers.
   Extra positional argv passed to the `prepare-llvm` helper. Repeat this once
   per argument, or pass a JSON array via
   `-Dprepare-llvm-args-json='["lean-llvm*"]'`.
+  The helper's emitted CMake arguments are reused both by `zig build
+  root-configure` and by the stage-local `zig build stage0-configure` /
+  `stage1-configure` / `stage2-configure` / `stage3-configure` steps.
   Passing `-Dprepare-llvm-args-json=[]` explicitly clears any saved helper argv
   for that `-Dbinary-dir`.
 
