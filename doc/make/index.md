@@ -43,8 +43,9 @@ zig build -Dprofile=release -Djobs=$(nproc || sysctl -n hw.logicalcpu)
 The legacy CMake/Make entrypoints still work and remain useful for low-level
 debugging, but the rest of this guide assumes `zig build`.
 If you specifically need the top-level preset build directory configured for a
-legacy `make -C <binary-dir> ...` flow, use `zig build configure`; otherwise
-the stage-local `zig build` steps are the preferred entrypoints.
+legacy `make -C <binary-dir> ...` flow, use `zig build root-configure`;
+`zig build configure` remains as a compatibility alias. Otherwise the
+stage-local `zig build` steps are the preferred entrypoints.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 

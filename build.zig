@@ -349,8 +349,16 @@ pub fn build(b: *Build) void {
 
     _ = addDriverStep(
         b,
+        "root-configure",
+        "Run the legacy top-level CMake configure for the selected profile and build directory",
+        configure_defaults.config(.configure),
+        &.{},
+    );
+
+    _ = addDriverStep(
+        b,
         "configure",
-        "Run CMake configure for the selected profile and build directory",
+        "Legacy alias for root-configure",
         configure_defaults.config(.configure),
         &.{},
     );
