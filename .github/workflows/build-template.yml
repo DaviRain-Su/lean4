@@ -155,50 +155,29 @@ jobs:
             OPTIONS+=(-DLEAN_VERSION_IS_RELEASE=1)
             OPTIONS+=(-DLEAN_SPECIAL_VERSION_DESC=${{ inputs.LEAN_SPECIAL_VERSION_DESC }})
           fi
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            MATRIX_CMAKE_OPTIONS=()
-            while IFS= read -r opt; do
-              MATRIX_CMAKE_OPTIONS+=("$opt")
-            done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CMAKE_OPTIONS_JSON"]) or [])]')
-            if [[ -n '${{ matrix.cross_target }}' ]]; then
-              export EXTRA_FLAGS=--target=${{ matrix.cross_target }}
-              OPTIONS+=(-DLEAN_PLATFORM_TARGET=${{ matrix.cross_target }})
-            fi
-            cmake_cmd=(cmake .. --preset "$BUILD_PROFILE" -B .)
-            if [[ ${#MATRIX_CMAKE_OPTIONS[@]} -gt 0 ]]; then
-              cmake_cmd+=("${MATRIX_CMAKE_OPTIONS[@]}")
-            fi
-            cmake_cmd+=("${OPTIONS[@]}" "-DLEAN_INSTALL_PREFIX=$PWD/..")
-            "${cmake_cmd[@]}"
-          else
-            ZIG_CONFIGURE_ARGS=(
-              "-Dprofile=$BUILD_PROFILE"
-              "-Dbinary-dir=build"
-              "-Djobs=$NPROC"
-              "-Dcmake-arg=-DLEAN_INSTALL_PREFIX=$PWD/.."
-              "-Dcmake-args-json=$MATRIX_CMAKE_OPTIONS_JSON"
-              "-Dprepare-llvm-args-json=$MATRIX_PREPARE_LLVM_ARGS_JSON"
-            )
-            if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
-              ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-script=${{ matrix.prepare_llvm_script }}")
-            fi
-            if [[ -n '${{ matrix.cross_target }}' ]]; then
-              ZIG_CONFIGURE_ARGS+=("-Dplatform-target=${{ matrix.cross_target }}")
-            fi
-            for opt in "${OPTIONS[@]}"; do
-              ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
-            done
-            cd ..
-            zig build root-configure "${ZIG_CONFIGURE_ARGS[@]}"
+          ZIG_CONFIGURE_ARGS=(
+            "-Dprofile=$BUILD_PROFILE"
+            "-Dbinary-dir=build"
+            "-Djobs=$NPROC"
+            "-Dcmake-arg=-DLEAN_INSTALL_PREFIX=$PWD/.."
+            "-Dcmake-args-json=$MATRIX_CMAKE_OPTIONS_JSON"
+            "-Dprepare-llvm-args-json=$MATRIX_PREPARE_LLVM_ARGS_JSON"
+          )
+          if [[ -n '${{ matrix.prepare_llvm_script }}' ]]; then
+            ZIG_CONFIGURE_ARGS+=("-Dprepare-llvm-script=${{ matrix.prepare_llvm_script }}")
           fi
+          if [[ -n '${{ matrix.cross_target }}' ]]; then
+            ZIG_CONFIGURE_ARGS+=("-Dplatform-target=${{ matrix.cross_target }}")
+          fi
+          for opt in "${OPTIONS[@]}"; do
+            ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
+          done
+          cd ..
+          zig build root-configure "${ZIG_CONFIGURE_ARGS[@]}"
       - name: Build Stage 0 & Configure Stage 1
         run: |
           ulimit -c unlimited  # coredumps
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            time make -C build stage1-configure -j$NPROC
-          else
-            time zig build stage1-configure -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
-          fi
+          time zig build stage1-configure -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
       - name: Download Lake Cache
         if: matrix.name == 'Linux Lake (Cached)'
         run: |
@@ -209,11 +188,7 @@ jobs:
       - name: Build Target Stage
         run: |
           ulimit -c unlimited  # coredumps
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            time make -C build $TARGET_STAGE -j$NPROC
-          else
-            time zig build "$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
-          fi
+          time zig build "$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
       # Should be done as early as possible and in particular *before* "Check rebootstrap" which
       # changes the state of stage1/
       - name: Save Cache
@@ -266,11 +241,7 @@ jobs:
           mv build/stage1.bak build/stage1
       - name: Install
         run: |
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            make -C build/$TARGET_STAGE install
-          else
-            zig build install -Dstage="$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
-          fi
+          zig build install -Dstage="$TARGET_STAGE" -Dbinary-dir="$LEAN_ZIG_BINARY_DIR"
       - name: Check Binaries
         run: ${{ matrix.binary-check }} lean-*/bin/* || true
       - name: Count binary symbols
@@ -307,24 +278,12 @@ jobs:
         id: test
         run: |
           ulimit -c unlimited  # coredumps
-          if [[ '${{ runner.os }}' == 'Windows' ]]; then
-            MATRIX_CTEST_OPTIONS=()
-            while IFS= read -r opt; do
-              MATRIX_CTEST_OPTIONS+=("$opt")
-            done < <(python3 -c 'import json, os; [print(opt) for opt in (json.loads(os.environ["MATRIX_CTEST_OPTIONS_JSON"]) or [])]')
-            ctest_cmd=(ctest --preset ${{ matrix.CMAKE_PRESET || 'release' }} --test-dir "build/$TARGET_STAGE" "-j$NPROC" --output-junit test-results.xml)
-            if [[ ${#MATRIX_CTEST_OPTIONS[@]} -gt 0 ]]; then
-              ctest_cmd+=("${MATRIX_CTEST_OPTIONS[@]}")
-            fi
-            time "${ctest_cmd[@]}"
-          else
-            ZIG_TEST_ARGS=(
-              "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
-              "-Dstage=$TARGET_STAGE"
-              "-Dctest-args-json=$MATRIX_CTEST_OPTIONS_JSON"
-            )
-            time zig build test-junit "${ZIG_TEST_ARGS[@]}"
-          fi
+          ZIG_TEST_ARGS=(
+            "-Dbinary-dir=$LEAN_ZIG_BINARY_DIR"
+            "-Dstage=$TARGET_STAGE"
+            "-Dctest-args-json=$MATRIX_CTEST_OPTIONS_JSON"
+          )
+          time zig build test-junit "${ZIG_TEST_ARGS[@]}"
         if: matrix.test
       - name: Test Summary
         uses: test-summary/action@37b508cfee6d4d080eedd00b5bb240a6a784a6a5 # v2.6
