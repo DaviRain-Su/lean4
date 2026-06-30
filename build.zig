@@ -266,38 +266,42 @@ pub fn build(b: *Build) void {
 
     const configure_dependency_cmd = createDriverCommand(b, runtime_defaults.config(.configure));
 
-    const stage1_configure_step = addRootTargetStep(
+    const stage1_configure_step = addBuildTargetStep(
         b,
         runtime_defaults,
         "stage1-configure",
         "Build stage0 and configure the stage1 sub-build",
+        null,
         "stage1-configure",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage1_step = addRootTargetStep(
+    const stage1_step = addBuildTargetStep(
         b,
         runtime_defaults,
         "stage1",
         "Build stage1",
+        null,
         "stage1",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage2_step = addRootTargetStep(
+    const stage2_step = addBuildTargetStep(
         b,
         runtime_defaults,
         "stage2",
         "Build stage2",
+        null,
         "stage2",
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage3_step = addRootTargetStep(
+    const stage3_step = addBuildTargetStep(
         b,
         runtime_defaults,
         "stage3",
         "Build stage3",
+        null,
         "stage3",
         &.{&configure_dependency_cmd.step},
     );
@@ -330,14 +334,14 @@ pub fn build(b: *Build) void {
         &.{selected_stage_step},
     );
 
-    _ = addRootTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", "bench", &.{&configure_dependency_cmd.step});
-    _ = addRootTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", "bench-part1", &.{&configure_dependency_cmd.step});
-    _ = addRootTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", "bench-part2", &.{&configure_dependency_cmd.step});
-    _ = addRootTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", "clean-stdlib", &.{&configure_dependency_cmd.step});
-    _ = addRootTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", "cache-get", &.{stage1_configure_step});
-    _ = addRootTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", "check-stage3", &.{stage3_step});
-    _ = addStageTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, "update-stage0", &.{selected_stage_step});
-    _ = addStageTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, "update-stage0-commit", &.{selected_stage_step});
+    _ = addBuildTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", null, "bench", &.{&configure_dependency_cmd.step});
+    _ = addBuildTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", null, "bench-part1", &.{&configure_dependency_cmd.step});
+    _ = addBuildTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", null, "bench-part2", &.{&configure_dependency_cmd.step});
+    _ = addBuildTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", null, "clean-stdlib", &.{&configure_dependency_cmd.step});
+    _ = addBuildTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", null, "cache-get", &.{stage1_configure_step});
+    _ = addBuildTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", null, "check-stage3", &.{stage3_step});
+    _ = addBuildTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, "update-stage0", &.{selected_stage_step});
+    _ = addBuildTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, "update-stage0-commit", &.{selected_stage_step});
     attachInstallStep(b, runtime_defaults, selected_stage, &.{selected_stage_step});
 
     const prepare_bench_stages_step = addDriverStep(
@@ -348,11 +352,12 @@ pub fn build(b: *Build) void {
         &.{stage1_step},
     );
 
-    _ = addRootTargetStep(
+    _ = addBuildTargetStep(
         b,
         runtime_defaults,
         "bench-stage2",
         "Prepare benchmark staging directories and then build stage2",
+        null,
         "stage2",
         &.{prepare_bench_stages_step},
     );
@@ -378,27 +383,16 @@ fn addDriverStep(
     return addNamedStep(b, name, description, createDriverCommand(b, config), deps);
 }
 
-fn addRootTargetStep(
+fn addBuildTargetStep(
     b: *Build,
     defaults: DriverDefaults,
     name: []const u8,
     description: []const u8,
+    stage: ?StageName,
     target: []const u8,
     deps: []const *Step,
 ) *Step {
-    return addDriverStep(b, name, description, defaults.buildTargetConfig(null, target), deps);
-}
-
-fn addStageTargetStep(
-    b: *Build,
-    defaults: DriverDefaults,
-    name: []const u8,
-    description: []const u8,
-    stage: StageName,
-    stage_target: []const u8,
-    deps: []const *Step,
-) *Step {
-    return addDriverStep(b, name, description, defaults.buildTargetConfig(stage, stage_target), deps);
+    return addDriverStep(b, name, description, defaults.buildTargetConfig(stage, target), deps);
 }
 
 fn addCTestStep(
