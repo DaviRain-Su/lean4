@@ -94,7 +94,7 @@ jobs:
         )
         ZIG_CONFIGURE_ARGS+=('-Dcmake-args-json=["-DWFAIL=ON","-DLEAN_EXTRA_CXX_FLAGS=-Werror"]')
         cd ..
-        zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
+        zig build root-configure "${ZIG_CONFIGURE_ARGS[@]}"
     - if: env.should_update_stage0 == 'yes'
       run: |
         zig build update-stage0-commit -Dbinary-dir=build

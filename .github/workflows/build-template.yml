@@ -189,7 +189,7 @@ jobs:
               ZIG_CONFIGURE_ARGS+=("-Dcmake-arg=$opt")
             done
             cd ..
-            zig build configure "${ZIG_CONFIGURE_ARGS[@]}"
+            zig build root-configure "${ZIG_CONFIGURE_ARGS[@]}"
           fi
       - name: Build Stage 0 & Configure Stage 1
         run: |
