@@ -268,22 +268,30 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
       endif()
       set(LEANTAR_TARGET ${LEANTAR_TARGET_ARCH}-${LEANTAR_TARGET_OS})
     endif()
+    set(LEANTAR_TARGET_DIR "${CMAKE_BINARY_DIR}/leantar/leantar-${LEANTAR_VERSION}-${LEANTAR_TARGET}")
     set(
       LEANTAR
-      ${CMAKE_BINARY_DIR}/leantar/leantar-${LEANTAR_VERSION}-${LEANTAR_TARGET}/leantar${CMAKE_EXECUTABLE_SUFFIX}
+      ${LEANTAR_TARGET_DIR}/leantar${CMAKE_EXECUTABLE_SUFFIX}
     )
-    if(NOT EXISTS "${LEANTAR}")
-      file(
-        DOWNLOAD
-          https://github.com/digama0/leangz/releases/download/${LEANTAR_VERSION}/leantar-${LEANTAR_VERSION}-${LEANTAR_TARGET}${LEANTAR_ARCHIVE_SUFFIX}
-        ${CMAKE_BINARY_DIR}/leantar${LEANTAR_ARCHIVE_SUFFIX}
-      )
-      file(
-        ARCHIVE_EXTRACT
-        INPUT ${CMAKE_BINARY_DIR}/leantar${LEANTAR_ARCHIVE_SUFFIX}
-        DESTINATION ${CMAKE_BINARY_DIR}/leantar
-      )
-    endif()
+    set(LEANTAR_ARCHIVE "${CMAKE_BINARY_DIR}/leantar${LEANTAR_ARCHIVE_SUFFIX}")
+    set(
+      LEANTAR_ARCHIVE_URL
+      https://github.com/digama0/leangz/releases/download/${LEANTAR_VERSION}/leantar-${LEANTAR_VERSION}-${LEANTAR_TARGET}${LEANTAR_ARCHIVE_SUFFIX}
+    )
+    add_custom_command(
+      OUTPUT "${LEANTAR}"
+      COMMAND
+        "${CMAKE_COMMAND}"
+        "-DARCHIVE_URL=${LEANTAR_ARCHIVE_URL}"
+        "-DARCHIVE_PATH=${LEANTAR_ARCHIVE}"
+        "-DTARGET_DIR=${LEANTAR_TARGET_DIR}"
+        "-DLEANTAR_BINARY=${LEANTAR}"
+        -P
+        "${LEAN_SOURCE_DIR}/script/cmake/prepare_root_leantar.cmake"
+      COMMENT "Preparing ${LEANTAR}"
+      VERBATIM
+    )
+    add_custom_target(leantar DEPENDS "${LEANTAR}")
   endif()
   list(APPEND STAGE0_ARGS -DLEANTAR=${LEANTAR})
   list(APPEND CL_ARGS -DCADICAL=${CADICAL} -DLEANTAR=${LEANTAR})
@@ -336,6 +344,9 @@ set(STAGE1_CONFIGURE_DEPS)
 set(STAGE1_BUILD_DEPS stage1-configure)
 if(TARGET cadical)
   list(APPEND STAGE1_BUILD_DEPS cadical)
+endif()
+if(TARGET leantar)
+  list(APPEND STAGE1_BUILD_DEPS leantar)
 endif()
 
 if(NOT STAGE1_PREV_STAGE)
