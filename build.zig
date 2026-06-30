@@ -47,18 +47,10 @@ const StageName = enum {
 
 const RootBuildTarget = enum {
     stage0,
-    stage2,
-    bench,
-    bench_part1,
-    bench_part2,
 
     fn cmakeTargetName(self: RootBuildTarget) []const u8 {
         return switch (self) {
             .stage0 => "stage0",
-            .stage2 => "stage2",
-            .bench => "bench",
-            .bench_part1 => "bench-part1",
-            .bench_part2 => "bench-part2",
         };
     }
 };
@@ -68,6 +60,9 @@ const StageBuildTarget = enum {
     update_stage0_commit,
     clean_stdlib,
     cache_get,
+    bench,
+    bench_part1,
+    bench_part2,
 
     fn cmakeTargetName(self: StageBuildTarget) []const u8 {
         return switch (self) {
@@ -75,6 +70,9 @@ const StageBuildTarget = enum {
             .update_stage0_commit => "update-stage0-commit",
             .clean_stdlib => "clean-stdlib",
             .cache_get => "cache-get",
+            .bench => "bench",
+            .bench_part1 => "bench-part1",
+            .bench_part2 => "bench-part2",
         };
     }
 };
@@ -233,6 +231,12 @@ const DriverDefaults = struct {
             .stage = stage,
             .target = target,
         } } });
+    }
+
+    fn stageBuildTargetConfigWithJobs(self: DriverDefaults, stage: StageName, target: StageBuildTarget, jobs: usize) DriverConfig {
+        var cfg = self.stageBuildTargetConfig(stage, target);
+        cfg.jobs = jobs;
+        return cfg;
     }
 
     fn buildStageConfig(self: DriverDefaults, stage: StageName) DriverConfig {
@@ -462,9 +466,6 @@ pub fn build(b: *Build) void {
         &.{selected_stage_step},
     );
 
-    _ = addRootBuildTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", .bench, &.{&configure_dependency_cmd.step});
-    _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", .bench_part1, &.{&configure_dependency_cmd.step});
-    _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", .bench_part2, &.{&configure_dependency_cmd.step});
     _ = addStageBuildTargetStep(
         b,
         runtime_defaults,
@@ -506,13 +507,45 @@ pub fn build(b: *Build) void {
         &.{stage1_step},
     );
 
-    _ = addRootBuildTargetStep(
+    const bench_stage2_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage2);
+
+    const bench_stage2_configure_step = addDriverStep(
+        b,
+        "bench-stage2-configure",
+        "Prepare benchmark staging directories and configure the stage2 sub-build",
+        runtime_defaults.configureStageConfig(.stage2, bench_stage2_configure_args),
+        &.{prepare_bench_stages_step},
+    );
+
+    const bench_stage2_step = addBuildStageStep(
         b,
         runtime_defaults,
         "bench-stage2",
-        "Prepare benchmark staging directories and then build stage2",
+        "Prepare benchmark staging directories, reconfigure stage2, and build stage2",
         .stage2,
-        &.{prepare_bench_stages_step},
+        &.{bench_stage2_configure_step},
+    );
+
+    _ = addDriverStep(
+        b,
+        "bench",
+        "Run the full benchmark suite from the stage2 sub-build",
+        runtime_defaults.stageBuildTargetConfigWithJobs(.stage2, .bench, 1),
+        &.{bench_stage2_step},
+    );
+    _ = addDriverStep(
+        b,
+        "bench-part1",
+        "Run benchmark suite part 1 from the stage2 sub-build",
+        runtime_defaults.stageBuildTargetConfigWithJobs(.stage2, .bench_part1, 1),
+        &.{bench_stage2_step},
+    );
+    _ = addDriverStep(
+        b,
+        "bench-part2",
+        "Run benchmark suite part 2 from the stage2 sub-build",
+        runtime_defaults.stageBuildTargetConfigWithJobs(.stage2, .bench_part2, 1),
+        &.{bench_stage2_step},
     );
 
     _ = addDriverStep(
