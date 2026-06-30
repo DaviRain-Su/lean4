@@ -56,8 +56,8 @@ When host tools are needed, that same root-compatible path also reuses the
 driver-managed `cadical` and `leantar` locations instead of letting the
 top-level CMake bootstrap them independently.
 The generated top-level `make -C <binary-dir> ...` compatibility targets are
-now thin wrappers around the stage-local sub-builds rather than an
-`ExternalProject` stage graph of their own.
+now thin wrappers around the stage-local configure/build/test/install entrypoints
+rather than an `ExternalProject` stage graph of their own.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 

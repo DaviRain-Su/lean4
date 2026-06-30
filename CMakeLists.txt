@@ -83,6 +83,53 @@ function(add_stage_make_wrapper target_name build_dir)
   )
 endfunction()
 
+# Keep direct sub-make wrappers for the stage build targets so a top-level
+# `make -j` continues to forward its jobserver into the nested Unix Makefiles.
+function(add_stage_build_wrapper target_name build_dir)
+  cmake_parse_arguments(ARG "" "BUILD_TARGET;JOBS" "BUILD_ARGS;DEPENDS" ${ARGN})
+  set(build_cmd ${CMAKE_COMMAND} --build "${build_dir}")
+  if(ARG_BUILD_TARGET)
+    list(APPEND build_cmd --target "${ARG_BUILD_TARGET}")
+  endif()
+  if(ARG_JOBS)
+    list(APPEND build_cmd --parallel "${ARG_JOBS}")
+  endif()
+  if(ARG_BUILD_ARGS)
+    list(APPEND build_cmd -- ${ARG_BUILD_ARGS})
+  endif()
+  add_custom_target(
+    ${target_name}
+    COMMAND ${build_cmd}
+    DEPENDS ${ARG_DEPENDS}
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMENT "Running ${target_name} in ${build_dir}"
+    USES_TERMINAL
+    COMMAND_EXPAND_LISTS
+    VERBATIM
+  )
+endfunction()
+
+function(add_stage_ctest_wrapper target_name build_dir)
+  cmake_parse_arguments(ARG "" "JOBS" "ARGS;DEPENDS" ${ARGN})
+  set(ctest_cmd ${CMAKE_CTEST_COMMAND} --test-dir "${build_dir}" --output-on-failure --progress)
+  if(ARG_JOBS)
+    list(APPEND ctest_cmd --parallel "${ARG_JOBS}")
+  endif()
+  if(ARG_ARGS)
+    list(APPEND ctest_cmd ${ARG_ARGS})
+  endif()
+  add_custom_target(
+    ${target_name}
+    COMMAND ${ctest_cmd}
+    DEPENDS ${ARG_DEPENDS}
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMENT "Running ${target_name} in ${build_dir}"
+    USES_TERMINAL
+    COMMAND_EXPAND_LISTS
+    VERBATIM
+  )
+endfunction()
+
 # Don't do anything with cadical/leantar on wasm
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   find_program(CADICAL cadical)
@@ -255,25 +302,37 @@ add_stage_make_wrapper(stage3 "${CMAKE_BINARY_DIR}/stage3" DEPENDS stage2 stage3
 
 # targets forwarded to appropriate stages
 
-add_stage_make_wrapper(update-stage0 "${CMAKE_BINARY_DIR}/stage1" MAKE_TARGET update-stage0 DEPENDS stage1)
+add_stage_build_wrapper(update-stage0 "${CMAKE_BINARY_DIR}/stage1" BUILD_TARGET update-stage0 DEPENDS stage1)
 
-add_stage_make_wrapper(
+add_stage_build_wrapper(
   update-stage0-commit
   "${CMAKE_BINARY_DIR}/stage1"
-  MAKE_TARGET update-stage0-commit
+  BUILD_TARGET update-stage0-commit
   DEPENDS stage1
 )
 
-add_stage_make_wrapper(test "${CMAKE_BINARY_DIR}/stage1" MAKE_TARGET test DEPENDS stage1)
+add_stage_ctest_wrapper(test "${CMAKE_BINARY_DIR}/stage1" DEPENDS stage1)
 
-add_stage_make_wrapper(bench "${CMAKE_BINARY_DIR}/stage2" MAKE_TARGET bench JOBS 1 DEPENDS stage2)
-add_stage_make_wrapper(bench-part1 "${CMAKE_BINARY_DIR}/stage2" MAKE_TARGET bench-part1 JOBS 1 DEPENDS stage2)
-add_stage_make_wrapper(bench-part2 "${CMAKE_BINARY_DIR}/stage2" MAKE_TARGET bench-part2 JOBS 1 DEPENDS stage2)
+add_stage_build_wrapper(bench "${CMAKE_BINARY_DIR}/stage2" BUILD_TARGET bench JOBS 1 DEPENDS stage2)
+add_stage_build_wrapper(bench-part1 "${CMAKE_BINARY_DIR}/stage2" BUILD_TARGET bench-part1 JOBS 1 DEPENDS stage2)
+add_stage_build_wrapper(bench-part2 "${CMAKE_BINARY_DIR}/stage2" BUILD_TARGET bench-part2 JOBS 1 DEPENDS stage2)
 
-add_stage_make_wrapper(clean-stdlib "${CMAKE_BINARY_DIR}/stage1" MAKE_TARGET clean-stdlib DEPENDS stage1-configure)
+add_stage_build_wrapper(clean-stdlib "${CMAKE_BINARY_DIR}/stage1" BUILD_TARGET clean-stdlib DEPENDS stage1-configure)
 
-add_stage_make_wrapper(cache-get "${CMAKE_BINARY_DIR}/stage1" MAKE_TARGET cache-get DEPENDS stage1-configure)
+add_stage_build_wrapper(cache-get "${CMAKE_BINARY_DIR}/stage1" BUILD_TARGET cache-get DEPENDS stage1-configure)
 
-install(CODE "execute_process(COMMAND \"${CMAKE_MAKE_PROGRAM}\" -C stage1 install)")
+install(CODE "
+  execute_process(
+    COMMAND \"${CMAKE_COMMAND}\" --build \"${CMAKE_BINARY_DIR}/stage1\" --target install
+    RESULT_VARIABLE stage1_install_result
+  )
+  if(NOT stage1_install_result EQUAL 0)
+    message(FATAL_ERROR \"Stage1 install failed with exit code \${stage1_install_result}\")
+  endif()
+")
 
-add_custom_target(check-stage3 COMMAND diff "stage2/bin/lean" "stage3/bin/lean" DEPENDS stage3)
+add_custom_target(
+  check-stage3
+  COMMAND ${CMAKE_COMMAND} -E compare_files "stage2/bin/lean" "stage3/bin/lean"
+  DEPENDS stage3
+)
