@@ -43,12 +43,6 @@ else
   TAIL=tail
 fi
 
-keep_open() {
-  while kill -0 "$1" 2>/dev/null; do
-    sleep 1
-  done
-}
-
 if command -v timeout >/dev/null 2>&1; then
   timeout_cmd() { timeout "$@"; }
 elif command -v gtimeout >/dev/null 2>&1; then
@@ -56,6 +50,7 @@ elif command -v gtimeout >/dev/null 2>&1; then
 elif command -v python3 >/dev/null 2>&1; then
   timeout_cmd() {
     python3 -c '
+import os
 import signal
 import subprocess
 import sys
@@ -63,15 +58,15 @@ import sys
 timeout = sys.argv[1]
 cmd = sys.argv[2:]
 seconds = float(timeout[:-1]) if timeout.endswith("s") else float(timeout)
-proc = subprocess.Popen(cmd)
+proc = subprocess.Popen(cmd, start_new_session=True)
 try:
     proc.wait(timeout=seconds)
 except subprocess.TimeoutExpired:
-    proc.send_signal(signal.SIGTERM)
+    os.killpg(proc.pid, signal.SIGTERM)
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
 sys.exit(proc.returncode)
 ' "$@"
