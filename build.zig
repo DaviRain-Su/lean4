@@ -160,6 +160,7 @@ const DriverConfig = struct {
     prepare_llvm_script: ?[]const u8,
     prepare_llvm_args: []const []const u8,
     cmake_args: []const []const u8,
+    saved_cmake_args: []const []const u8,
     build_args: []const []const u8,
     ctest_args: []const []const u8,
 };
@@ -202,6 +203,7 @@ const DriverDefaults = struct {
             .prepare_llvm_script = self.prepare_llvm_script,
             .prepare_llvm_args = self.prepare_llvm_args,
             .cmake_args = self.cmake_args,
+            .saved_cmake_args = self.cmake_args,
             .build_args = self.build_args,
             .ctest_args = self.ctest_args,
         };
@@ -319,7 +321,7 @@ pub fn build(b: *Build) void {
     const prepare_llvm_script = resolvePrepareLlvmScript(requested_prepare_llvm_script, saved_metadata);
     const prepare_llvm_args = resolvePrepareLlvmArgs(requested_prepare_llvm_script, prepare_llvm_args_request, saved_metadata);
     const configure_cmake_args = normalizeCmakeArgs(b, cmake_args_request.values, b.install_path, platform_target);
-    const inherited_cmake_args = resolveInheritedCmakeArgs(cmake_args_request, configure_cmake_args, saved_metadata);
+    const inherited_cmake_args = resolveInheritedCmakeArgs(b, cmake_args_request, configure_cmake_args, saved_metadata);
     const configure_defaults: DriverDefaults = .{
         .profile = profile,
         .binary_dir = binary_dir,
@@ -721,15 +723,53 @@ fn normalizeCmakeArgs(
 }
 
 fn resolveInheritedCmakeArgs(
+    b: *Build,
     requested_args: CollectedArgs,
     configured_args: []const []const u8,
     saved_metadata: ?SavedDriverMetadata,
 ) []const []const u8 {
     if (requested_args.specified) return configured_args;
     if (saved_metadata) |metadata| {
-        if (metadata.cmake_args.len != 0) return metadata.cmake_args;
+        const sanitized = sanitizeSavedCmakeArgs(b, configured_args, metadata.cmake_args);
+        if (sanitized.len != 0) return sanitized;
     }
     return configured_args;
+}
+
+fn sanitizeSavedCmakeArgs(
+    b: *Build,
+    fallback_args: []const []const u8,
+    raw_args: []const []const u8,
+) []const []const u8 {
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+
+    for (raw_args) |arg| {
+        if (cmakeArgName(arg)) |name| {
+            if (isTransientDriverCmakeArg(name)) continue;
+        }
+
+        var duplicate = false;
+        for (args.items) |existing| {
+            if (mem.eql(u8, existing, arg)) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) args.append(arg) catch @panic("OOM");
+    }
+
+    if (args.items.len == 0) return fallback_args;
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn isTransientDriverCmakeArg(name: []const u8) bool {
+    return mem.eql(u8, name, "STAGE") or
+        mem.eql(u8, name, "PREV_STAGE") or
+        mem.eql(u8, name, "PREV_STAGE_CMAKE_EXECUTABLE_SUFFIX") or
+        mem.eql(u8, name, "CADICAL") or
+        mem.eql(u8, name, "LEANTAR") or
+        mem.eql(u8, name, "USE_GITHASH");
 }
 
 fn buildStageConfigureArgs(
@@ -1224,7 +1264,7 @@ fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
         .platform_target = config.platform_target,
         .prepare_llvm_script = config.prepare_llvm_script,
         .prepare_llvm_args = config.prepare_llvm_args,
-        .cmake_args = config.cmake_args,
+        .cmake_args = config.saved_cmake_args,
     };
 
     var out: std.Io.Writer.Allocating = .init(b.allocator);

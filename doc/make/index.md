@@ -84,6 +84,8 @@ CMake/Make/CTest layers.
   those saved `cmake` arguments unless you override them again on the command
   line. In particular, any saved `CMAKE_CXX_COMPILER` or `CMAKE_CXX_FLAGS`
   settings are also reused when `prepare-host-tools` recompiles `cadical`.
+  Stage-local injected flags such as `STAGE`, `PREV_STAGE`, `CADICAL`, and
+  `LEANTAR` are regenerated per step and are not persisted in that metadata.
   Passing `-Dcmake-args-json=[]` counts as an explicit override and clears any
   previously saved extra `cmake` arguments for that `-Dbinary-dir`.
   The same metadata also restores the configured profile and parallelism defaults,

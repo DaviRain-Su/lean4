@@ -77,6 +77,32 @@ compute_action_fingerprint() {
   rm -f "$tmp"
 }
 
+compute_inputs_fingerprint() {
+  local label=${1:?missing fingerprint label}
+  shift
+
+  local tmp
+  tmp=$(mktemp "${TMPDIR:-/tmp}/zig-driver-fingerprint.XXXXXX")
+  {
+    printf 'label=%s\n' "$label"
+    while [[ $# -gt 0 ]]; do
+      local item=$1
+      shift
+      [[ -n "$item" ]] || continue
+      if [[ -f "$item" ]]; then
+        printf 'file=%s\n' "$item"
+        cat "$item"
+        printf '\n'
+      else
+        printf 'text=%s\n' "$item"
+      fi
+    done
+  } >"$tmp"
+
+  sha256_of_file "$tmp"
+  rm -f "$tmp"
+}
+
 stamp_path_for() {
   local name=${1:?missing stamp name}
   printf '%s/%s.sha256\n' "$(zig_driver_stamp_dir)" "$name"
@@ -232,6 +258,25 @@ configure_fingerprint() {
   fi
 }
 
+configure_artifact_fingerprint() {
+  local label=${1:?missing configure fingerprint label}
+  local source_dir=${2:?missing configure source directory}
+  local mode=${3:?missing configure mode}
+
+  local -a items=("$source_dir/CMakeLists.txt")
+  if [[ -n "$PREPARE_LLVM_SCRIPT" ]]; then
+    items+=("$PREPARE_LLVM_SCRIPT")
+  fi
+  if [[ "$mode" == root ]]; then
+    items+=("preset=$PROFILE")
+  fi
+  if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
+    items+=("${effective_cmake_args[@]}")
+  fi
+
+  compute_inputs_fingerprint "$label-artifacts" "${items[@]}"
+}
+
 configure_outputs_ready() {
   local build_dir=${1:?missing configure build directory}
   [[ -f "$build_dir/CMakeCache.txt" && -f "$build_dir/Makefile" ]]
@@ -241,13 +286,23 @@ run_configure_dir() {
   local build_dir=${1:?missing configure build directory}
   local source_dir=${2:?missing configure source directory}
   local stamp_name=${3:?missing configure stamp name}
-  local fingerprint
+  local fingerprint artifact_fingerprint
   fingerprint=$(configure_fingerprint "$stamp_name" "$source_dir")
-  local stamp_path
+  refresh_effective_cmake_args
+  artifact_fingerprint=$(configure_artifact_fingerprint "$stamp_name" "$source_dir" stage)
+  local stamp_path artifact_stamp_path
   stamp_path=$(stamp_path_for "$stamp_name")
+  artifact_stamp_path=$(stamp_path_for "$stamp_name-artifacts")
 
-  if configure_outputs_ready "$build_dir" && stamp_matches "$stamp_path" "$fingerprint"; then
+  if configure_outputs_ready "$build_dir" && stamp_matches "$stamp_path" "$fingerprint" && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
     printf '[zig-build-driver] %s is up-to-date; skipping configure\n' "$stamp_name"
+    return 0
+  fi
+
+  if configure_outputs_ready "$build_dir" && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
+    printf '[zig-build-driver] %s wrapper inputs changed; refreshing stamp without reconfiguring existing build\n' "$stamp_name"
+    write_stamp "$stamp_path" "$fingerprint"
+    write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
     return 0
   fi
 
@@ -258,12 +313,12 @@ run_configure_dir() {
     "$build_dir/Makefile" \
     "$build_dir/cmake_install.cmake"
   local -a cmake_cmd=(cmake "-GUnix Makefiles" -S "$source_dir" -B "$build_dir")
-  refresh_effective_cmake_args
   if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
     cmake_cmd+=("${effective_cmake_args[@]}")
   fi
   "${cmake_cmd[@]}"
   write_stamp "$stamp_path" "$fingerprint"
+  write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
 }
 
 leantar_target_dir() {
@@ -547,24 +602,34 @@ run_check_rebootstrap() {
 }
 
 run_root_configure() {
-  local fingerprint
+  local fingerprint artifact_fingerprint
   fingerprint=$(configure_fingerprint "root-configure" "$REPO_ROOT")
-  local stamp_path
+  refresh_effective_cmake_args
+  artifact_fingerprint=$(configure_artifact_fingerprint "root-configure" "$REPO_ROOT" root)
+  local stamp_path artifact_stamp_path
   stamp_path=$(stamp_path_for "root-configure")
+  artifact_stamp_path=$(stamp_path_for "root-configure-artifacts")
 
-  if configure_outputs_ready "$BINARY_DIR" && stamp_matches "$stamp_path" "$fingerprint"; then
+  if configure_outputs_ready "$BINARY_DIR" && stamp_matches "$stamp_path" "$fingerprint" && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
     printf '[zig-build-driver] root-configure is up-to-date; skipping root configure\n'
+    return 0
+  fi
+
+  if configure_outputs_ready "$BINARY_DIR" && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
+    printf '[zig-build-driver] root-configure wrapper inputs changed; refreshing stamp without reconfiguring existing build\n'
+    write_stamp "$stamp_path" "$fingerprint"
+    write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
     return 0
   fi
 
   mkdir -p "$BINARY_DIR"
   local -a cmake_cmd=(cmake --preset "$PROFILE" -B "$BINARY_DIR")
-  refresh_effective_cmake_args
   if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
     cmake_cmd+=("${effective_cmake_args[@]}")
   fi
   "${cmake_cmd[@]}"
   write_stamp "$stamp_path" "$fingerprint"
+  write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
 }
 
 case "$ACTION" in
