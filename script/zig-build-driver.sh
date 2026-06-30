@@ -306,7 +306,11 @@ configure_artifact_fingerprint() {
     done < <(emit_root_host_tool_args)
   fi
   if use_mimalloc_enabled; then
-    items+=("USE_MIMALLOC=ON" "mimalloc_git_ref=v2.2.3")
+    items+=(
+      "USE_MIMALLOC=ON"
+      "mimalloc_git_tag=v2.2.3"
+      "mimalloc_git_commit=94036de6fe20bfd8a73d4a6d142fcf532ea604d9"
+    )
   else
     items+=("USE_MIMALLOC=OFF")
   fi
@@ -401,6 +405,8 @@ mimalloc_sources_ready() {
 }
 
 prepare_mimalloc_sources() {
+  local mimalloc_git_tag=v2.2.3
+  local mimalloc_git_commit=94036de6fe20bfd8a73d4a6d142fcf532ea604d9
   refresh_effective_cmake_args
   if ! use_mimalloc_enabled; then
     return 0
@@ -414,7 +420,12 @@ prepare_mimalloc_sources() {
   if [[ ! -d "$source_dir/.git" ]]; then
     rm -rf "$source_dir"
     mkdir -p "$(dirname "$source_dir")"
-    git clone --depth 1 --branch v2.2.3 https://github.com/microsoft/mimalloc "$source_dir"
+    # v2.2.3 is an annotated tag; fetch the resolved commit directly to avoid
+    # warning spam on shallow clones while keeping the human-readable tag nearby.
+    git init "$source_dir" >/dev/null
+    git -C "$source_dir" remote add origin https://github.com/microsoft/mimalloc
+    git -C "$source_dir" fetch --depth 1 origin "$mimalloc_git_commit"
+    git -C "$source_dir" checkout --detach FETCH_HEAD >/dev/null
   fi
 
   [[ -f "$source_dir/include/mimalloc.h" && -f "$source_dir/src/static.c" ]] || {
