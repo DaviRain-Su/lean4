@@ -49,6 +49,11 @@ run_build_stage_target() {
   "${args[@]}"
 }
 
+run_install_stage() {
+  local -a args=(cmake --install "$BINARY_DIR/$STAGE")
+  "${args[@]}"
+}
+
 run_ctest_stage() {
   local -a args=(ctest --preset "$PROFILE" --test-dir "$BINARY_DIR/$STAGE" "-j$JOBS")
   if [[ -n "$CTEST_JUNIT" ]]; then
@@ -95,6 +100,9 @@ case "$COMMAND" in
     ;;
   stage-target)
     run_build_stage_target
+    ;;
+  install)
+    run_install_stage
     ;;
   ctest)
     run_ctest_stage

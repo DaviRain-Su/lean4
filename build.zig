@@ -49,6 +49,7 @@ const DriverCommand = enum {
     configure,
     root_target,
     stage_target,
+    install,
     ctest,
     prepare_bench_stages,
     check_rebootstrap,
@@ -58,6 +59,7 @@ const DriverCommand = enum {
             .configure => "configure",
             .root_target => "root-target",
             .stage_target => "stage-target",
+            .install => "install",
             .ctest => "ctest",
             .prepare_bench_stages => "prepare-bench-stages",
             .check_rebootstrap => "check-rebootstrap",
@@ -160,6 +162,12 @@ const DriverDefaults = struct {
         var cfg = self.config(.ctest);
         cfg.stage = stage;
         cfg.ctest_junit = junit_path;
+        return cfg;
+    }
+
+    fn installConfig(self: DriverDefaults, stage: StageName) DriverConfig {
+        var cfg = self.config(.install);
+        cfg.stage = stage;
         return cfg;
     }
 
@@ -415,7 +423,7 @@ fn attachInstallStep(
     stage: StageName,
     deps: []const *Step,
 ) void {
-    const install_cmd = createDriverCommand(b, defaults.stageTargetConfig(stage, "install"));
+    const install_cmd = createDriverCommand(b, defaults.installConfig(stage));
     const install_step = b.getInstallStep();
     for (deps) |dep| {
         install_step.dependOn(dep);
@@ -463,6 +471,7 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
     return switch (config.command) {
         .configure => "driver-configure",
         .ctest => b.fmt("driver-ctest-{s}", .{config.stage.?.asString()}),
+        .install => b.fmt("driver-install-{s}", .{config.stage.?.asString()}),
         .root_target => b.fmt("driver-root-{s}", .{config.target.?}),
         .stage_target => b.fmt("driver-stage-{s}-{s}", .{ config.stage.?.asString(), config.stage_target.? }),
         .prepare_bench_stages => "driver-prepare-bench-stages",
