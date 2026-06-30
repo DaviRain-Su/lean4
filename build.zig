@@ -47,8 +47,7 @@ const StageName = enum {
 
 const DriverCommand = enum {
     configure,
-    root_target,
-    stage_target,
+    build_target,
     install,
     ctest,
     prepare_bench_stages,
@@ -57,8 +56,7 @@ const DriverCommand = enum {
     fn asString(self: DriverCommand) []const u8 {
         return switch (self) {
             .configure => "configure",
-            .root_target => "root-target",
-            .stage_target => "stage-target",
+            .build_target => "build-target",
             .install => "install",
             .ctest => "ctest",
             .prepare_bench_stages => "prepare-bench-stages",
@@ -145,16 +143,10 @@ const DriverDefaults = struct {
         };
     }
 
-    fn rootTargetConfig(self: DriverDefaults, target: []const u8) DriverConfig {
-        var cfg = self.config(.root_target);
-        cfg.target = target;
-        return cfg;
-    }
-
-    fn stageTargetConfig(self: DriverDefaults, stage: StageName, stage_target: []const u8) DriverConfig {
-        var cfg = self.config(.stage_target);
+    fn buildTargetConfig(self: DriverDefaults, stage: ?StageName, target: []const u8) DriverConfig {
+        var cfg = self.config(.build_target);
         cfg.stage = stage;
-        cfg.stage_target = stage_target;
+        cfg.target = target;
         return cfg;
     }
 
@@ -394,7 +386,7 @@ fn addRootTargetStep(
     target: []const u8,
     deps: []const *Step,
 ) *Step {
-    return addDriverStep(b, name, description, defaults.rootTargetConfig(target), deps);
+    return addDriverStep(b, name, description, defaults.buildTargetConfig(null, target), deps);
 }
 
 fn addStageTargetStep(
@@ -406,7 +398,7 @@ fn addStageTargetStep(
     stage_target: []const u8,
     deps: []const *Step,
 ) *Step {
-    return addDriverStep(b, name, description, defaults.stageTargetConfig(stage, stage_target), deps);
+    return addDriverStep(b, name, description, defaults.buildTargetConfig(stage, stage_target), deps);
 }
 
 fn addCTestStep(
@@ -476,8 +468,10 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
         .configure => "driver-configure",
         .ctest => b.fmt("driver-ctest-{s}", .{config.stage.?.asString()}),
         .install => b.fmt("driver-install-{s}", .{config.stage.?.asString()}),
-        .root_target => b.fmt("driver-root-{s}", .{config.target.?}),
-        .stage_target => b.fmt("driver-stage-{s}-{s}", .{ config.stage.?.asString(), config.stage_target.? }),
+        .build_target => if (config.stage) |stage|
+            b.fmt("driver-stage-{s}-{s}", .{ stage.asString(), config.target.? })
+        else
+            b.fmt("driver-root-{s}", .{config.target.?}),
         .prepare_bench_stages => "driver-prepare-bench-stages",
         .check_rebootstrap => "driver-check-rebootstrap",
     };
