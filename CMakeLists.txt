@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
 include(ExternalProject)
-include(FetchContent)
 
 if(NOT CMAKE_GENERATOR MATCHES "Makefiles")
   message(FATAL_ERROR "Only makefile generators are supported")
@@ -130,6 +129,78 @@ function(add_stage_ctest_wrapper target_name build_dir)
   )
 endfunction()
 
+function(ensure_git_checkout source_dir repository commit)
+  cmake_parse_arguments(ARG "" "" "REQUIRED_FILES" ${ARGN})
+  set(required_missing FALSE)
+  foreach(required_file IN LISTS ARG_REQUIRED_FILES)
+    if(NOT EXISTS "${source_dir}/${required_file}")
+      set(required_missing TRUE)
+      break()
+    endif()
+  endforeach()
+  if(NOT required_missing)
+    return()
+  endif()
+
+  find_program(GIT_EXECUTABLE git REQUIRED)
+  if(EXISTS "${source_dir}/.git")
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" remote get-url origin
+      RESULT_VARIABLE git_remote_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(git_remote_result EQUAL 0)
+      execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" remote set-url origin "${repository}"
+        COMMAND_ERROR_IS_FATAL ANY
+        OUTPUT_QUIET
+        ERROR_QUIET
+      )
+    else()
+      execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" remote add origin "${repository}"
+        COMMAND_ERROR_IS_FATAL ANY
+        OUTPUT_QUIET
+        ERROR_QUIET
+      )
+    endif()
+  else()
+    file(REMOVE_RECURSE "${source_dir}")
+    get_filename_component(source_parent "${source_dir}" DIRECTORY)
+    file(MAKE_DIRECTORY "${source_parent}")
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" init "${source_dir}"
+      COMMAND_ERROR_IS_FATAL ANY
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" remote add origin "${repository}"
+      COMMAND_ERROR_IS_FATAL ANY
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+  endif()
+
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" fetch --depth 1 origin "${commit}"
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+  execute_process(
+    COMMAND "${GIT_EXECUTABLE}" -C "${source_dir}" checkout --detach FETCH_HEAD
+    COMMAND_ERROR_IS_FATAL ANY
+    OUTPUT_QUIET
+    ERROR_QUIET
+  )
+
+  foreach(required_file IN LISTS ARG_REQUIRED_FILES)
+    if(NOT EXISTS "${source_dir}/${required_file}")
+      message(FATAL_ERROR "required checkout artifact missing: ${source_dir}/${required_file}")
+    endif()
+  endforeach()
+endfunction()
+
 # Don't do anything with cadical/leantar on wasm
 if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   find_program(CADICAL cadical)
@@ -211,18 +282,14 @@ endif()
 if(USE_MIMALLOC)
   set(MIMALLOC_SOURCE_DIR "${CMAKE_BINARY_DIR}/mimalloc/src/mimalloc")
   if(NOT EXISTS "${MIMALLOC_SOURCE_DIR}/include/mimalloc.h" OR NOT EXISTS "${MIMALLOC_SOURCE_DIR}/src/static.c")
-    FetchContent_Declare(
-      mimalloc
-      GIT_REPOSITORY https://github.com/microsoft/mimalloc
-      GIT_TAG v2.2.3
-      # Unnecessarily deep directory structure, but it saves us from a complicated
-      # stage0 update for now. If we ever update the other dependencies like
-      # cadical, it might be worth reorganizing the directory structure.
-      SOURCE_DIR
+    ensure_git_checkout(
       "${MIMALLOC_SOURCE_DIR}"
-      EXCLUDE_FROM_ALL
+      https://github.com/microsoft/mimalloc
+      94036de6fe20bfd8a73d4a6d142fcf532ea604d9
+      REQUIRED_FILES
+      include/mimalloc.h
+      src/static.c
     )
-    FetchContent_MakeAvailable(mimalloc)
   endif()
 endif()
 
