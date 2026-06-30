@@ -87,7 +87,7 @@ run_prepare_bench_stages() {
 run_check_rebootstrap() {
   run_build_target "$ACTION_UPDATE_STAGE" "$ACTION_UPDATE_TARGET"
   git commit --allow-empty -m "$ACTION_GIT_COMMIT_MESSAGE"
-  run_build_target "" "$ACTION_REBUILD_TARGET"
+  run_build_stage "$ACTION_REBUILD_STAGE"
   run_ctest_stage "$ACTION_TEST_STAGE" ""
 }
 
@@ -108,6 +108,11 @@ case "$ACTION" in
     ;;
   configure-stage)
     mkdir -p "$BINARY_DIR/$ACTION_STAGE"
+    rm -rf \
+      "$BINARY_DIR/$ACTION_STAGE/CMakeCache.txt" \
+      "$BINARY_DIR/$ACTION_STAGE/CMakeFiles" \
+      "$BINARY_DIR/$ACTION_STAGE/Makefile" \
+      "$BINARY_DIR/$ACTION_STAGE/cmake_install.cmake"
     cmake_cmd=(cmake "-GUnix Makefiles" -S "$REPO_ROOT/src" -B "$BINARY_DIR/$ACTION_STAGE")
     if [[ ${#cmake_args[@]} -gt 0 ]]; then
       cmake_cmd+=("${cmake_args[@]}")

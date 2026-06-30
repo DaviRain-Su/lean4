@@ -47,30 +47,18 @@ const StageName = enum {
 
 const RootBuildTarget = enum {
     stage0,
-    stage1_configure,
-    stage1,
     stage2,
-    stage3,
     bench,
     bench_part1,
     bench_part2,
-    clean_stdlib,
-    cache_get,
-    check_stage3,
 
     fn cmakeTargetName(self: RootBuildTarget) []const u8 {
         return switch (self) {
             .stage0 => "stage0",
-            .stage1_configure => "stage1-configure",
-            .stage1 => "stage1",
             .stage2 => "stage2",
-            .stage3 => "stage3",
             .bench => "bench",
             .bench_part1 => "bench-part1",
             .bench_part2 => "bench-part2",
-            .clean_stdlib => "clean-stdlib",
-            .cache_get => "cache-get",
-            .check_stage3 => "check-stage3",
         };
     }
 };
@@ -78,11 +66,15 @@ const RootBuildTarget = enum {
 const StageBuildTarget = enum {
     update_stage0,
     update_stage0_commit,
+    clean_stdlib,
+    cache_get,
 
     fn cmakeTargetName(self: StageBuildTarget) []const u8 {
         return switch (self) {
             .update_stage0 => "update-stage0",
             .update_stage0_commit => "update-stage0-commit",
+            .clean_stdlib => "clean-stdlib",
+            .cache_get => "cache-get",
         };
     }
 };
@@ -135,7 +127,7 @@ const PrepareBenchStagesAction = struct {
 const RebootstrapAction = struct {
     update_stage: StageName,
     update_target: StageBuildTarget,
-    rebuild_target: RootBuildTarget,
+    rebuild_stage: StageName,
     test_stage: StageName,
     git_commit_message: []const u8,
 };
@@ -272,7 +264,7 @@ const DriverDefaults = struct {
         return self.config(.{ .check_rebootstrap = .{
             .update_stage = .stage1,
             .update_target = .update_stage0,
-            .rebuild_target = .stage1,
+            .rebuild_stage = .stage1,
             .test_stage = .stage1,
             .git_commit_message = "chore: update-stage0",
         } });
@@ -394,30 +386,56 @@ pub fn build(b: *Build) void {
         &.{stage1_configure_step},
     );
 
-    const stage2_step = addRootBuildTargetStep(
+    const stage2_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage2);
+
+    const stage2_configure_step = addDriverStep(
+        b,
+        "stage2-configure",
+        "Build stage1 and configure the stage2 sub-build",
+        runtime_defaults.configureStageConfig(.stage2, stage2_configure_args),
+        &.{stage1_step},
+    );
+
+    const stage2_step = addBuildStageStep(
         b,
         runtime_defaults,
         "stage2",
         "Build stage2",
         .stage2,
-        &.{&configure_dependency_cmd.step},
+        &.{stage2_configure_step},
     );
 
-    const stage3_step = addRootBuildTargetStep(
+    const stage3_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage3);
+
+    const stage3_configure_step = addDriverStep(
+        b,
+        "stage3-configure",
+        "Build stage2 and configure the stage3 sub-build",
+        runtime_defaults.configureStageConfig(.stage3, stage3_configure_args),
+        &.{stage2_step},
+    );
+
+    const stage3_step = addBuildStageStep(
         b,
         runtime_defaults,
         "stage3",
         "Build stage3",
         .stage3,
-        &.{&configure_dependency_cmd.step},
+        &.{stage3_configure_step},
     );
 
-    const stages = StageSteps{
+    const stage_configure_steps = StageSteps{
+        .stage1 = stage1_configure_step,
+        .stage2 = stage2_configure_step,
+        .stage3 = stage3_configure_step,
+    };
+    const stage_build_steps = StageSteps{
         .stage1 = stage1_step,
         .stage2 = stage2_step,
         .stage3 = stage3_step,
     };
-    const selected_stage_step = stageStep(selected_stage, stages);
+    const selected_stage_configure_step = stageStep(selected_stage, stage_configure_steps);
+    const selected_stage_step = stageStep(selected_stage, stage_build_steps);
     const default_stage_junit_path = b.pathFromRoot(b.pathJoin(&.{
         runtime_defaults.binary_dir,
         selected_stage.asString(),
@@ -447,9 +465,35 @@ pub fn build(b: *Build) void {
     _ = addRootBuildTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", .bench, &.{&configure_dependency_cmd.step});
     _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", .bench_part1, &.{&configure_dependency_cmd.step});
     _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", .bench_part2, &.{&configure_dependency_cmd.step});
-    _ = addRootBuildTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", .clean_stdlib, &.{&configure_dependency_cmd.step});
-    _ = addRootBuildTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", .cache_get, &.{stage1_configure_step});
-    _ = addRootBuildTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", .check_stage3, &.{stage3_step});
+    _ = addStageBuildTargetStep(
+        b,
+        runtime_defaults,
+        "clean-stdlib",
+        "Remove generated stdlib artifacts from the selected stage build directory",
+        selected_stage,
+        .clean_stdlib,
+        &.{selected_stage_configure_step},
+    );
+    _ = addStageBuildTargetStep(
+        b,
+        runtime_defaults,
+        "cache-get",
+        "Download the Lake cache for the selected stage build directory",
+        selected_stage,
+        .cache_get,
+        &.{selected_stage_configure_step},
+    );
+    _ = addCommandStep(
+        b,
+        "check-stage3",
+        "Build stage3 and compare it against stage2",
+        &.{
+            "diff",
+            stageLeanPath(b, runtime_defaults.binary_dir, .stage2),
+            stageLeanPath(b, runtime_defaults.binary_dir, .stage3),
+        },
+        &.{stage3_step},
+    );
     _ = addStageBuildTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, .update_stage0, &.{selected_stage_step});
     _ = addStageBuildTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, .update_stage0_commit, &.{selected_stage_step});
     attachInstallStep(b, runtime_defaults, selected_stage, &.{selected_stage_step});
@@ -565,6 +609,18 @@ fn addNamedStep(
     }
     step.dependOn(&cmd.step);
     return step;
+}
+
+fn addCommandStep(
+    b: *Build,
+    name: []const u8,
+    description: []const u8,
+    argv: []const []const u8,
+    deps: []const *Step,
+) *Step {
+    const cmd = b.addSystemCommand(argv);
+    cmd.setCwd(b.path("."));
+    return addNamedStep(b, name, description, cmd, deps);
 }
 
 fn createDriverCommand(b: *Build, config: DriverConfig) *Build.Step.Run {
@@ -756,6 +812,14 @@ fn absoluteBuildPath(b: *Build, binary_dir: []const u8, parts: []const []const u
     return b.pathFromRoot(b.pathJoin(full_parts.items));
 }
 
+fn stageLeanPath(b: *Build, binary_dir: []const u8, stage: StageName) []const u8 {
+    return absoluteBuildPath(b, binary_dir, &.{
+        stage.asString(),
+        "bin",
+        b.fmt("lean{s}", .{hostExecutableSuffix()}),
+    });
+}
+
 fn loadSavedDriverMetadata(b: *Build, binary_dir: []const u8) ?SavedDriverMetadata {
     const metadata_path = b.pathFromRoot(b.pathJoin(&.{ binary_dir, ".zig-driver.json" }));
     const contents = std.Io.Dir.cwd().readFileAlloc(
@@ -928,7 +992,7 @@ fn renderShellConfig(b: *Build, config: DriverConfig) []const u8 {
     writeOptionalShellAssignment(w, "ACTION_CTEST_JUNIT", actionCtestJunit(config.action));
     writeOptionalShellAssignment(w, "ACTION_UPDATE_STAGE", actionUpdateStage(config.action));
     writeOptionalShellAssignment(w, "ACTION_UPDATE_TARGET", actionUpdateTarget(config.action));
-    writeOptionalShellAssignment(w, "ACTION_REBUILD_TARGET", actionRebuildTarget(config.action));
+    writeOptionalShellAssignment(w, "ACTION_REBUILD_STAGE", actionRebuildStage(config.action));
     writeOptionalShellAssignment(w, "ACTION_TEST_STAGE", actionTestStage(config.action));
     writeOptionalShellAssignment(w, "ACTION_GIT_COMMIT_MESSAGE", actionGitCommitMessage(config.action));
     writeShellArray(w, "prepare_llvm_args", config.prepare_llvm_args);
@@ -1015,9 +1079,9 @@ fn actionUpdateTarget(action: DriverAction) ?[]const u8 {
     };
 }
 
-fn actionRebuildTarget(action: DriverAction) ?[]const u8 {
+fn actionRebuildStage(action: DriverAction) ?[]const u8 {
     return switch (action) {
-        .check_rebootstrap => |rebootstrap| rebootstrap.rebuild_target.cmakeTargetName(),
+        .check_rebootstrap => |rebootstrap| rebootstrap.rebuild_stage.asString(),
         else => null,
     };
 }
