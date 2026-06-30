@@ -101,6 +101,8 @@ CMake/Make/CTest layers.
 
 * `-Dctest-arg=`\
   Extra argv elements forwarded to `ctest` when running `zig build test`.
+  The Zig driver runs `ctest` directly inside the selected stage build
+  directory and enables `--output-on-failure --progress` by default.
   Repeat this option once per argument, for example
   `-Dctest-arg=--rerun-failed` or
   `-Dctest-arg=-R "-Dctest-arg=<regex>"`.

@@ -519,7 +519,7 @@ run_install_stage() {
 run_ctest_stage() {
   local stage=${1:?missing test stage}
   local junit_path=${2-}
-  local -a args=(ctest --preset "$PROFILE" --test-dir "$BINARY_DIR/$stage" "-j$JOBS")
+  local -a args=(ctest --test-dir "$BINARY_DIR/$stage" "-j$JOBS" --output-on-failure --progress)
   if [[ -n "$junit_path" ]]; then
     args+=(--output-junit "$junit_path")
   fi
