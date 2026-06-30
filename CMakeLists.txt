@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.21)
-include(ExternalProject)
 
 if(NOT CMAKE_GENERATOR MATCHES "Makefiles")
   message(FATAL_ERROR "Only makefile generators are supported")
@@ -223,19 +222,30 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
       string(APPEND CADICAL_CXXFLAGS " -DNUNLOCKED")
     endif()
     string(APPEND CADICAL_CXXFLAGS " -DNCLOSEFROM")
-    ExternalProject_Add(
-      cadical
-      PREFIX cadical
-      GIT_REPOSITORY https://github.com/arminbiere/cadical
-      GIT_TAG rel-2.1.2
-      CONFIGURE_COMMAND ""
-      BUILD_COMMAND
-        $(MAKE) -f ${CMAKE_SOURCE_DIR}/src/cadical.mk CMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}
-        CXX=${CADICAL_CXX} CXXFLAGS=${CADICAL_CXXFLAGS} LDFLAGS=${CADICAL_LDFLAGS}
-      BUILD_IN_SOURCE ON
-      INSTALL_COMMAND ""
+    find_program(GIT_EXECUTABLE git REQUIRED)
+    set(CADICAL_SOURCE_DIR "${CMAKE_BINARY_DIR}/cadical/src/cadical")
+    set(CADICAL "${CMAKE_BINARY_DIR}/cadical/cadical${CMAKE_EXECUTABLE_SUFFIX}")
+    add_custom_command(
+      OUTPUT "${CADICAL}"
+      COMMAND
+        "${CMAKE_COMMAND}"
+        "-DGIT_EXECUTABLE=${GIT_EXECUTABLE}"
+        "-DSOURCE_DIR=${CADICAL_SOURCE_DIR}"
+        "-DREPOSITORY=https://github.com/arminbiere/cadical"
+        "-DGIT_REF=rel-2.1.2"
+        "-DMAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+        "-DCADICAL_MK=${LEAN_SOURCE_DIR}/src/cadical.mk"
+        "-DCADICAL_BINARY=${CADICAL}"
+        "-DCMAKE_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+        "-DCADICAL_CXX=${CADICAL_CXX}"
+        "-DCADICAL_CXXFLAGS=${CADICAL_CXXFLAGS}"
+        "-DCADICAL_LDFLAGS=${CADICAL_LDFLAGS}"
+        -P
+        "${LEAN_SOURCE_DIR}/script/cmake/prepare_root_cadical.cmake"
+      COMMENT "Preparing ${CADICAL}"
+      VERBATIM
     )
-    set(CADICAL ${CMAKE_BINARY_DIR}/cadical/cadical${CMAKE_EXECUTABLE_SUFFIX})
+    add_custom_target(cadical DEPENDS "${CADICAL}")
     list(APPEND EXTRA_DEPENDS cadical)
   endif()
   find_program(LEANTAR leantar)
