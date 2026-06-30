@@ -178,6 +178,28 @@ cmake_define_value() {
   printf '%s\n' "$value"
 }
 
+cmake_bool_is_true() {
+  local value=${1-}
+  local upper
+  upper=$(printf '%s' "$value" | tr '[:lower:]' '[:upper:]')
+  case "$upper" in
+    0|FALSE|N|NO|OFF|IGNORE|NOTFOUND|*-NOTFOUND)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+use_mimalloc_enabled() {
+  local value=ON
+  if cmake_define_value USE_MIMALLOC "${effective_cmake_args[@]}" >/dev/null; then
+    value=$(cmake_define_value USE_MIMALLOC "${effective_cmake_args[@]}")
+  fi
+  cmake_bool_is_true "$value"
+}
+
 host_executable_suffix() {
   case "$(uname -s)" in
     CYGWIN*|MINGW*|MSYS*|Windows_NT) printf '.exe' ;;
@@ -270,6 +292,11 @@ configure_artifact_fingerprint() {
   if [[ "$mode" == root ]]; then
     items+=("preset=$PROFILE")
   fi
+  if use_mimalloc_enabled; then
+    items+=("USE_MIMALLOC=ON" "mimalloc_git_ref=v2.2.3")
+  else
+    items+=("USE_MIMALLOC=OFF")
+  fi
   if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
     items+=("${effective_cmake_args[@]}")
   fi
@@ -290,6 +317,7 @@ run_configure_dir() {
   fingerprint=$(configure_fingerprint "$stamp_name" "$source_dir")
   refresh_effective_cmake_args
   artifact_fingerprint=$(configure_artifact_fingerprint "$stamp_name" "$source_dir" stage)
+  prepare_mimalloc_sources
   local stamp_path artifact_stamp_path
   stamp_path=$(stamp_path_for "$stamp_name")
   artifact_stamp_path=$(stamp_path_for "$stamp_name-artifacts")
@@ -347,6 +375,39 @@ leantar_target_dir() {
 
 leantar_binary_path() {
   printf '%s/leantar%s\n' "$(leantar_target_dir)" "$(host_executable_suffix)"
+}
+
+mimalloc_source_dir() {
+  printf '%s/mimalloc/src/mimalloc\n' "$BINARY_DIR"
+}
+
+mimalloc_sources_ready() {
+  local source_dir
+  source_dir=$(mimalloc_source_dir)
+  [[ -f "$source_dir/include/mimalloc.h" && -f "$source_dir/src/static.c" ]]
+}
+
+prepare_mimalloc_sources() {
+  refresh_effective_cmake_args
+  if ! use_mimalloc_enabled; then
+    return 0
+  fi
+  if mimalloc_sources_ready; then
+    return 0
+  fi
+
+  local source_dir
+  source_dir=$(mimalloc_source_dir)
+  if [[ ! -d "$source_dir/.git" ]]; then
+    rm -rf "$source_dir"
+    mkdir -p "$(dirname "$source_dir")"
+    git clone --depth 1 --branch v2.2.3 https://github.com/microsoft/mimalloc "$source_dir"
+  fi
+
+  [[ -f "$source_dir/include/mimalloc.h" && -f "$source_dir/src/static.c" ]] || {
+    echo "failed to prepare mimalloc sources at $source_dir" >&2
+    exit 1
+  }
 }
 
 cadical_binary_path() {
@@ -606,6 +667,7 @@ run_root_configure() {
   fingerprint=$(configure_fingerprint "root-configure" "$REPO_ROOT")
   refresh_effective_cmake_args
   artifact_fingerprint=$(configure_artifact_fingerprint "root-configure" "$REPO_ROOT" root)
+  prepare_mimalloc_sources
   local stamp_path artifact_stamp_path
   stamp_path=$(stamp_path_for "root-configure")
   artifact_stamp_path=$(stamp_path_for "root-configure-artifacts")

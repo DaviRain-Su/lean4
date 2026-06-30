@@ -46,6 +46,9 @@ If you specifically need the top-level preset build directory configured for a
 legacy `make -C <binary-dir> ...` flow, use `zig build root-configure`;
 `zig build configure` remains as a compatibility alias. Otherwise the
 stage-local `zig build` steps are the preferred entrypoints.
+Cold stage-local configure flows also prepare the `mimalloc` source tree when
+`USE_MIMALLOC=ON`, so they no longer require a prior `zig build root-configure`
+just to populate that sibling dependency checkout.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 
