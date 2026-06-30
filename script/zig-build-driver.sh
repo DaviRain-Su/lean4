@@ -433,12 +433,12 @@ run_check_rebootstrap() {
 
 run_root_configure() {
   local fingerprint
-  fingerprint=$(configure_fingerprint "configure-root" "$REPO_ROOT")
+  fingerprint=$(configure_fingerprint "root-configure" "$REPO_ROOT")
   local stamp_path
-  stamp_path=$(stamp_path_for "configure-root")
+  stamp_path=$(stamp_path_for "root-configure")
 
   if configure_outputs_ready "$BINARY_DIR" && stamp_matches "$stamp_path" "$fingerprint"; then
-    printf '[zig-build-driver] configure-root is up-to-date; skipping configure\n'
+    printf '[zig-build-driver] root-configure is up-to-date; skipping root configure\n'
     return 0
   fi
 
@@ -457,7 +457,7 @@ run_root_configure() {
 }
 
 case "$ACTION" in
-  configure)
+  root-configure)
     run_root_configure
     ;;
   prepare-host-tools)

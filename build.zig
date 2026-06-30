@@ -110,7 +110,7 @@ const RebootstrapAction = struct {
 };
 
 const DriverAction = union(enum) {
-    configure,
+    root_configure,
     prepare_host_tools,
     configure_stage0,
     configure_stage: ConfigureStageAction,
@@ -124,7 +124,7 @@ const DriverAction = union(enum) {
 
     fn asString(self: DriverAction) []const u8 {
         return switch (self) {
-            .configure => "configure",
+            .root_configure => "root-configure",
             .prepare_host_tools => "prepare-host-tools",
             .configure_stage0 => "configure-stage0",
             .configure_stage => "configure-stage",
@@ -347,21 +347,16 @@ pub fn build(b: *Build) void {
         .ctest_junit = ctest_junit,
     };
 
-    _ = addDriverStep(
+    const root_configure_step = addDriverStep(
         b,
         "root-configure",
         "Run the legacy top-level CMake configure for the selected profile and build directory",
-        configure_defaults.config(.configure),
+        configure_defaults.config(.root_configure),
         &.{},
     );
 
-    _ = addDriverStep(
-        b,
-        "configure",
-        "Legacy alias for root-configure",
-        configure_defaults.config(.configure),
-        &.{},
-    );
+    const configure_step = b.step("configure", "Legacy alias for root-configure");
+    configure_step.dependOn(root_configure_step);
 
     const prepare_host_tools_step = addDriverStep(
         b,
@@ -686,7 +681,7 @@ fn createDriverFiles(b: *Build, config: DriverConfig) DriverFiles {
 
 fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
     return switch (config.action) {
-        .configure => "driver-configure",
+        .root_configure => "driver-root-configure",
         .prepare_host_tools => "driver-prepare-host-tools",
         .configure_stage0 => "driver-configure-stage0",
         .configure_stage => |action| b.fmt("driver-configure-stage-{s}", .{action.stage.asString()}),
