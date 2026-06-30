@@ -725,26 +725,13 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
 }
 
 fn renderMetadataJson(b: *Build, config: DriverConfig) []const u8 {
-    const stage_name = if (config.stage) |stage| stage.asString() else null;
-    const payload = .{
-        .binary_dir = config.binary_dir,
-        .build_args = config.build_args,
-        .cmake_args = config.cmake_args,
-        .command = config.command.asString(),
-        .ctest_args = config.ctest_args,
-        .ctest_junit = config.ctest_junit,
-        .install_prefix = config.install_prefix,
+    const payload: SavedDriverMetadata = .{
+        .profile = config.profile,
         .jobs = config.jobs,
-        .make_args = config.build_args,
         .platform_target = config.platform_target,
-        .prepare_llvm_args = config.prepare_llvm_args,
         .prepare_llvm_script = config.prepare_llvm_script,
-        .profile = config.profile.presetName(),
-        .stage = stage_name,
-        .stage_target = config.stage_target,
-        .target = config.target,
-        .git_commit_message = config.git_commit_message,
-        .zig_version = @import("builtin").zig_version_string,
+        .prepare_llvm_args = config.prepare_llvm_args,
+        .cmake_args = config.cmake_args,
     };
 
     var out: std.Io.Writer.Allocating = .init(b.allocator);
