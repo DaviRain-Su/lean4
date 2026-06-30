@@ -185,7 +185,7 @@ pub fn build(b: *Build) void {
     const binary_dir = b.option([]const u8, "binary-dir", "Build directory override. Defaults to the CMake preset's standard output path.") orelse bootstrap_profile.defaultBinaryDir();
     const saved_metadata = loadSavedDriverMetadata(b, binary_dir);
     const profile = requested_profile orelse resolveSavedProfile(saved_metadata) orelse .@"dev-release";
-    const requested_jobs = b.option(usize, "jobs", "Parallelism for make and ctest. 0 means auto-detect.");
+    const requested_jobs = b.option(usize, "jobs", "Parallelism for cmake --build and ctest. 0 means auto-detect.");
     const jobs = resolveJobs(requested_jobs, saved_metadata);
     const selected_stage = b.option(StageName, "stage", "Stage to use for stage-local commands such as test, install, and update-stage0. Default: stage1.") orelse .stage1;
     const ctest_junit = b.option([]const u8, "ctest-junit", "Path passed to ctest --output-junit.");
@@ -208,9 +208,9 @@ pub fn build(b: *Build) void {
     const make_args_request = collectArgs(
         b,
         "make-arg",
-        "Extra argv element passed to make. Repeat once per argument.",
+        "Extra native-build-tool argv element passed after cmake --build --. Repeat once per argument.",
         "make-args-json",
-        "JSON array of extra argv elements passed to make.",
+        "JSON array of extra native-build-tool argv elements passed after cmake --build --.",
     );
     const ctest_args_request = collectArgs(
         b,

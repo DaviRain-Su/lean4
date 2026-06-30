@@ -33,18 +33,18 @@ emit_prepare_llvm_args() {
   popd >/dev/null
 }
 
-run_make_root_target() {
-  local -a args=(make -C "$BINARY_DIR" "-j$JOBS" "$TARGET")
+run_build_root_target() {
+  local -a args=(cmake --build "$BINARY_DIR" --parallel "$JOBS" --target "$TARGET")
   if [[ ${#make_args[@]} -gt 0 ]]; then
-    args+=("${make_args[@]}")
+    args+=(-- "${make_args[@]}")
   fi
   "${args[@]}"
 }
 
-run_make_stage_target() {
-  local -a args=(make -C "$BINARY_DIR/$STAGE" "-j$JOBS" "$STAGE_TARGET")
+run_build_stage_target() {
+  local -a args=(cmake --build "$BINARY_DIR/$STAGE" --parallel "$JOBS" --target "$STAGE_TARGET")
   if [[ ${#make_args[@]} -gt 0 ]]; then
-    args+=("${make_args[@]}")
+    args+=(-- "${make_args[@]}")
   fi
   "${args[@]}"
 }
@@ -69,9 +69,9 @@ run_prepare_bench_stages() {
 }
 
 run_check_rebootstrap() {
-  run_make_stage_target
+  run_build_stage_target
   git commit --allow-empty -m "$GIT_COMMIT_MESSAGE"
-  run_make_root_target
+  run_build_root_target
   run_ctest_stage
 }
 
@@ -91,10 +91,10 @@ case "$COMMAND" in
     cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
     ;;
   root-target)
-    run_make_root_target
+    run_build_root_target
     ;;
   stage-target)
-    run_make_stage_target
+    run_build_stage_target
     ;;
   ctest)
     run_ctest_stage

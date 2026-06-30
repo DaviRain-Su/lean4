@@ -84,8 +84,9 @@ CMake/Make/CTest layers.
   plus any step-specific flags.
 
 * `-Dmake-arg=`\
-  Extra argv elements forwarded to the underlying `make` invocations. Repeat
-  this option once per argument, for example `-Dmake-arg=VERBOSE=1`.
+  Extra argv elements forwarded to the native build tool launched by
+  `cmake --build -- ...`. Repeat this option once per argument, for example
+  `-Dmake-arg=VERBOSE=1`.
   CI-style JSON arrays are also accepted via
   `-Dmake-args-json='["VERBOSE=1"]'`.
 
@@ -143,7 +144,8 @@ well:
 Troubleshooting
 ---------------
 
-* Use `zig build -Dmake-arg=VERBOSE=1 ...` to print the underlying `make`
-  commands.
+* Use `zig build -Dmake-arg=VERBOSE=1 ...` to print verbose native build-tool
+  commands when the selected generator supports it (for example Unix
+  Makefiles).
 * If you need to bypass the Zig driver entirely, the legacy `cmake --preset ...`
   and `make -C ...` commands are still supported.
