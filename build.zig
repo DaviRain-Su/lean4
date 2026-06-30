@@ -90,6 +90,10 @@ const StageBuildAction = struct {
     target: StageBuildTarget,
 };
 
+const BuildStageAction = struct {
+    stage: StageName,
+};
+
 const BuildTargetAction = union(enum) {
     root: RootBuildTarget,
     stage: StageBuildAction,
@@ -133,6 +137,7 @@ const RebootstrapAction = struct {
 const DriverAction = union(enum) {
     configure,
     build_target: BuildTargetAction,
+    build_stage: BuildStageAction,
     install: InstallAction,
     ctest: CTestAction,
     prepare_bench_stages: PrepareBenchStagesAction,
@@ -142,6 +147,7 @@ const DriverAction = union(enum) {
         return switch (self) {
             .configure => "configure",
             .build_target => "build-target",
+            .build_stage => "build-stage",
             .install => "install",
             .ctest => "ctest",
             .prepare_bench_stages => "prepare-bench-stages",
@@ -227,6 +233,10 @@ const DriverDefaults = struct {
             .stage = stage,
             .target = target,
         } } });
+    }
+
+    fn buildStageConfig(self: DriverDefaults, stage: StageName) DriverConfig {
+        return self.config(.{ .build_stage = .{ .stage = stage } });
     }
 
     fn ctestConfig(self: DriverDefaults, stage: StageName, junit_path: ?[]const u8) DriverConfig {
@@ -351,13 +361,13 @@ pub fn build(b: *Build) void {
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage1_step = addRootBuildTargetStep(
+    const stage1_step = addBuildStageStep(
         b,
         runtime_defaults,
         "stage1",
         "Build stage1",
         .stage1,
-        &.{&configure_dependency_cmd.step},
+        &.{stage1_configure_step},
     );
 
     const stage2_step = addRootBuildTargetStep(
@@ -481,6 +491,17 @@ fn addStageBuildTargetStep(
     return addDriverStep(b, name, description, defaults.stageBuildTargetConfig(stage, target), deps);
 }
 
+fn addBuildStageStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    name: []const u8,
+    description: []const u8,
+    stage: StageName,
+    deps: []const *Step,
+) *Step {
+    return addDriverStep(b, name, description, defaults.buildStageConfig(stage), deps);
+}
+
 fn addCTestStep(
     b: *Build,
     defaults: DriverDefaults,
@@ -548,6 +569,7 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
         .configure => "driver-configure",
         .ctest => |action| b.fmt("driver-ctest-{s}", .{action.stage.asString()}),
         .install => |action| b.fmt("driver-install-{s}", .{action.stage.asString()}),
+        .build_stage => |action| b.fmt("driver-build-stage-{s}", .{action.stage.asString()}),
         .build_target => |action| switch (action) {
             .root => |target| b.fmt("driver-root-{s}", .{target.cmakeTargetName()}),
             .stage => |stage_build| b.fmt("driver-stage-{s}-{s}", .{ stage_build.stage.asString(), stage_build.target.cmakeTargetName() }),
@@ -816,6 +838,7 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
 fn actionStage(action: DriverAction) ?[]const u8 {
     return switch (action) {
         .build_target => |build_target| build_target.stageName(),
+        .build_stage => |build_stage| build_stage.stage.asString(),
         .install => |install| install.stage.asString(),
         .ctest => |ctest| ctest.stage.asString(),
         .prepare_bench_stages => |prepare| prepare.source_stage.asString(),

@@ -47,6 +47,15 @@ run_build_target() {
   "${args[@]}"
 }
 
+run_build_stage() {
+  local stage=${1:?missing build stage}
+  local -a args=(cmake --build "$BINARY_DIR/$stage" --parallel "$JOBS")
+  if [[ ${#build_args[@]} -gt 0 ]]; then
+    args+=(-- "${build_args[@]}")
+  fi
+  "${args[@]}"
+}
+
 run_install_stage() {
   local stage=${1:?missing install stage}
   local -a args=(cmake --install "$BINARY_DIR/$stage")
@@ -99,6 +108,9 @@ case "$ACTION" in
     ;;
   build-target)
     run_build_target "$ACTION_STAGE" "$ACTION_TARGET"
+    ;;
+  build-stage)
+    run_build_stage "$ACTION_STAGE"
     ;;
   install)
     run_install_stage "$ACTION_STAGE"
