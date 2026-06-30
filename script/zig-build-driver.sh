@@ -126,6 +126,33 @@ host_executable_suffix() {
   esac
 }
 
+compiler_supports_closefrom() {
+  local compiler=${1:?missing compiler}
+  local tmp_dir
+  tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/cadical-closefrom.XXXXXX")
+  local source_path="$tmp_dir/closefrom.cpp"
+  local output_path="$tmp_dir/closefrom$(host_executable_suffix)"
+
+  cat >"$source_path" <<'EOF'
+extern "C" {
+#include <unistd.h>
+}
+
+int main() {
+  closefrom(0);
+  return 0;
+}
+EOF
+
+  if "$compiler" -std=c++11 -o "$output_path" "$source_path" >/dev/null 2>&1; then
+    rm -rf "$tmp_dir"
+    return 0
+  fi
+
+  rm -rf "$tmp_dir"
+  return 1
+}
+
 staged_binary_path() {
   local tool=${1:?missing staged tool name}
   local executable_suffix
@@ -331,10 +358,14 @@ prepare_cadical() {
   if command -v ccache >/dev/null 2>&1; then
     cadical_cxx="ccache $cadical_cxx"
   fi
+  local cadical_cxxflags=
+  if ! compiler_supports_closefrom c++; then
+    cadical_cxxflags=-DNCLOSEFROM
+  fi
 
   (
     cd "$source_dir"
-    make -f "$REPO_ROOT/src/cadical.mk" "CMAKE_EXECUTABLE_SUFFIX=$executable_suffix" "CXX=$cadical_cxx"
+    make -f "$REPO_ROOT/src/cadical.mk" "CMAKE_EXECUTABLE_SUFFIX=$executable_suffix" "CXX=$cadical_cxx" "CXXFLAGS=$cadical_cxxflags"
   )
 
   [[ -x "$cadical_bin" ]] || {
