@@ -386,9 +386,9 @@ pub fn build(b: *Build) void {
     const stage1_configure_step = addDriverStep(
         b,
         "stage1-configure",
-        "Build stage0 and configure the stage1 sub-build",
+        "Configure the stage1 sub-build after preparing stage0",
         runtime_defaults.configureStageConfig(.stage1, stage1_configure_args),
-        &.{stage0_step},
+        &.{stage0_configure_step},
     );
 
     const stage1_step = addBuildStageStep(
@@ -397,7 +397,7 @@ pub fn build(b: *Build) void {
         "stage1",
         "Build stage1",
         .stage1,
-        &.{stage1_configure_step},
+        &.{ stage0_step, stage1_configure_step },
     );
 
     const stage2_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage2);
@@ -405,9 +405,9 @@ pub fn build(b: *Build) void {
     const stage2_configure_step = addDriverStep(
         b,
         "stage2-configure",
-        "Build stage1 and configure the stage2 sub-build",
+        "Configure the stage2 sub-build after preparing stage1",
         runtime_defaults.configureStageConfig(.stage2, stage2_configure_args),
-        &.{stage1_step},
+        &.{stage1_configure_step},
     );
 
     const stage2_step = addBuildStageStep(
@@ -416,7 +416,7 @@ pub fn build(b: *Build) void {
         "stage2",
         "Build stage2",
         .stage2,
-        &.{stage2_configure_step},
+        &.{ stage1_step, stage2_configure_step },
     );
 
     const stage3_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage3);
@@ -424,9 +424,9 @@ pub fn build(b: *Build) void {
     const stage3_configure_step = addDriverStep(
         b,
         "stage3-configure",
-        "Build stage2 and configure the stage3 sub-build",
+        "Configure the stage3 sub-build after preparing stage2",
         runtime_defaults.configureStageConfig(.stage3, stage3_configure_args),
-        &.{stage2_step},
+        &.{stage2_configure_step},
     );
 
     const stage3_step = addBuildStageStep(
@@ -435,7 +435,7 @@ pub fn build(b: *Build) void {
         "stage3",
         "Build stage3",
         .stage3,
-        &.{stage3_configure_step},
+        &.{ stage2_step, stage3_configure_step },
     );
 
     const stage_configure_steps = StageSteps{
