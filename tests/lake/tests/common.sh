@@ -32,11 +32,52 @@ fi
 if [ "$UNAME" = Darwin ] || [ "$UNAME" = FreeBSD ]; then
   sed_i() { sed -i '' "$@"; }
   stat_ch() { stat -f %l -- "$1"; }
-  TAIL=gtail
+  if command -v gtail >/dev/null 2>&1; then
+    TAIL=gtail
+  else
+    TAIL=tail
+  fi
 else
   sed_i() { sed -i "$@"; }
   stat_ch() { stat -c %h -- "$1"; }
   TAIL=tail
+fi
+
+keep_open() {
+  while kill -0 "$1" 2>/dev/null; do
+    sleep 1
+  done
+}
+
+if command -v timeout >/dev/null 2>&1; then
+  timeout_cmd() { timeout "$@"; }
+elif command -v gtimeout >/dev/null 2>&1; then
+  timeout_cmd() { gtimeout "$@"; }
+elif command -v python3 >/dev/null 2>&1; then
+  timeout_cmd() {
+    python3 -c '
+import signal
+import subprocess
+import sys
+
+timeout = sys.argv[1]
+cmd = sys.argv[2:]
+seconds = float(timeout[:-1]) if timeout.endswith("s") else float(timeout)
+proc = subprocess.Popen(cmd)
+try:
+    proc.wait(timeout=seconds)
+except subprocess.TimeoutExpired:
+    proc.send_signal(signal.SIGTERM)
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+sys.exit(proc.returncode)
+' "$@"
+  }
+else
+  timeout_cmd() { "$@"; }
 fi
 
 if [ "$OS" = Windows_NT ]; then

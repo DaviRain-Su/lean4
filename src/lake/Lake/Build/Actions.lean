@@ -131,10 +131,21 @@ public def compileStaticLib
   createParentDirs libFile
   -- `ar rcs` does not remove old files from the archive, so it must be deleted first
   removeFileIfExists libFile
-  let args := #["rcs"]
-  let args := if thin then args.push "--thin" else args
-  let args := args.push libFile.toString ++ (← mkArgs libFile <| oFiles.map toString)
-  proc {cmd := ar.toString, args}
+  if System.Platform.isOSX then
+    if thin then
+      error "thin static libraries are not supported on macOS"
+    let filelistPath := libFile.addExtension "filelist"
+    let h ← IO.FS.Handle.mk filelistPath .write
+    oFiles.forM fun f => h.putStr s!"{f}\n"
+    proc {
+      cmd := "libtool"
+      args := #["-static", "-o", libFile.toString, "-filelist", filelistPath.toString]
+    }
+  else
+    let args := #["rcs"]
+    let args := if thin then args.push "--thin" else args
+    let args := args.push libFile.toString ++ (← mkArgs libFile <| oFiles.map toString)
+    proc {cmd := ar.toString, args}
 
 def getMacOSXDeploymentEnv : BaseIO (Array (String × Option String)) := do
   -- It is difficult to identify the correct minor version here, leading to linking warnings like:

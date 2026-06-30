@@ -32,6 +32,9 @@ echo "# TEST 116"
 
 # Test that `lake serve` produces the `Failed to configure` message.
 MSGS="$INIT_REQ$INITD_NOT$OPEN_REQ"
-grep -q "Failed to configure the Lake workspace" <(set +e; (echo -n "$MSGS" && $TAIL --pid=$$ -f /dev/null) | timeout 30s $LAKE serve | tee serve.log)
+grep -q "Failed to configure the Lake workspace" <(
+  set +e
+  timeout_cmd 30s bash -c 'printf "%s" "$1"; sleep 3600' _ "$MSGS" | $LAKE serve | tee serve.log
+)
 
 echo "Test passed"
