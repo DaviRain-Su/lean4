@@ -226,6 +226,12 @@ const DriverDefaults = struct {
         return self.config(.prepare_host_tools);
     }
 
+    fn rootConfigureConfig(self: DriverDefaults, cmake_args: []const []const u8) DriverConfig {
+        var cfg = self.config(.root_configure);
+        cfg.cmake_args = cmake_args;
+        return cfg;
+    }
+
     fn configureStage0Config(self: DriverDefaults, cmake_args: []const []const u8) DriverConfig {
         var cfg = self.config(.configure_stage0);
         cfg.cmake_args = cmake_args;
@@ -294,9 +300,9 @@ pub fn build(b: *Build) void {
     const cmake_args_request = collectArgs(
         b,
         "cmake-arg",
-        "Extra argv element passed to cmake --preset. Repeat once per argument.",
+        "Extra argv element passed to the direct cmake configure invocation. Repeat once per argument.",
         "cmake-args-json",
-        "JSON array of extra argv elements passed to cmake --preset.",
+        "JSON array of extra argv elements passed to the direct cmake configure invocation.",
     );
     const build_args_request = collectArgsWithLegacy(
         b,
@@ -349,11 +355,13 @@ pub fn build(b: *Build) void {
         .ctest_junit = ctest_junit,
     };
 
+    const root_configure_args = buildRootConfigureArgs(b, configure_defaults);
+
     const root_configure_step = addDriverStep(
         b,
         "root-configure",
         "Run the legacy top-level CMake configure for the selected profile and build directory",
-        configure_defaults.config(.root_configure),
+        configure_defaults.rootConfigureConfig(root_configure_args),
         &.{},
     );
 
@@ -789,6 +797,18 @@ fn buildStageConfigureArgs(
         args.append(b.fmt("-DCADICAL={s}", .{cadicalPath(b, defaults.binary_dir)})) catch @panic("OOM");
         args.append(b.fmt("-DLEANTAR={s}", .{leantarPath(b, defaults.binary_dir)})) catch @panic("OOM");
     }
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn buildRootConfigureArgs(
+    b: *Build,
+    defaults: DriverDefaults,
+) []const []const u8 {
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+
+    args.appendSlice(profilePresetCmakeArgs(defaults.profile)) catch @panic("OOM");
+    args.appendSlice(defaults.cmake_args) catch @panic("OOM");
     return args.toOwnedSlice() catch @panic("OOM");
 }
 

@@ -290,7 +290,7 @@ configure_artifact_fingerprint() {
     items+=("$PREPARE_LLVM_SCRIPT")
   fi
   if [[ "$mode" == root ]]; then
-    items+=("preset=$PROFILE")
+    items+=("profile=$PROFILE")
   fi
   if use_mimalloc_enabled; then
     items+=("USE_MIMALLOC=ON" "mimalloc_git_ref=v2.2.3")
@@ -685,7 +685,7 @@ run_root_configure() {
   fi
 
   mkdir -p "$BINARY_DIR"
-  local -a cmake_cmd=(cmake --preset "$PROFILE" -B "$BINARY_DIR")
+  local -a cmake_cmd=(cmake "-GUnix Makefiles" -S "$REPO_ROOT" -B "$BINARY_DIR")
   if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
     cmake_cmd+=("${effective_cmake_args[@]}")
   fi

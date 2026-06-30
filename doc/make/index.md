@@ -49,6 +49,9 @@ stage-local `zig build` steps are the preferred entrypoints.
 Cold stage-local configure flows also prepare the `mimalloc` source tree when
 `USE_MIMALLOC=ON`, so they no longer require a prior `zig build root-configure`
 just to populate that sibling dependency checkout.
+The legacy `zig build root-configure` path reuses the same checkout when it is
+already present instead of repopulating it through CMake's old `FetchContent`
+bootstrap.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 
@@ -66,16 +69,18 @@ Pass these along with `zig build`. The driver forwards them into the existing
 CMake/Make/CTest layers.
 
 * `-Dprofile=`\
-  Select the CMake preset to drive. Valid values are `release`, `dev-release`
-  (default), `debug`, `relwithassert`, `sanitize`, and `sandebug`.
+  Select the build profile to drive. Valid values are `release`,
+  `dev-release` (default), `debug`, `relwithassert`, `sanitize`, and
+  `sandebug`.
 
 * `-Dbinary-dir=`\
-  Override the build directory. By default this follows the selected preset,
+  Override the build directory. By default this follows the selected profile,
   e.g. `build/release` for `release` and `dev-release`.
 
 * `-Dcmake-arg=`\
-  Extra argv elements passed through to `cmake --preset ... -B ...`. Repeat
-  this option once per argument, for example
+  Extra argv elements passed through to the direct `cmake -S ... -B ...`
+  configure invocations used by `zig build root-configure` and the stage-local
+  configure steps. Repeat this option once per argument, for example
   `-Dcmake-arg=-DUSE_LAKE_CACHE=ON` or
   `-Dcmake-arg=-DCMAKE_CXX_COMPILER=clang++`.
   For CI- or script-generated argument lists, you can instead pass a JSON array

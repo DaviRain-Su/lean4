@@ -121,18 +121,21 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
 endif()
 
 if(USE_MIMALLOC)
-  FetchContent_Declare(
-    mimalloc
-    GIT_REPOSITORY https://github.com/microsoft/mimalloc
-    GIT_TAG v2.2.3
-    # Unnecessarily deep directory structure, but it saves us from a complicated
-    # stage0 update for now. If we ever update the other dependencies like
-    # cadical, it might be worth reorganizing the directory structure.
-    SOURCE_DIR
-    "${CMAKE_BINARY_DIR}/mimalloc/src/mimalloc"
-    EXCLUDE_FROM_ALL
-  )
-  FetchContent_MakeAvailable(mimalloc)
+  set(MIMALLOC_SOURCE_DIR "${CMAKE_BINARY_DIR}/mimalloc/src/mimalloc")
+  if(NOT EXISTS "${MIMALLOC_SOURCE_DIR}/include/mimalloc.h" OR NOT EXISTS "${MIMALLOC_SOURCE_DIR}/src/static.c")
+    FetchContent_Declare(
+      mimalloc
+      GIT_REPOSITORY https://github.com/microsoft/mimalloc
+      GIT_TAG v2.2.3
+      # Unnecessarily deep directory structure, but it saves us from a complicated
+      # stage0 update for now. If we ever update the other dependencies like
+      # cadical, it might be worth reorganizing the directory structure.
+      SOURCE_DIR
+      "${MIMALLOC_SOURCE_DIR}"
+      EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(mimalloc)
+  endif()
 endif()
 
 if(NOT STAGE1_PREV_STAGE)
