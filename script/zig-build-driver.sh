@@ -119,6 +119,39 @@ emit_prepare_llvm_args() {
   popd >/dev/null
 }
 
+effective_cmake_args=()
+
+refresh_effective_cmake_args() {
+  effective_cmake_args=()
+
+  if [[ -n "$PREPARE_LLVM_SCRIPT" ]]; then
+    while IFS= read -r arg; do
+      effective_cmake_args+=("$arg")
+    done < <(emit_prepare_llvm_args)
+  fi
+  if [[ ${#cmake_args[@]} -gt 0 ]]; then
+    effective_cmake_args+=("${cmake_args[@]}")
+  fi
+}
+
+cmake_define_value() {
+  local name=${1:?missing CMake define name}
+  shift
+
+  local prefix="-D${name}="
+  local value=
+  while [[ $# -gt 0 ]]; do
+    local arg=$1
+    shift
+    if [[ "$arg" == "$prefix"* ]]; then
+      value=${arg#"$prefix"}
+    fi
+  done
+
+  [[ -n "${value:-}" ]] || return 1
+  printf '%s\n' "$value"
+}
+
 host_executable_suffix() {
   case "$(uname -s)" in
     CYGWIN*|MINGW*|MSYS*|Windows_NT) printf '.exe' ;;
@@ -128,10 +161,18 @@ host_executable_suffix() {
 
 compiler_supports_closefrom() {
   local compiler=${1:?missing compiler}
+  local compiler_flags=${2-}
   local tmp_dir
   tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/cadical-closefrom.XXXXXX")
   local source_path="$tmp_dir/closefrom.cpp"
   local output_path="$tmp_dir/closefrom$(host_executable_suffix)"
+  local -a compiler_parts=()
+  local -a compiler_flag_parts=()
+
+  read -r -a compiler_parts <<<"$compiler"
+  if [[ -n "$compiler_flags" ]]; then
+    read -r -a compiler_flag_parts <<<"$compiler_flags"
+  fi
 
   cat >"$source_path" <<'EOF'
 extern "C" {
@@ -144,7 +185,12 @@ int main() {
 }
 EOF
 
-  if "$compiler" -std=c++11 -o "$output_path" "$source_path" >/dev/null 2>&1; then
+  if [[ -n "$compiler_flags" ]]; then
+    if "${compiler_parts[@]}" -std=c++11 "${compiler_flag_parts[@]}" -o "$output_path" "$source_path" >/dev/null 2>&1; then
+      rm -rf "$tmp_dir"
+      return 0
+    fi
+  elif "${compiler_parts[@]}" -std=c++11 -o "$output_path" "$source_path" >/dev/null 2>&1; then
     rm -rf "$tmp_dir"
     return 0
   fi
@@ -251,6 +297,34 @@ cadical_binary_path() {
   printf '%s/cadical/cadical%s\n' "$BINARY_DIR" "$(host_executable_suffix)"
 }
 
+resolved_cadical_cxx=
+resolved_cadical_cxxflags=
+
+resolve_cadical_toolchain() {
+  refresh_effective_cmake_args
+
+  resolved_cadical_cxx=c++
+  resolved_cadical_cxxflags=
+
+  if cmake_define_value CMAKE_CXX_COMPILER "${effective_cmake_args[@]}" >/dev/null; then
+    resolved_cadical_cxx=$(cmake_define_value CMAKE_CXX_COMPILER "${effective_cmake_args[@]}")
+  fi
+  if cmake_define_value CMAKE_CXX_FLAGS "${effective_cmake_args[@]}" >/dev/null; then
+    resolved_cadical_cxxflags=$(cmake_define_value CMAKE_CXX_FLAGS "${effective_cmake_args[@]}")
+  fi
+  if command -v ccache >/dev/null 2>&1 && [[ "$resolved_cadical_cxx" != ccache\ * ]]; then
+    resolved_cadical_cxx="ccache $resolved_cadical_cxx"
+  fi
+  if ! compiler_supports_closefrom "$resolved_cadical_cxx" "$resolved_cadical_cxxflags"; then
+    if [[ "$resolved_cadical_cxxflags" != *-DNCLOSEFROM* ]]; then
+      if [[ -n "$resolved_cadical_cxxflags" ]]; then
+        resolved_cadical_cxxflags+=" "
+      fi
+      resolved_cadical_cxxflags+="-DNCLOSEFROM"
+    fi
+  fi
+}
+
 prepare_leantar() {
   local version=v0.1.19
   local executable_suffix
@@ -354,18 +428,11 @@ prepare_cadical() {
     git clone --depth 1 --branch rel-2.1.2 https://github.com/arminbiere/cadical "$source_dir"
   fi
 
-  local cadical_cxx=c++
-  if command -v ccache >/dev/null 2>&1; then
-    cadical_cxx="ccache $cadical_cxx"
-  fi
-  local cadical_cxxflags=
-  if ! compiler_supports_closefrom c++; then
-    cadical_cxxflags=-DNCLOSEFROM
-  fi
+  resolve_cadical_toolchain
 
   (
     cd "$source_dir"
-    make -f "$REPO_ROOT/src/cadical.mk" "CMAKE_EXECUTABLE_SUFFIX=$executable_suffix" "CXX=$cadical_cxx" "CXXFLAGS=$cadical_cxxflags"
+    make -j"$JOBS" -f "$REPO_ROOT/src/cadical.mk" "CMAKE_EXECUTABLE_SUFFIX=$executable_suffix" "CXX=$resolved_cadical_cxx" "CXXFLAGS=$resolved_cadical_cxxflags"
   )
 
   [[ -x "$cadical_bin" ]] || {
@@ -382,26 +449,42 @@ prepare_host_tools_fingerprint() {
   compute_action_fingerprint "prepare-host-tools" "$CONFIG_PATH" "${BASH_SOURCE[0]}" "$REPO_ROOT/src/cadical.mk"
 }
 
-run_prepare_host_tools() {
-  local fingerprint
-  fingerprint=$(prepare_host_tools_fingerprint)
-  local stamp_path
-  stamp_path=$(stamp_path_for "prepare-host-tools")
+prepare_host_tools_artifact_fingerprint() {
+  resolve_cadical_toolchain
+  compute_action_fingerprint \
+    "prepare-host-tools-artifacts" \
+    "$REPO_ROOT/src/cadical.mk" \
+    "leantar_version=v0.1.19" \
+    "leantar_target_dir=$(leantar_target_dir)" \
+    "cadical_git_ref=rel-2.1.2" \
+    "cadical_cxx=$resolved_cadical_cxx" \
+    "cadical_cxxflags=$resolved_cadical_cxxflags"
+}
 
-  if host_tools_ready && stamp_matches "$stamp_path" "$fingerprint"; then
+run_prepare_host_tools() {
+  local fingerprint artifact_fingerprint
+  fingerprint=$(prepare_host_tools_fingerprint)
+  artifact_fingerprint=$(prepare_host_tools_artifact_fingerprint)
+  local stamp_path artifact_stamp_path
+  stamp_path=$(stamp_path_for "prepare-host-tools")
+  artifact_stamp_path=$(stamp_path_for "prepare-host-tools-artifacts")
+
+  if host_tools_ready && stamp_matches "$stamp_path" "$fingerprint" && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
     printf '[zig-build-driver] prepare-host-tools is up-to-date; skipping\n'
     return 0
   fi
 
-  if host_tools_ready; then
+  if host_tools_ready && stamp_matches "$artifact_stamp_path" "$artifact_fingerprint"; then
     printf '[zig-build-driver] prepare-host-tools inputs changed; refreshing stamp without rebuilding existing tools\n'
     write_stamp "$stamp_path" "$fingerprint"
+    write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
     return 0
   fi
 
   prepare_leantar
   prepare_cadical
   write_stamp "$stamp_path" "$fingerprint"
+  write_stamp "$artifact_stamp_path" "$artifact_fingerprint"
 }
 
 run_build_target() {

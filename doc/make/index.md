@@ -79,9 +79,11 @@ CMake/Make/CTest layers.
   via `-Dcmake-args-json='["-DUSE_LAKE_CACHE=ON","-DCMAKE_CXX_COMPILER=clang++"]'`.
   Any successful `zig build` driver step saves the most recent configure-time
   argv in `<binary-dir>/.zig-driver.json`, and later `zig build stage1`,
-  `zig build test`, `zig build install`, or benchmark-helper invocations against
-  that same `-Dbinary-dir` will reuse those saved `cmake` arguments unless you
-  override them again on the command line.
+  `zig build test`, `zig build install`, `zig build prepare-host-tools`, or
+  benchmark-helper invocations against that same `-Dbinary-dir` will reuse
+  those saved `cmake` arguments unless you override them again on the command
+  line. In particular, any saved `CMAKE_CXX_COMPILER` or `CMAKE_CXX_FLAGS`
+  settings are also reused when `prepare-host-tools` recompiles `cadical`.
   Passing `-Dcmake-args-json=[]` counts as an explicit override and clears any
   previously saved extra `cmake` arguments for that `-Dbinary-dir`.
   The same metadata also restores the configured profile and parallelism defaults,
