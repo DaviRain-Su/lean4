@@ -52,6 +52,9 @@ just to populate that sibling dependency checkout.
 The legacy `zig build root-configure` path reuses the same checkout when it is
 already present instead of repopulating it through CMake's old `FetchContent`
 bootstrap.
+When host tools are needed, that same root-compatible path also reuses the
+driver-managed `cadical` and `leantar` locations instead of letting the
+top-level CMake bootstrap them independently.
 
 You can replace `$(nproc || sysctl -n hw.logicalcpu)` with the desired parallelism amount.
 

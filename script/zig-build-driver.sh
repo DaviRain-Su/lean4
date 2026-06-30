@@ -200,6 +200,15 @@ use_mimalloc_enabled() {
   cmake_bool_is_true "$value"
 }
 
+root_requires_host_tools() {
+  local system_name=
+  if cmake_define_value CMAKE_SYSTEM_NAME "${effective_cmake_args[@]}" >/dev/null; then
+    system_name=$(cmake_define_value CMAKE_SYSTEM_NAME "${effective_cmake_args[@]}")
+    [[ "$system_name" == "Emscripten" ]] && return 1
+  fi
+  return 0
+}
+
 host_executable_suffix() {
   case "$(uname -s)" in
     CYGWIN*|MINGW*|MSYS*|Windows_NT) printf '.exe' ;;
@@ -291,6 +300,10 @@ configure_artifact_fingerprint() {
   fi
   if [[ "$mode" == root ]]; then
     items+=("profile=$PROFILE")
+    while IFS= read -r arg; do
+      [[ -n "$arg" ]] || continue
+      items+=("$arg")
+    done < <(emit_root_host_tool_args)
   fi
   if use_mimalloc_enabled; then
     items+=("USE_MIMALLOC=ON" "mimalloc_git_ref=v2.2.3")
@@ -562,6 +575,18 @@ host_tools_ready() {
   [[ -x "$(leantar_binary_path)" && -x "$(cadical_binary_path)" ]]
 }
 
+emit_root_host_tool_args() {
+  if ! root_requires_host_tools; then
+    return 0
+  fi
+  if ! cmake_define_value CADICAL "${effective_cmake_args[@]}" >/dev/null; then
+    printf '%s\n' "-DCADICAL=$(cadical_binary_path)"
+  fi
+  if ! cmake_define_value LEANTAR "${effective_cmake_args[@]}" >/dev/null; then
+    printf '%s\n' "-DLEANTAR=$(leantar_binary_path)"
+  fi
+}
+
 prepare_host_tools_fingerprint() {
   compute_action_fingerprint "prepare-host-tools" "$CONFIG_PATH" "${BASH_SOURCE[0]}" "$REPO_ROOT/src/cadical.mk"
 }
@@ -666,8 +691,16 @@ run_root_configure() {
   local fingerprint artifact_fingerprint
   fingerprint=$(configure_fingerprint "root-configure" "$REPO_ROOT")
   refresh_effective_cmake_args
+  if root_requires_host_tools; then
+    run_prepare_host_tools
+  fi
   artifact_fingerprint=$(configure_artifact_fingerprint "root-configure" "$REPO_ROOT" root)
   prepare_mimalloc_sources
+  local -a root_host_tool_args=()
+  while IFS= read -r arg; do
+    [[ -n "$arg" ]] || continue
+    root_host_tool_args+=("$arg")
+  done < <(emit_root_host_tool_args)
   local stamp_path artifact_stamp_path
   stamp_path=$(stamp_path_for "root-configure")
   artifact_stamp_path=$(stamp_path_for "root-configure-artifacts")
@@ -688,6 +721,9 @@ run_root_configure() {
   local -a cmake_cmd=(cmake "-GUnix Makefiles" -S "$REPO_ROOT" -B "$BINARY_DIR")
   if [[ ${#effective_cmake_args[@]} -gt 0 ]]; then
     cmake_cmd+=("${effective_cmake_args[@]}")
+  fi
+  if [[ ${#root_host_tool_args[@]} -gt 0 ]]; then
+    cmake_cmd+=("${root_host_tool_args[@]}")
   fi
   "${cmake_cmd[@]}"
   write_stamp "$stamp_path" "$fingerprint"
