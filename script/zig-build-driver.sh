@@ -507,7 +507,7 @@ prepare_host_tools_fingerprint() {
 
 prepare_host_tools_artifact_fingerprint() {
   resolve_cadical_toolchain
-  compute_action_fingerprint \
+  compute_inputs_fingerprint \
     "prepare-host-tools-artifacts" \
     "$REPO_ROOT/src/cadical.mk" \
     "leantar_version=v0.1.19" \
