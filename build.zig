@@ -45,9 +45,68 @@ const StageName = enum {
     }
 };
 
-const BuildTargetAction = struct {
-    stage: ?StageName,
-    target: []const u8,
+const RootBuildTarget = enum {
+    stage1_configure,
+    stage1,
+    stage2,
+    stage3,
+    bench,
+    bench_part1,
+    bench_part2,
+    clean_stdlib,
+    cache_get,
+    check_stage3,
+
+    fn cmakeTargetName(self: RootBuildTarget) []const u8 {
+        return switch (self) {
+            .stage1_configure => "stage1-configure",
+            .stage1 => "stage1",
+            .stage2 => "stage2",
+            .stage3 => "stage3",
+            .bench => "bench",
+            .bench_part1 => "bench-part1",
+            .bench_part2 => "bench-part2",
+            .clean_stdlib => "clean-stdlib",
+            .cache_get => "cache-get",
+            .check_stage3 => "check-stage3",
+        };
+    }
+};
+
+const StageBuildTarget = enum {
+    update_stage0,
+    update_stage0_commit,
+
+    fn cmakeTargetName(self: StageBuildTarget) []const u8 {
+        return switch (self) {
+            .update_stage0 => "update-stage0",
+            .update_stage0_commit => "update-stage0-commit",
+        };
+    }
+};
+
+const StageBuildAction = struct {
+    stage: StageName,
+    target: StageBuildTarget,
+};
+
+const BuildTargetAction = union(enum) {
+    root: RootBuildTarget,
+    stage: StageBuildAction,
+
+    fn stageName(self: BuildTargetAction) ?[]const u8 {
+        return switch (self) {
+            .root => null,
+            .stage => |stage_build| stage_build.stage.asString(),
+        };
+    }
+
+    fn targetName(self: BuildTargetAction) []const u8 {
+        return switch (self) {
+            .root => |target| target.cmakeTargetName(),
+            .stage => |stage_build| stage_build.target.cmakeTargetName(),
+        };
+    }
 };
 
 const InstallAction = struct {
@@ -65,8 +124,8 @@ const PrepareBenchStagesAction = struct {
 
 const RebootstrapAction = struct {
     update_stage: StageName,
-    update_target: []const u8,
-    rebuild_target: []const u8,
+    update_target: StageBuildTarget,
+    rebuild_target: RootBuildTarget,
     test_stage: StageName,
     git_commit_message: []const u8,
 };
@@ -159,11 +218,15 @@ const DriverDefaults = struct {
         };
     }
 
-    fn buildTargetConfig(self: DriverDefaults, stage: ?StageName, target: []const u8) DriverConfig {
-        return self.config(.{ .build_target = .{
+    fn rootBuildTargetConfig(self: DriverDefaults, target: RootBuildTarget) DriverConfig {
+        return self.config(.{ .build_target = .{ .root = target } });
+    }
+
+    fn stageBuildTargetConfig(self: DriverDefaults, stage: StageName, target: StageBuildTarget) DriverConfig {
+        return self.config(.{ .build_target = .{ .stage = .{
             .stage = stage,
             .target = target,
-        } });
+        } } });
     }
 
     fn ctestConfig(self: DriverDefaults, stage: StageName, junit_path: ?[]const u8) DriverConfig {
@@ -184,8 +247,8 @@ const DriverDefaults = struct {
     fn checkRebootstrapConfig(self: DriverDefaults) DriverConfig {
         return self.config(.{ .check_rebootstrap = .{
             .update_stage = .stage1,
-            .update_target = "update-stage0",
-            .rebuild_target = "stage1",
+            .update_target = .update_stage0,
+            .rebuild_target = .stage1,
             .test_stage = .stage1,
             .git_commit_message = "chore: update-stage0",
         } });
@@ -279,43 +342,39 @@ pub fn build(b: *Build) void {
 
     const configure_dependency_cmd = createDriverCommand(b, runtime_defaults.config(.configure));
 
-    const stage1_configure_step = addBuildTargetStep(
+    const stage1_configure_step = addRootBuildTargetStep(
         b,
         runtime_defaults,
         "stage1-configure",
         "Build stage0 and configure the stage1 sub-build",
-        null,
-        "stage1-configure",
+        .stage1_configure,
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage1_step = addBuildTargetStep(
+    const stage1_step = addRootBuildTargetStep(
         b,
         runtime_defaults,
         "stage1",
         "Build stage1",
-        null,
-        "stage1",
+        .stage1,
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage2_step = addBuildTargetStep(
+    const stage2_step = addRootBuildTargetStep(
         b,
         runtime_defaults,
         "stage2",
         "Build stage2",
-        null,
-        "stage2",
+        .stage2,
         &.{&configure_dependency_cmd.step},
     );
 
-    const stage3_step = addBuildTargetStep(
+    const stage3_step = addRootBuildTargetStep(
         b,
         runtime_defaults,
         "stage3",
         "Build stage3",
-        null,
-        "stage3",
+        .stage3,
         &.{&configure_dependency_cmd.step},
     );
 
@@ -351,14 +410,14 @@ pub fn build(b: *Build) void {
         &.{selected_stage_step},
     );
 
-    _ = addBuildTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", null, "bench", &.{&configure_dependency_cmd.step});
-    _ = addBuildTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", null, "bench-part1", &.{&configure_dependency_cmd.step});
-    _ = addBuildTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", null, "bench-part2", &.{&configure_dependency_cmd.step});
-    _ = addBuildTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", null, "clean-stdlib", &.{&configure_dependency_cmd.step});
-    _ = addBuildTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", null, "cache-get", &.{stage1_configure_step});
-    _ = addBuildTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", null, "check-stage3", &.{stage3_step});
-    _ = addBuildTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, "update-stage0", &.{selected_stage_step});
-    _ = addBuildTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, "update-stage0-commit", &.{selected_stage_step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "bench", "Run the full benchmark suite", .bench, &.{&configure_dependency_cmd.step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part1", "Run benchmark suite part 1", .bench_part1, &.{&configure_dependency_cmd.step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "bench-part2", "Run benchmark suite part 2", .bench_part2, &.{&configure_dependency_cmd.step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "clean-stdlib", "Remove generated stdlib artifacts from the selected build directory", .clean_stdlib, &.{&configure_dependency_cmd.step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "cache-get", "Download the Lake cache for the selected build directory", .cache_get, &.{stage1_configure_step});
+    _ = addRootBuildTargetStep(b, runtime_defaults, "check-stage3", "Build stage3 and compare it against stage2", .check_stage3, &.{stage3_step});
+    _ = addStageBuildTargetStep(b, runtime_defaults, "update-stage0", "Refresh stage0 from the selected stage (default stage1)", selected_stage, .update_stage0, &.{selected_stage_step});
+    _ = addStageBuildTargetStep(b, runtime_defaults, "update-stage0-commit", "Refresh stage0 from the selected stage and create the update commit", selected_stage, .update_stage0_commit, &.{selected_stage_step});
     attachInstallStep(b, runtime_defaults, selected_stage, &.{selected_stage_step});
 
     const prepare_bench_stages_step = addDriverStep(
@@ -369,13 +428,12 @@ pub fn build(b: *Build) void {
         &.{stage1_step},
     );
 
-    _ = addBuildTargetStep(
+    _ = addRootBuildTargetStep(
         b,
         runtime_defaults,
         "bench-stage2",
         "Prepare benchmark staging directories and then build stage2",
-        null,
-        "stage2",
+        .stage2,
         &.{prepare_bench_stages_step},
     );
 
@@ -400,16 +458,27 @@ fn addDriverStep(
     return addNamedStep(b, name, description, createDriverCommand(b, config), deps);
 }
 
-fn addBuildTargetStep(
+fn addRootBuildTargetStep(
     b: *Build,
     defaults: DriverDefaults,
     name: []const u8,
     description: []const u8,
-    stage: ?StageName,
-    target: []const u8,
+    target: RootBuildTarget,
     deps: []const *Step,
 ) *Step {
-    return addDriverStep(b, name, description, defaults.buildTargetConfig(stage, target), deps);
+    return addDriverStep(b, name, description, defaults.rootBuildTargetConfig(target), deps);
+}
+
+fn addStageBuildTargetStep(
+    b: *Build,
+    defaults: DriverDefaults,
+    name: []const u8,
+    description: []const u8,
+    stage: StageName,
+    target: StageBuildTarget,
+    deps: []const *Step,
+) *Step {
+    return addDriverStep(b, name, description, defaults.stageBuildTargetConfig(stage, target), deps);
 }
 
 fn addCTestStep(
@@ -479,10 +548,10 @@ fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
         .configure => "driver-configure",
         .ctest => |action| b.fmt("driver-ctest-{s}", .{action.stage.asString()}),
         .install => |action| b.fmt("driver-install-{s}", .{action.stage.asString()}),
-        .build_target => |action| if (action.stage) |stage|
-            b.fmt("driver-stage-{s}-{s}", .{ stage.asString(), action.target })
-        else
-            b.fmt("driver-root-{s}", .{action.target}),
+        .build_target => |action| switch (action) {
+            .root => |target| b.fmt("driver-root-{s}", .{target.cmakeTargetName()}),
+            .stage => |stage_build| b.fmt("driver-stage-{s}-{s}", .{ stage_build.stage.asString(), stage_build.target.cmakeTargetName() }),
+        },
         .prepare_bench_stages => "driver-prepare-bench-stages",
         .check_rebootstrap => "driver-check-rebootstrap",
     };
@@ -746,7 +815,7 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
 
 fn actionStage(action: DriverAction) ?[]const u8 {
     return switch (action) {
-        .build_target => |build_target| if (build_target.stage) |stage| stage.asString() else null,
+        .build_target => |build_target| build_target.stageName(),
         .install => |install| install.stage.asString(),
         .ctest => |ctest| ctest.stage.asString(),
         .prepare_bench_stages => |prepare| prepare.source_stage.asString(),
@@ -756,7 +825,7 @@ fn actionStage(action: DriverAction) ?[]const u8 {
 
 fn actionTarget(action: DriverAction) ?[]const u8 {
     return switch (action) {
-        .build_target => |build_target| build_target.target,
+        .build_target => |build_target| build_target.targetName(),
         else => null,
     };
 }
@@ -777,14 +846,14 @@ fn actionUpdateStage(action: DriverAction) ?[]const u8 {
 
 fn actionUpdateTarget(action: DriverAction) ?[]const u8 {
     return switch (action) {
-        .check_rebootstrap => |rebootstrap| rebootstrap.update_target,
+        .check_rebootstrap => |rebootstrap| rebootstrap.update_target.cmakeTargetName(),
         else => null,
     };
 }
 
 fn actionRebuildTarget(action: DriverAction) ?[]const u8 {
     return switch (action) {
-        .check_rebootstrap => |rebootstrap| rebootstrap.rebuild_target,
+        .check_rebootstrap => |rebootstrap| rebootstrap.rebuild_target.cmakeTargetName(),
         else => null,
     };
 }
