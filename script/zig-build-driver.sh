@@ -33,6 +33,139 @@ emit_prepare_llvm_args() {
   popd >/dev/null
 }
 
+host_executable_suffix() {
+  case "$(uname -s)" in
+    CYGWIN*|MINGW*|MSYS*|Windows_NT) printf '.exe' ;;
+    *) printf '' ;;
+  esac
+}
+
+copy_program_if_needed() {
+  local source=${1:?missing source program}
+  local destination=${2:?missing destination program}
+  mkdir -p "$(dirname "$destination")"
+  cmake -E copy_if_different "$source" "$destination"
+  chmod +x "$destination" || true
+}
+
+run_configure_dir() {
+  local build_dir=${1:?missing configure build directory}
+  local source_dir=${2:?missing configure source directory}
+  mkdir -p "$build_dir"
+  rm -rf \
+    "$build_dir/CMakeCache.txt" \
+    "$build_dir/CMakeFiles" \
+    "$build_dir/Makefile" \
+    "$build_dir/cmake_install.cmake"
+  local -a cmake_cmd=(cmake "-GUnix Makefiles" -S "$source_dir" -B "$build_dir")
+  if [[ ${#cmake_args[@]} -gt 0 ]]; then
+    cmake_cmd+=("${cmake_args[@]}")
+  fi
+  "${cmake_cmd[@]}"
+}
+
+prepare_leantar() {
+  local version=v0.1.19
+  local executable_suffix
+  executable_suffix=$(host_executable_suffix)
+
+  local target archive_suffix
+  case "$(uname -s)" in
+    CYGWIN*|MINGW*|MSYS*|Windows_NT)
+      target=x86_64-pc-windows-msvc
+      archive_suffix=.zip
+      ;;
+    Darwin)
+      archive_suffix=.tar.gz
+      case "$(uname -m)" in
+        arm64|aarch64) target=aarch64-apple-darwin ;;
+        *) target=x86_64-apple-darwin ;;
+      esac
+      ;;
+    *)
+      archive_suffix=.tar.gz
+      case "$(uname -m)" in
+        arm64|aarch64) target=aarch64-unknown-linux-musl ;;
+        *) target=x86_64-unknown-linux-musl ;;
+      esac
+      ;;
+  esac
+
+  local target_dir="$BINARY_DIR/leantar/leantar-$version-$target"
+  local leantar_bin="$target_dir/leantar$executable_suffix"
+  [[ -x "$leantar_bin" ]] && return 0
+
+  if command -v leantar >/dev/null 2>&1; then
+    copy_program_if_needed "$(command -v leantar)" "$leantar_bin"
+    return 0
+  fi
+
+  local archive="$BINARY_DIR/leantar$archive_suffix"
+  mkdir -p "$BINARY_DIR/leantar"
+  curl --fail --location --output "$archive" \
+    "https://github.com/digama0/leangz/releases/download/$version/leantar-$version-$target$archive_suffix"
+
+  if [[ "$archive_suffix" == ".zip" ]]; then
+    python3 - "$archive" "$BINARY_DIR/leantar" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+archive = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+destination.mkdir(parents=True, exist_ok=True)
+with zipfile.ZipFile(archive) as zf:
+    zf.extractall(destination)
+PY
+  else
+    tar -xzf "$archive" -C "$BINARY_DIR/leantar"
+  fi
+
+  [[ -x "$leantar_bin" ]] || {
+    echo "failed to prepare leantar at $leantar_bin" >&2
+    exit 1
+  }
+}
+
+prepare_cadical() {
+  local executable_suffix
+  executable_suffix=$(host_executable_suffix)
+  local cadical_bin="$BINARY_DIR/cadical/cadical$executable_suffix"
+  [[ -x "$cadical_bin" ]] && return 0
+
+  if command -v cadical >/dev/null 2>&1; then
+    copy_program_if_needed "$(command -v cadical)" "$cadical_bin"
+    return 0
+  fi
+
+  local source_dir="$BINARY_DIR/cadical/src/cadical"
+  if [[ ! -d "$source_dir/.git" ]]; then
+    rm -rf "$source_dir"
+    mkdir -p "$(dirname "$source_dir")"
+    git clone --depth 1 --branch rel-2.1.2 https://github.com/arminbiere/cadical "$source_dir"
+  fi
+
+  local cadical_cxx=c++
+  if command -v ccache >/dev/null 2>&1; then
+    cadical_cxx="ccache $cadical_cxx"
+  fi
+
+  (
+    cd "$source_dir"
+    make -f "$REPO_ROOT/src/cadical.mk" "CMAKE_EXECUTABLE_SUFFIX=$executable_suffix" "CXX=$cadical_cxx"
+  )
+
+  [[ -x "$cadical_bin" ]] || {
+    echo "failed to prepare cadical at $cadical_bin" >&2
+    exit 1
+  }
+}
+
+run_prepare_host_tools() {
+  prepare_leantar
+  prepare_cadical
+}
+
 run_build_target() {
   local stage=${1-}
   local target=${2:?missing build target}
@@ -106,18 +239,17 @@ case "$ACTION" in
     "${cmake_cmd[@]}"
     cp "$METADATA_PATH" "$BINARY_DIR/.zig-driver.json"
     ;;
+  prepare-host-tools)
+    run_prepare_host_tools
+    ;;
+  configure-stage0)
+    run_configure_dir "$BINARY_DIR/stage0" "$REPO_ROOT/stage0/src"
+    ;;
   configure-stage)
-    mkdir -p "$BINARY_DIR/$ACTION_STAGE"
-    rm -rf \
-      "$BINARY_DIR/$ACTION_STAGE/CMakeCache.txt" \
-      "$BINARY_DIR/$ACTION_STAGE/CMakeFiles" \
-      "$BINARY_DIR/$ACTION_STAGE/Makefile" \
-      "$BINARY_DIR/$ACTION_STAGE/cmake_install.cmake"
-    cmake_cmd=(cmake "-GUnix Makefiles" -S "$REPO_ROOT/src" -B "$BINARY_DIR/$ACTION_STAGE")
-    if [[ ${#cmake_args[@]} -gt 0 ]]; then
-      cmake_cmd+=("${cmake_args[@]}")
-    fi
-    "${cmake_cmd[@]}"
+    run_configure_dir "$BINARY_DIR/$ACTION_STAGE" "$REPO_ROOT/src"
+    ;;
+  build-stage0)
+    run_build_stage stage0
     ;;
   build-target)
     run_build_target "$ACTION_STAGE" "$ACTION_TARGET"

@@ -45,16 +45,6 @@ const StageName = enum {
     }
 };
 
-const RootBuildTarget = enum {
-    stage0,
-
-    fn cmakeTargetName(self: RootBuildTarget) []const u8 {
-        return switch (self) {
-            .stage0 => "stage0",
-        };
-    }
-};
-
 const StageBuildTarget = enum {
     update_stage0,
     update_stage0_commit,
@@ -77,9 +67,17 @@ const StageBuildTarget = enum {
     }
 };
 
-const StageBuildAction = struct {
+const BuildTargetAction = struct {
     stage: StageName,
     target: StageBuildTarget,
+
+    fn stageName(self: BuildTargetAction) ?[]const u8 {
+        return self.stage.asString();
+    }
+
+    fn targetName(self: BuildTargetAction) []const u8 {
+        return self.target.cmakeTargetName();
+    }
 };
 
 const BuildStageAction = struct {
@@ -88,25 +86,6 @@ const BuildStageAction = struct {
 
 const ConfigureStageAction = struct {
     stage: StageName,
-};
-
-const BuildTargetAction = union(enum) {
-    root: RootBuildTarget,
-    stage: StageBuildAction,
-
-    fn stageName(self: BuildTargetAction) ?[]const u8 {
-        return switch (self) {
-            .root => null,
-            .stage => |stage_build| stage_build.stage.asString(),
-        };
-    }
-
-    fn targetName(self: BuildTargetAction) []const u8 {
-        return switch (self) {
-            .root => |target| target.cmakeTargetName(),
-            .stage => |stage_build| stage_build.target.cmakeTargetName(),
-        };
-    }
 };
 
 const InstallAction = struct {
@@ -132,8 +111,11 @@ const RebootstrapAction = struct {
 
 const DriverAction = union(enum) {
     configure,
+    prepare_host_tools,
+    configure_stage0,
     configure_stage: ConfigureStageAction,
     build_target: BuildTargetAction,
+    build_stage0,
     build_stage: BuildStageAction,
     install: InstallAction,
     ctest: CTestAction,
@@ -143,8 +125,11 @@ const DriverAction = union(enum) {
     fn asString(self: DriverAction) []const u8 {
         return switch (self) {
             .configure => "configure",
+            .prepare_host_tools => "prepare-host-tools",
+            .configure_stage0 => "configure-stage0",
             .configure_stage => "configure-stage",
             .build_target => "build-target",
+            .build_stage0 => "build-stage0",
             .build_stage => "build-stage",
             .install => "install",
             .ctest => "ctest",
@@ -222,21 +207,31 @@ const DriverDefaults = struct {
         };
     }
 
-    fn rootBuildTargetConfig(self: DriverDefaults, target: RootBuildTarget) DriverConfig {
-        return self.config(.{ .build_target = .{ .root = target } });
-    }
-
     fn stageBuildTargetConfig(self: DriverDefaults, stage: StageName, target: StageBuildTarget) DriverConfig {
-        return self.config(.{ .build_target = .{ .stage = .{
+        return self.config(.{ .build_target = .{
             .stage = stage,
             .target = target,
-        } } });
+        } });
     }
 
     fn stageBuildTargetConfigWithJobs(self: DriverDefaults, stage: StageName, target: StageBuildTarget, jobs: usize) DriverConfig {
         var cfg = self.stageBuildTargetConfig(stage, target);
         cfg.jobs = jobs;
         return cfg;
+    }
+
+    fn prepareHostToolsConfig(self: DriverDefaults) DriverConfig {
+        return self.config(.prepare_host_tools);
+    }
+
+    fn configureStage0Config(self: DriverDefaults, cmake_args: []const []const u8) DriverConfig {
+        var cfg = self.config(.configure_stage0);
+        cfg.cmake_args = cmake_args;
+        return cfg;
+    }
+
+    fn buildStage0Config(self: DriverDefaults) DriverConfig {
+        return self.config(.build_stage0);
     }
 
     fn buildStageConfig(self: DriverDefaults, stage: StageName) DriverConfig {
@@ -360,15 +355,30 @@ pub fn build(b: *Build) void {
         &.{},
     );
 
-    const configure_dependency_cmd = createDriverCommand(b, runtime_defaults.config(.configure));
-
-    const stage0_step = addRootBuildTargetStep(
+    const prepare_host_tools_step = addDriverStep(
         b,
-        runtime_defaults,
+        "prepare-host-tools",
+        "Prepare host tools needed by stage-local bootstrap builds",
+        runtime_defaults.prepareHostToolsConfig(),
+        &.{},
+    );
+
+    const stage0_configure_args = buildStage0ConfigureArgs(b, runtime_defaults);
+
+    const stage0_configure_step = addDriverStep(
+        b,
+        "stage0-configure",
+        "Prepare host tools and configure the stage0 sub-build",
+        runtime_defaults.configureStage0Config(stage0_configure_args),
+        &.{prepare_host_tools_step},
+    );
+
+    const stage0_step = addDriverStep(
+        b,
         "stage0",
         "Build stage0",
-        .stage0,
-        &.{&configure_dependency_cmd.step},
+        runtime_defaults.buildStage0Config(),
+        &.{stage0_configure_step},
     );
 
     const stage1_configure_args = buildStageConfigureArgs(b, runtime_defaults, .stage1);
@@ -569,17 +579,6 @@ fn addDriverStep(
     return addNamedStep(b, name, description, createDriverCommand(b, config), deps);
 }
 
-fn addRootBuildTargetStep(
-    b: *Build,
-    defaults: DriverDefaults,
-    name: []const u8,
-    description: []const u8,
-    target: RootBuildTarget,
-    deps: []const *Step,
-) *Step {
-    return addDriverStep(b, name, description, defaults.rootBuildTargetConfig(target), deps);
-}
-
 fn addStageBuildTargetStep(
     b: *Build,
     defaults: DriverDefaults,
@@ -680,14 +679,14 @@ fn createDriverFiles(b: *Build, config: DriverConfig) DriverFiles {
 fn driverFileStem(b: *Build, config: DriverConfig) []const u8 {
     return switch (config.action) {
         .configure => "driver-configure",
+        .prepare_host_tools => "driver-prepare-host-tools",
+        .configure_stage0 => "driver-configure-stage0",
         .configure_stage => |action| b.fmt("driver-configure-stage-{s}", .{action.stage.asString()}),
+        .build_stage0 => "driver-build-stage0",
         .ctest => |action| b.fmt("driver-ctest-{s}", .{action.stage.asString()}),
         .install => |action| b.fmt("driver-install-{s}", .{action.stage.asString()}),
         .build_stage => |action| b.fmt("driver-build-stage-{s}", .{action.stage.asString()}),
-        .build_target => |action| switch (action) {
-            .root => |target| b.fmt("driver-root-{s}", .{target.cmakeTargetName()}),
-            .stage => |stage_build| b.fmt("driver-stage-{s}-{s}", .{ stage_build.stage.asString(), stage_build.target.cmakeTargetName() }),
-        },
+        .build_target => |action| b.fmt("driver-stage-{s}-{s}", .{ action.stage.asString(), action.target.cmakeTargetName() }),
         .prepare_bench_stages => "driver-prepare-bench-stages",
         .check_rebootstrap => "driver-check-rebootstrap",
     };
@@ -748,6 +747,87 @@ fn buildStageConfigureArgs(
         args.append(b.fmt("-DLEANTAR={s}", .{leantarPath(b, defaults.binary_dir)})) catch @panic("OOM");
     }
     return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn buildStage0ConfigureArgs(
+    b: *Build,
+    defaults: DriverDefaults,
+) []const []const u8 {
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+
+    args.appendSlice(filterStage0CmakeArgs(b, defaults.cmake_args)) catch @panic("OOM");
+    args.append("-DSTAGE=0") catch @panic("OOM");
+    args.append("-DUSE_GITHASH=OFF") catch @panic("OOM");
+    args.append(b.fmt("-DLEANTAR={s}", .{leantarPath(b, defaults.binary_dir)})) catch @panic("OOM");
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn filterStage0CmakeArgs(
+    b: *Build,
+    raw_args: []const []const u8,
+) []const []const u8 {
+    var args = std.array_list.Managed([]const u8).init(b.allocator);
+    defer args.deinit();
+
+    for (raw_args) |arg| {
+        if (rewriteStage0CmakeArg(b, arg)) |forwarded| {
+            args.append(forwarded) catch @panic("OOM");
+        }
+    }
+    return args.toOwnedSlice() catch @panic("OOM");
+}
+
+fn rewriteStage0CmakeArg(b: *Build, arg: []const u8) ?[]const u8 {
+    const name = cmakeArgName(arg) orelse return null;
+    if (mem.startsWith(u8, name, "STAGE0_")) {
+        return stripStagePrefixedCmakeArg(b, arg, name, "STAGE0_");
+    }
+    if (mem.startsWith(u8, name, "STAGE1_")) {
+        return null;
+    }
+    if (mem.startsWith(u8, name, "CMAKE_")) {
+        if (mem.eql(u8, name, "CMAKE_BUILD_TYPE") or mem.eql(u8, name, "CMAKE_HOME_DIRECTORY")) {
+            return null;
+        }
+        return arg;
+    }
+    if (shouldForwardStage0Arg(name)) {
+        return arg;
+    }
+    return null;
+}
+
+fn shouldForwardStage0Arg(name: []const u8) bool {
+    return mem.eql(u8, name, "USE_GMP") or
+        mem.eql(u8, name, "CHECK_OLEAN_VERSION") or
+        mem.startsWith(u8, name, "LEAN_VERSION_") or
+        mem.eql(u8, name, "LEAN_SPECIAL_VERSION_DESC") or
+        mem.startsWith(u8, name, "LLVM") or
+        mem.startsWith(u8, name, "PKG_CONFIG") or
+        mem.startsWith(u8, name, "USE_LAKE") or
+        mem.startsWith(u8, name, "USE_MIMALLOC");
+}
+
+fn cmakeArgName(arg: []const u8) ?[]const u8 {
+    if (!mem.startsWith(u8, arg, "-D")) return null;
+
+    const body = arg[2..];
+    const typed_end = mem.indexOfScalar(u8, body, ':') orelse body.len;
+    const value_end = mem.indexOfScalar(u8, body, '=') orelse body.len;
+    const end = @min(typed_end, value_end);
+    return body[0..end];
+}
+
+fn stripStagePrefixedCmakeArg(
+    b: *Build,
+    arg: []const u8,
+    name: []const u8,
+    prefix: []const u8,
+) []const u8 {
+    const body = arg[2..];
+    const suffix = body[name.len..];
+    return b.fmt("-D{s}{s}", .{ name[prefix.len..], suffix });
 }
 
 fn profilePresetCmakeArgs(profile: BuildProfile) []const []const u8 {
@@ -1074,6 +1154,7 @@ fn writeShellQuoted(w: *std.Io.Writer, value: []const u8) void {
 
 fn actionStage(action: DriverAction) ?[]const u8 {
     return switch (action) {
+        .configure_stage0, .build_stage0 => "stage0",
         .configure_stage => |configure_stage| configure_stage.stage.asString(),
         .build_target => |build_target| build_target.stageName(),
         .build_stage => |build_stage| build_stage.stage.asString(),
