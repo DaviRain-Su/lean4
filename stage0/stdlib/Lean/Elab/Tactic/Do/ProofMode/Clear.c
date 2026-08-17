@@ -38,7 +38,7 @@ size_t lean_usize_sub(size_t, size_t);
 size_t lean_usize_mul(size_t, size_t);
 uint8_t lean_usize_dec_le(size_t, size_t);
 lean_object* l_Lean_PersistentHashMap_getCollisionNodeSize___redArg(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 extern lean_object* l_Lean_Elab_unsupportedSyntaxExceptionId;
 uint8_t l_Lean_Syntax_isOfKind(lean_object*, lean_object*);
 lean_object* l_Lean_Syntax_getArg(lean_object*, lean_object*);
@@ -280,7 +280,7 @@ goto v_reusejp_49_;
 v_reusejp_49_:
 {
 lean_object* v___x_51_; lean_object* v___x_52_; 
-v___x_51_ = lean_st_ref_set(v___y_32_, v___x_50_);
+v___x_51_ = lean_st_ref_put(v___y_32_, v___x_50_);
 v___x_52_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_52_, 0, v_fst_39_);
 return v___x_52_;
@@ -1053,7 +1053,7 @@ goto v_reusejp_343_;
 v_reusejp_343_:
 {
 lean_object* v___x_345_; lean_object* v___x_346_; lean_object* v___x_347_; 
-v___x_345_ = lean_st_ref_set(v___y_316_, v___x_344_);
+v___x_345_ = lean_st_ref_put(v___y_316_, v___x_344_);
 v___x_346_ = lean_box(0);
 v___x_347_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_347_, 0, v___x_346_);
@@ -1675,11 +1675,13 @@ return v_res_664_;
 }
 lean_object* runtime_initialize_Std_Tactic_Do_Syntax(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Focus(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Clear(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Std_Tactic_Do_Syntax(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

@@ -39,7 +39,7 @@ lean_object* lean_string_append(lean_object*, lean_object*);
 lean_object* l_mkPanicMessageWithDecl(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_panic_fn_borrowed(lean_object*, lean_object*);
 lean_object* l_String_Slice_splitToSubslice___redArg(lean_object*, lean_object*);
-lean_object* lean_string_utf8_extract(lean_object*, lean_object*, lean_object*);
+lean_object* lean_string_utf8_extract_fast(lean_object*, lean_object*, lean_object*);
 uint32_t lean_string_utf8_get(lean_object*, lean_object*);
 lean_object* lean_string_utf8_set(lean_object*, lean_object*, uint32_t);
 uint8_t lean_uint32_dec_eq(uint32_t, uint32_t);
@@ -237,6 +237,45 @@ LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_date = (const lean_object*
 static const lean_string_object l_Std_Http_Header_Name_expect___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 7, .m_capacity = 7, .m_length = 6, .m_data = "expect"};
 static const lean_object* l_Std_Http_Header_Name_expect___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_expect___closed__0_value;
 LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_expect = (const lean_object*)&l_Std_Http_Header_Name_expect___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_cookie___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 7, .m_capacity = 7, .m_length = 6, .m_data = "cookie"};
+static const lean_object* l_Std_Http_Header_Name_cookie___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_cookie___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_cookie = (const lean_object*)&l_Std_Http_Header_Name_cookie___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_setCookie___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 11, .m_capacity = 11, .m_length = 10, .m_data = "set-cookie"};
+static const lean_object* l_Std_Http_Header_Name_setCookie___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_setCookie___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_setCookie = (const lean_object*)&l_Std_Http_Header_Name_setCookie___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_location___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 9, .m_capacity = 9, .m_length = 8, .m_data = "location"};
+static const lean_object* l_Std_Http_Header_Name_location___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_location___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_location = (const lean_object*)&l_Std_Http_Header_Name_location___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_proxyAuthorization___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 20, .m_capacity = 20, .m_length = 19, .m_data = "proxy-authorization"};
+static const lean_object* l_Std_Http_Header_Name_proxyAuthorization___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_proxyAuthorization___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_proxyAuthorization = (const lean_object*)&l_Std_Http_Header_Name_proxyAuthorization___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_contentEncoding___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 17, .m_capacity = 17, .m_length = 16, .m_data = "content-encoding"};
+static const lean_object* l_Std_Http_Header_Name_contentEncoding___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_contentEncoding___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_contentEncoding = (const lean_object*)&l_Std_Http_Header_Name_contentEncoding___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_contentLanguage___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 17, .m_capacity = 17, .m_length = 16, .m_data = "content-language"};
+static const lean_object* l_Std_Http_Header_Name_contentLanguage___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_contentLanguage___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_contentLanguage = (const lean_object*)&l_Std_Http_Header_Name_contentLanguage___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_contentLocation___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 17, .m_capacity = 17, .m_length = 16, .m_data = "content-location"};
+static const lean_object* l_Std_Http_Header_Name_contentLocation___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_contentLocation___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_contentLocation = (const lean_object*)&l_Std_Http_Header_Name_contentLocation___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_lastModified___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 14, .m_capacity = 14, .m_length = 13, .m_data = "last-modified"};
+static const lean_object* l_Std_Http_Header_Name_lastModified___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_lastModified___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_lastModified = (const lean_object*)&l_Std_Http_Header_Name_lastModified___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_referer___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 8, .m_capacity = 8, .m_length = 7, .m_data = "referer"};
+static const lean_object* l_Std_Http_Header_Name_referer___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_referer___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_referer = (const lean_object*)&l_Std_Http_Header_Name_referer___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_origin___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 7, .m_capacity = 7, .m_length = 6, .m_data = "origin"};
+static const lean_object* l_Std_Http_Header_Name_origin___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_origin___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_origin = (const lean_object*)&l_Std_Http_Header_Name_origin___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_keepAlive___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 11, .m_capacity = 11, .m_length = 10, .m_data = "keep-alive"};
+static const lean_object* l_Std_Http_Header_Name_keepAlive___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_keepAlive___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_keepAlive = (const lean_object*)&l_Std_Http_Header_Name_keepAlive___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_ifNoneMatch___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 14, .m_capacity = 14, .m_length = 13, .m_data = "if-none-match"};
+static const lean_object* l_Std_Http_Header_Name_ifNoneMatch___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_ifNoneMatch___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_ifNoneMatch = (const lean_object*)&l_Std_Http_Header_Name_ifNoneMatch___closed__0_value;
+static const lean_string_object l_Std_Http_Header_Name_ifModifiedSince___closed__0_value = {.m_header = {.m_rc = 0, .m_cs_sz = 0, .m_other = 0, .m_tag = 249}, .m_size = 18, .m_capacity = 18, .m_length = 17, .m_data = "if-modified-since"};
+static const lean_object* l_Std_Http_Header_Name_ifModifiedSince___closed__0 = (const lean_object*)&l_Std_Http_Header_Name_ifModifiedSince___closed__0_value;
+LEAN_EXPORT const lean_object* l_Std_Http_Header_Name_ifModifiedSince = (const lean_object*)&l_Std_Http_Header_Name_ifModifiedSince___closed__0_value;
 static lean_object* _init_l_Std_Http_Header_Name_isValidHeaderValue___autoParam___closed__12(void){
 _start:
 {
@@ -851,7 +890,7 @@ goto v_resetjp_239_;
 v_resetjp_239_:
 {
 lean_object* v___x_242_; lean_object* v___x_243_; lean_object* v___x_244_; lean_object* v___x_246_; 
-v___x_242_ = lean_string_utf8_extract(v___x_223_, v___x_224_, v___x_225_);
+v___x_242_ = lean_string_utf8_extract_fast(v___x_223_, v___x_224_, v___x_225_);
 v___x_243_ = lean_string_append(v_val_238_, v___x_242_);
 lean_dec_ref(v___x_242_);
 v___x_244_ = lean_string_append(v___x_243_, v_out_235_);
@@ -882,7 +921,7 @@ return v___x_247_;
 v___jp_250_:
 {
 lean_object* v___x_254_; lean_object* v___x_255_; uint32_t v___x_256_; uint32_t v___x_257_; uint8_t v___x_258_; 
-v___x_254_ = lean_string_utf8_extract(v_name_226_, v_startInclusive_252_, v_endExclusive_253_);
+v___x_254_ = lean_string_utf8_extract_fast(v_name_226_, v_startInclusive_252_, v_endExclusive_253_);
 lean_dec(v_endExclusive_253_);
 lean_dec(v_startInclusive_252_);
 v___x_255_ = lean_unsigned_to_nat(0u);
@@ -1053,11 +1092,13 @@ lean_object* runtime_initialize_Init_Data_ToString(uint8_t builtin);
 lean_object* runtime_initialize_Std_Http_Internal(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_String_Search(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_String_Iter(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Std_Http_Data_Headers_Name(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Init_Data_ToString(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

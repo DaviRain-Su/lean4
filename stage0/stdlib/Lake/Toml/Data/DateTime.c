@@ -36,7 +36,7 @@ lean_object* l_String_Slice_toNat_x3f(lean_object*);
 uint8_t lean_nat_dec_le(lean_object*, lean_object*);
 lean_object* l_String_Slice_positions(lean_object*);
 lean_object* l_Lake_Date_toString(lean_object*);
-lean_object* lean_string_utf8_extract(lean_object*, lean_object*, lean_object*);
+lean_object* lean_string_utf8_extract_fast(lean_object*, lean_object*, lean_object*);
 lean_object* l_Lake_Date_ofString_x3f(lean_object*);
 lean_object* l_String_Slice_Pos_prevn(lean_object*, lean_object*, lean_object*);
 lean_object* l_String_Slice_Pos_prev_x3f(lean_object*, lean_object*);
@@ -1057,8 +1057,8 @@ return v___x_253_;
 else
 {
 lean_object* v___x_254_; 
-lean_dec_ref_known(v___x_180_, 2);
 lean_dec(v_tail_181_);
+lean_dec_ref_known(v___x_180_, 2);
 v___x_254_ = lean_box(0);
 return v___x_254_;
 }
@@ -2262,7 +2262,7 @@ lean_inc(v_startInclusive_665_);
 v_endExclusive_666_ = lean_ctor_get(v_head_662_, 2);
 lean_inc(v_endExclusive_666_);
 lean_dec(v_head_662_);
-v___x_667_ = lean_string_utf8_extract(v_str_664_, v_startInclusive_665_, v_endExclusive_666_);
+v___x_667_ = lean_string_utf8_extract_fast(v_str_664_, v_startInclusive_665_, v_endExclusive_666_);
 lean_dec(v_endExclusive_666_);
 lean_dec(v_startInclusive_665_);
 lean_dec_ref(v_str_664_);
@@ -2328,7 +2328,7 @@ lean_inc(v_startInclusive_680_);
 v_endExclusive_681_ = lean_ctor_get(v_head_662_, 2);
 lean_inc(v_endExclusive_681_);
 lean_dec(v_head_662_);
-v___x_682_ = lean_string_utf8_extract(v_str_679_, v_startInclusive_680_, v_endExclusive_681_);
+v___x_682_ = lean_string_utf8_extract_fast(v_str_679_, v_startInclusive_680_, v_endExclusive_681_);
 lean_dec(v_endExclusive_681_);
 lean_dec(v_startInclusive_680_);
 lean_dec_ref(v_str_679_);
@@ -2424,7 +2424,7 @@ lean_inc(v_startInclusive_701_);
 v_endExclusive_702_ = lean_ctor_get(v_head_695_, 2);
 lean_inc(v_endExclusive_702_);
 lean_dec(v_head_695_);
-v___x_703_ = lean_string_utf8_extract(v_str_700_, v_startInclusive_701_, v_endExclusive_702_);
+v___x_703_ = lean_string_utf8_extract_fast(v_str_700_, v_startInclusive_701_, v_endExclusive_702_);
 lean_dec(v_endExclusive_702_);
 lean_dec(v_startInclusive_701_);
 lean_dec_ref(v_str_700_);
@@ -2486,7 +2486,7 @@ goto v___jp_852_;
 v___jp_710_:
 {
 lean_object* v___x_711_; lean_object* v___x_712_; 
-v___x_711_ = lean_string_utf8_extract(v_str_707_, v_startInclusive_708_, v_endExclusive_709_);
+v___x_711_ = lean_string_utf8_extract_fast(v_str_707_, v_startInclusive_708_, v_endExclusive_709_);
 lean_dec(v_endExclusive_709_);
 lean_dec(v_startInclusive_708_);
 lean_dec_ref(v_str_707_);
@@ -3051,8 +3051,8 @@ else
 lean_inc(v_endExclusive_709_);
 lean_inc(v_startInclusive_708_);
 lean_inc_ref(v_str_707_);
-lean_dec_ref_known(v___x_778_, 2);
 lean_dec(v_tail_779_);
+lean_dec_ref_known(v___x_778_, 2);
 v___y_726_ = v___x_775_;
 goto v___jp_725_;
 }
@@ -3102,7 +3102,7 @@ v_resetjp_825_:
 lean_object* v___x_828_; lean_object* v___x_829_; lean_object* v___x_830_; 
 v___x_828_ = lean_nat_add(v_startInclusive_708_, v___x_824_);
 lean_dec(v___x_824_);
-v___x_829_ = lean_string_utf8_extract(v_str_707_, v_startInclusive_708_, v___x_828_);
+v___x_829_ = lean_string_utf8_extract_fast(v_str_707_, v_startInclusive_708_, v___x_828_);
 lean_dec(v___x_828_);
 lean_dec(v_startInclusive_708_);
 lean_dec_ref(v_str_707_);
@@ -3481,11 +3481,13 @@ lean_object* runtime_initialize_Init_Data_String_Search(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_Iterators_Consumers_Collect(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_Iterators_Consumers_Loop(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_ToString_Macro(uint8_t builtin);
+void lean_initialize();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lake_Toml_Data_DateTime(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize();
 res = runtime_initialize_Lake_Util_Date(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

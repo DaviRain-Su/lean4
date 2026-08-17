@@ -60,7 +60,7 @@ lean_object* lean_nat_mul(lean_object*, lean_object*);
 lean_object* lean_nat_div(lean_object*, lean_object*);
 uint8_t lean_nat_dec_le(lean_object*, lean_object*);
 lean_object* lean_mk_array(lean_object*, lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Environment_find_x3f(lean_object*, lean_object*, uint8_t);
 lean_object* l_Lean_Compiler_LCNF_toMonoType(lean_object*, lean_object*, lean_object*);
 lean_object* l_instMonadEIO(lean_object*);
@@ -1637,19 +1637,19 @@ goto v_reusejp_438_;
 }
 v_reusejp_438_:
 {
-lean_object* v___x_440_; lean_object* v___x_441_; lean_object* v___x_442_; lean_object* v___f_443_; lean_object* v___x_3875__overap_444_; lean_object* v___x_445_; 
+lean_object* v___x_440_; lean_object* v___x_441_; lean_object* v___x_442_; lean_object* v___f_443_; lean_object* v___x_3876__overap_444_; lean_object* v___x_445_; 
 v___x_440_ = l_StateRefT_x27_instMonad___redArg(v___x_439_);
 v___x_441_ = lean_box(0);
 v___x_442_ = l_instInhabitedOfMonad___redArg(v___x_440_, v___x_441_);
 v___f_443_ = lean_alloc_closure((void*)(l_instInhabitedForall___redArg___lam__0___boxed), 2, 1);
 lean_closure_set(v___f_443_, 0, v___x_442_);
-v___x_3875__overap_444_ = lean_panic_fn_borrowed(v___f_443_, v_msg_409_);
+v___x_3876__overap_444_ = lean_panic_fn_borrowed(v___f_443_, v_msg_409_);
 lean_dec_ref(v___f_443_);
 lean_inc(v___y_413_);
 lean_inc_ref(v___y_412_);
 lean_inc(v___y_411_);
 lean_inc_ref(v___y_410_);
-v___x_445_ = lean_apply_5(v___x_3875__overap_444_, v___y_410_, v___y_411_, v___y_412_, v___y_413_, lean_box(0));
+v___x_445_ = lean_apply_5(v___x_3876__overap_444_, v___y_410_, v___y_411_, v___y_412_, v___y_413_, lean_box(0));
 return v___x_445_;
 }
 }
@@ -4071,7 +4071,7 @@ goto v_reusejp_1274_;
 v_reusejp_1274_:
 {
 lean_object* v___x_1276_; uint8_t v___x_1277_; lean_object* v___x_1278_; 
-v___x_1276_ = lean_st_ref_set(v___y_1251_, v___x_1275_);
+v___x_1276_ = lean_st_ref_put(v___y_1251_, v___x_1275_);
 v___x_1277_ = 0;
 v___x_1278_ = l_Lean_Compiler_LCNF_eraseParam___redArg(v___x_1277_, v_a_1270_, v___y_1252_);
 if (lean_obj_tag(v___x_1278_) == 0)
@@ -4924,7 +4924,7 @@ goto v_reusejp_1625_;
 v_reusejp_1625_:
 {
 lean_object* v___x_1627_; 
-v___x_1627_ = lean_st_ref_set(v_a_1525_, v___x_1626_);
+v___x_1627_ = lean_st_ref_put(v_a_1525_, v___x_1626_);
 v_code_1524_ = v_k_1600_;
 goto _start;
 }
@@ -5040,7 +5040,7 @@ goto v_reusejp_1656_;
 v_reusejp_1656_:
 {
 lean_object* v___x_1658_; lean_object* v___x_1659_; 
-v___x_1658_ = lean_st_ref_set(v_a_1525_, v___x_1657_);
+v___x_1658_ = lean_st_ref_put(v_a_1525_, v___x_1657_);
 v___x_1659_ = l_Lean_Compiler_LCNF_StructProjCases_visitCode(v_k_1600_, v_a_1525_, v_a_1526_, v_a_1527_, v_a_1528_, v_a_1529_);
 if (lean_obj_tag(v___x_1659_) == 0)
 {
@@ -5105,7 +5105,7 @@ goto v_reusejp_1671_;
 v_reusejp_1671_:
 {
 lean_object* v___x_1673_; lean_object* v___x_1674_; 
-v___x_1673_ = lean_st_ref_set(v_a_1525_, v___x_1672_);
+v___x_1673_ = lean_st_ref_put(v_a_1525_, v___x_1672_);
 lean_inc(v_a_1660_);
 v___x_1674_ = l_Lean_Compiler_LCNF_Code_inferType(v___x_1605_, v_a_1660_, v_a_1526_, v_a_1527_, v_a_1528_, v_a_1529_);
 if (lean_obj_tag(v___x_1674_) == 0)
@@ -6281,7 +6281,7 @@ goto v_reusejp_1951_;
 v_reusejp_1951_:
 {
 lean_object* v___x_1953_; lean_object* v___x_1954_; 
-v___x_1953_ = lean_st_ref_set(v_a_1525_, v___x_1952_);
+v___x_1953_ = lean_st_ref_put(v_a_1525_, v___x_1952_);
 v___x_1954_ = l_Lean_Compiler_LCNF_StructProjCases_visitCode(v_code_1915_, v_a_1525_, v_a_1526_, v_a_1527_, v_a_1528_, v_a_1529_);
 if (lean_obj_tag(v___x_1954_) == 0)
 {
@@ -6346,7 +6346,7 @@ goto v_reusejp_1966_;
 v_reusejp_1966_:
 {
 lean_object* v___x_1968_; lean_object* v___x_1970_; 
-v___x_1968_ = lean_st_ref_set(v_a_1525_, v___x_1967_);
+v___x_1968_ = lean_st_ref_put(v_a_1525_, v___x_1967_);
 if (v_isShared_1918_ == 0)
 {
 lean_ctor_set(v___x_1917_, 2, v_a_1955_);
@@ -7800,11 +7800,13 @@ return v_res_2373_;
 }
 lean_object* runtime_initialize_Lean_Compiler_LCNF_PrettyPrinter(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Compiler_LCNF_MonoTypes(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Compiler_LCNF_StructProjCases(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Compiler_LCNF_PrettyPrinter(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

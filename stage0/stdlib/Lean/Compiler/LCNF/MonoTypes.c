@@ -62,7 +62,7 @@ lean_object* l_Lean_Name_mkStr4(lean_object*, lean_object*, lean_object*, lean_o
 lean_object* l_Lean_MapDeclarationExtension_find_x3f___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, uint8_t);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_MapDeclarationExtension_insert___redArg(lean_object*, lean_object*, lean_object*, lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Meta_isProp(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_Meta_isTypeFormerType(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_PersistentEnvExtension_modifyState___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
@@ -1975,7 +1975,7 @@ goto v_reusejp_577_;
 v_reusejp_577_:
 {
 lean_object* v___x_579_; lean_object* v___x_580_; lean_object* v___x_582_; 
-v___x_579_ = lean_st_ref_set(v_a_545_, v___x_578_);
+v___x_579_ = lean_st_ref_put(v_a_545_, v___x_578_);
 v___x_580_ = lean_box(0);
 if (v_isShared_562_ == 0)
 {
@@ -2616,7 +2616,7 @@ goto v_reusejp_721_;
 v_reusejp_721_:
 {
 lean_object* v___x_723_; lean_object* v___x_725_; 
-v___x_723_ = lean_st_ref_set(v___y_693_, v___x_722_);
+v___x_723_ = lean_st_ref_put(v___y_693_, v___x_722_);
 if (v_isShared_701_ == 0)
 {
 v___x_725_ = v___x_700_;
@@ -2683,11 +2683,13 @@ return v_res_783_;
 lean_object* runtime_initialize_Lean_Compiler_LCNF_Util(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Compiler_LCNF_BaseTypes(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Compiler_LCNF_Irrelevant(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Compiler_LCNF_MonoTypes(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Compiler_LCNF_Util(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

@@ -38,7 +38,7 @@ lean_object* lean_st_ref_get(lean_object*);
 uint8_t l_Lean_Expr_hasMVar(lean_object*);
 lean_object* l_Lean_instantiateMVarsCore(lean_object*, lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Name_mkStr6(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_Name_mkStr4(lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_stringToMessageData(lean_object*);
@@ -243,7 +243,7 @@ goto v_reusejp_29_;
 v_reusejp_29_:
 {
 lean_object* v___x_31_; lean_object* v___x_32_; 
-v___x_31_ = lean_st_ref_set(v___y_12_, v___x_30_);
+v___x_31_ = lean_st_ref_put(v___y_12_, v___x_30_);
 v___x_32_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_32_, 0, v_fst_19_);
 return v___x_32_;
@@ -1120,7 +1120,7 @@ goto v_reusejp_369_;
 v_reusejp_369_:
 {
 lean_object* v___x_371_; lean_object* v___x_372_; lean_object* v___x_373_; 
-v___x_371_ = lean_st_ref_set(v___y_342_, v___x_370_);
+v___x_371_ = lean_st_ref_put(v___y_342_, v___x_370_);
 v___x_372_ = lean_box(0);
 v___x_373_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_373_, 0, v___x_372_);
@@ -1600,11 +1600,13 @@ return v_res_641_;
 }
 }
 lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Exfalso(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

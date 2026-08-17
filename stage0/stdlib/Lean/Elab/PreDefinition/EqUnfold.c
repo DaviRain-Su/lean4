@@ -34,7 +34,7 @@ lean_object* l_Lean_replaceRef(lean_object*, lean_object*);
 uint8_t l_Lean_Expr_hasMVar(lean_object*);
 lean_object* l_Lean_instantiateMVarsCore(lean_object*, lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Environment_find_x3f(lean_object*, lean_object*, uint8_t);
 lean_object* l_Std_DTreeMap_Internal_Impl_Const_get_x3f___at___00Lean_NameMap_find_x3f_spec__0___redArg(lean_object*, lean_object*);
 lean_object* l_Lean_Name_mkStr1(lean_object*);
@@ -800,7 +800,7 @@ goto v_reusejp_149_;
 v_reusejp_149_:
 {
 lean_object* v___x_151_; 
-v___x_151_ = lean_st_ref_set(v_a_72_, v___x_150_);
+v___x_151_ = lean_st_ref_put(v_a_72_, v___x_150_);
 v_fileName_103_ = v_fileName_81_;
 v_fileMap_104_ = v_fileMap_82_;
 v_currRecDepth_105_ = v_currRecDepth_84_;
@@ -1078,7 +1078,7 @@ goto v_reusejp_258_;
 v_reusejp_258_:
 {
 lean_object* v___x_260_; lean_object* v___x_261_; 
-v___x_260_ = lean_st_ref_set(v___y_241_, v___x_259_);
+v___x_260_ = lean_st_ref_put(v___y_241_, v___x_259_);
 v___x_261_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_261_, 0, v_fst_248_);
 return v___x_261_;
@@ -1546,7 +1546,7 @@ v___x_459_ = l_Lean_MessageData_ofExpr(v___x_422_);
 v___x_460_ = lean_alloc_ctor(7, 2, 0);
 lean_ctor_set(v___x_460_, 0, v___x_458_);
 lean_ctor_set(v___x_460_, 1, v___x_459_);
-v___x_461_ = l_Lean_throwError___at___00Lean_Meta_getConstUnfoldEqnFor_x3f_spec__4___redArg(v___x_460_, v___y_456_, v___y_454_, v___y_455_, v___y_457_);
+v___x_461_ = l_Lean_throwError___at___00Lean_Meta_getConstUnfoldEqnFor_x3f_spec__4___redArg(v___x_460_, v___y_454_, v___y_457_, v___y_456_, v___y_455_);
 v_a_462_ = lean_ctor_get(v___x_461_, 0);
 v_isSharedCheck_469_ = !lean_is_exclusive(v___x_461_);
 if (v_isSharedCheck_469_ == 0)
@@ -1605,10 +1605,10 @@ if (v___x_483_ == 0)
 lean_dec_ref(v___x_480_);
 lean_dec_ref(v___x_442_);
 lean_dec_ref(v___x_441_);
-v___y_454_ = v___y_472_;
-v___y_455_ = v___y_473_;
-v___y_456_ = v___y_471_;
-v___y_457_ = v___y_474_;
+v___y_454_ = v___y_471_;
+v___y_455_ = v___y_474_;
+v___y_456_ = v___y_473_;
+v___y_457_ = v___y_472_;
 goto v___jp_453_;
 }
 else
@@ -1620,10 +1620,10 @@ if (v___x_484_ == 0)
 {
 lean_dec_ref(v___x_442_);
 lean_dec_ref(v___x_441_);
-v___y_454_ = v___y_472_;
-v___y_455_ = v___y_473_;
-v___y_456_ = v___y_471_;
-v___y_457_ = v___y_474_;
+v___y_454_ = v___y_471_;
+v___y_455_ = v___y_474_;
+v___y_456_ = v___y_473_;
+v___y_457_ = v___y_472_;
 goto v___jp_453_;
 }
 else
@@ -3283,7 +3283,7 @@ goto v_reusejp_1089_;
 v_reusejp_1089_:
 {
 lean_object* v___x_1091_; lean_object* v___x_1092_; lean_object* v___x_1094_; 
-v___x_1091_ = lean_st_ref_set(v___y_1052_, v___x_1090_);
+v___x_1091_ = lean_st_ref_put(v___y_1052_, v___x_1090_);
 v___x_1092_ = lean_box(0);
 if (v_isShared_1059_ == 0)
 {
@@ -3936,7 +3936,7 @@ v___x_1365_ = lean_string_dec_eq(v_str_1342_, v___x_1364_);
 v___x_1366_ = 1;
 v___x_1367_ = 0;
 v___x_1368_ = 2;
-v___x_1369_ = lean_alloc_ctor(0, 0, 19);
+v___x_1369_ = lean_alloc_ctor(0, 0, 20);
 lean_ctor_set_uint8(v___x_1369_, 0, v___x_1361_);
 lean_ctor_set_uint8(v___x_1369_, 1, v___x_1361_);
 lean_ctor_set_uint8(v___x_1369_, 2, v___x_1361_);
@@ -3956,6 +3956,7 @@ lean_ctor_set_uint8(v___x_1369_, 15, v___x_1358_);
 lean_ctor_set_uint8(v___x_1369_, 16, v___x_1358_);
 lean_ctor_set_uint8(v___x_1369_, 17, v___x_1358_);
 lean_ctor_set_uint8(v___x_1369_, 18, v___x_1358_);
+lean_ctor_set_uint8(v___x_1369_, 19, v___x_1361_);
 v___x_1370_ = l___private_Lean_Meta_Basic_0__Lean_Meta_Config_toKey(v___x_1369_);
 v___x_1371_ = lean_alloc_ctor(0, 1, 8);
 lean_ctor_set(v___x_1371_, 0, v___x_1369_);
@@ -4304,11 +4305,13 @@ return v_res_1473_;
 lean_object* runtime_initialize_Lean_Meta_Eqns(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Rfl(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Intro(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_PreDefinition_EqUnfold(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Meta_Eqns(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

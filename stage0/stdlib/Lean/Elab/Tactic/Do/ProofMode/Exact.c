@@ -36,7 +36,7 @@ size_t lean_usize_sub(size_t, size_t);
 size_t lean_usize_mul(size_t, size_t);
 uint8_t lean_usize_dec_le(size_t, size_t);
 lean_object* l_Lean_PersistentHashMap_getCollisionNodeSize___redArg(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 uint8_t l_Lean_Expr_hasMVar(lean_object*);
 lean_object* l_Lean_instantiateMVarsCore(lean_object*, lean_object*);
 lean_object* l_Lean_Elab_Tactic_replaceMainGoal___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
@@ -1213,7 +1213,7 @@ goto v_reusejp_378_;
 v_reusejp_378_:
 {
 lean_object* v___x_380_; lean_object* v___x_381_; 
-v___x_380_ = lean_st_ref_set(v___y_361_, v___x_379_);
+v___x_380_ = lean_st_ref_put(v___y_361_, v___x_379_);
 v___x_381_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_381_, 0, v_fst_368_);
 return v___x_381_;
@@ -1986,7 +1986,7 @@ goto v_reusejp_672_;
 v_reusejp_672_:
 {
 lean_object* v___x_674_; lean_object* v___x_675_; lean_object* v___x_676_; 
-v___x_674_ = lean_st_ref_set(v___y_645_, v___x_673_);
+v___x_674_ = lean_st_ref_put(v___y_645_, v___x_673_);
 v___x_675_ = lean_box(0);
 v___x_676_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_676_, 0, v___x_675_);
@@ -2457,11 +2457,13 @@ return v_res_895_;
 lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Focus(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Elab_Tactic_ElabTerm(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Exact(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

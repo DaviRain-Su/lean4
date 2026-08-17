@@ -18,13 +18,15 @@ public import Init.Data.RArray
 public import Init.Ext
 import Init.Data.Hashable
 import Init.Data.Int.LemmasAux
-import Init.Data.Nat.Linear
+import Init.Data.Nat.Internal.Linear
 import Init.Grind.Ordered.Order
 import Init.Omega
 import Init.WFTactics
 import Init.Data.Int.Repr
 
 @[expose] public section
+
+open Internal
 
 namespace Lean.Grind.CommRing
 /-!
@@ -358,7 +360,7 @@ theorem Mon.revlex_k_eq_revlex (m₁ m₂ : Mon) : m₁.revlex_k m₂ = m₁.rev
   induction fuel generalizing m₁ m₂
   next => rfl
   next =>
-    simp [revlexFuel]; split <;> try rfl
+    simp [revlexFuel, -cond_eq_ite]; split <;> try rfl
     next ih _ _ pw₁ m₁ pw₂ m₂ =>
       simp only [cond_eq_ite, beq_iff_eq]
       split

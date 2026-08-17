@@ -260,9 +260,7 @@ extern "C" LEAN_EXPORT size_t lean_object_data_byte_size(lean_object * o) {
 }
 
 static inline void lean_dealloc(lean_object * o, size_t sz) {
-#ifdef LEAN_SMALL_ALLOCATOR
-    dealloc(o, sz);
-#elif defined(LEAN_MIMALLOC)
+#ifdef LEAN_MIMALLOC
     mi_free_size(o, sz);
 #else
     free_sized(o, sz);
@@ -336,11 +334,11 @@ static inline lean_object * pop_back(lean_object * & todo) {
 static inline void dec(lean_object * o, lean_object* & todo) {
     if (lean_is_scalar(o))
         return;
-    if (LEAN_LIKELY(o->m_rc > 1)) {
-        o->m_rc--;
-    } else if (o->m_rc == 1) {
+    if (LEAN_LIKELY(lean_internal_get_rc(o) > 1)) {
+        lean_internal_sub_rc(o, 1);
+    } else if (lean_internal_get_rc(o) == 1) {
         push_back(todo, o);
-    } else if (o->m_rc == 0) {
+    } else if (lean_internal_get_rc(o) == 0) {
         return;
     } else if (std::atomic_fetch_add_explicit(lean_get_rc_mt_addr(o), 1, std::memory_order_acq_rel) == -1) {
         push_back(todo, o);
@@ -351,18 +349,16 @@ static inline void dec(lean_object * o, lean_object* & todo) {
 LEAN_THREAD_PTR(object, g_to_free);
 #endif
 
-static void lean_del_core(object * o, object * & todo);
+static object * lean_del_core(object * o, object * todo);
 
 extern "C" LEAN_EXPORT lean_object * lean_alloc_object(size_t sz) {
 #ifdef LEAN_LAZY_RC
      if (g_to_free) {
          object * o = pop_back(g_to_free);
-         lean_del_core(o, g_to_free);
+         g_to_free = lean_del_core(o, g_to_free);
      }
 #endif
-#ifdef LEAN_SMALL_ALLOCATOR
-    return (lean_object*)alloc(sz);
-#elif defined(LEAN_MIMALLOC)
+#ifdef LEAN_MIMALLOC
     void * r = mi_malloc(sz);
     if (r == nullptr) lean_internal_panic_out_of_memory();
     lean_object * o = (lean_object*)r;
@@ -379,7 +375,9 @@ extern "C" LEAN_EXPORT lean_object * lean_alloc_object(size_t sz) {
 static void deactivate_task(lean_task_object * t);
 static void deactivate_promise(lean_promise_object * t);
 
-static void lean_del_core_other(object * o, uint8 tag, object * & todo) {
+/* The deletion worklist is passed by value and returned rather than by reference so that it can
+   live in a register across the constructor loop, which is by far the hottest deletion path. */
+static object * lean_del_core_other(object * o, uint8 tag, object * todo) {
     switch (tag) {
     case LeanClosure: {
         object ** it  = lean_closure_arg_cptr(o);
@@ -427,28 +425,30 @@ static void lean_del_core_other(object * o, uint8 tag, object * & todo) {
     default:
         lean_unreachable();
     }
+    return todo;
 }
 
-static void lean_del_core(object * o, object * & todo) {
+static object * lean_del_core(object * o, object * todo) {
     uint8 tag = lean_ptr_tag(o);
     if (LEAN_LIKELY(tag <= LeanMaxCtorTag)) {
         object ** it  = lean_ctor_obj_cptr(o);
         object ** end = it + lean_ctor_num_objs(o);
         for (; it != end; ++it) dec(*it, todo);
         lean_free_small_object(o);
+        return todo;
     } else {
-        lean_del_core_other(o, tag, todo);
+        return lean_del_core_other(o, tag, todo);
     }
 }
 
 extern "C" LEAN_EXPORT void lean_dec_ref_cold(lean_object * o) {
-    if (o->m_rc == 1 || std::atomic_fetch_add_explicit(lean_get_rc_mt_addr(o), 1, std::memory_order_acq_rel) == -1) {
+    if (lean_internal_get_rc(o) == 1 || std::atomic_fetch_add_explicit(lean_get_rc_mt_addr(o), 1, std::memory_order_acq_rel) == -1) {
 #ifdef LEAN_LAZY_RC
         push_back(g_to_free, o);
 #else
         object * todo = nullptr;
         while (true) {
-            lean_del_core(o, todo);
+            todo = lean_del_core(o, todo);
             if (todo == nullptr)
                 return;
             o = pop_back(todo);
@@ -558,7 +558,7 @@ extern "C" LEAN_EXPORT void lean_mark_persistent(object * o) {
         object * o = todo.back();
         todo.pop_back();
         if (!lean_is_scalar(o) && lean_has_rc(o)) {
-            o->m_rc = 0;
+            lean_internal_set_rc(o, 0);
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
             // do not report as leak
@@ -643,7 +643,7 @@ extern "C" LEAN_EXPORT void lean_mark_mt(object * o) {
         object * o = todo.back();
         todo.pop_back();
         if (!lean_is_scalar(o) && lean_is_st(o)) {
-            o->m_rc = -o->m_rc;
+            lean_internal_set_rc(o, -lean_internal_get_rc(o));
             uint8_t tag = lean_ptr_tag(o);
             if (tag <= LeanMaxCtorTag) {
                 object ** it  = lean_ctor_obj_cptr(o);
@@ -1131,7 +1131,7 @@ void deactivate_task(lean_task_object * t) {
 }
 
 static inline void lean_set_task_header(lean_object * o) {
-    o->m_rc       = -1;
+    lean_internal_set_rc(o, -1);
     o->m_tag      = LeanTask;
     o->m_other    = 0;
     o->m_cs_sz    = 0;
@@ -2380,13 +2380,22 @@ extern "C" LEAN_EXPORT uint8 lean_string_is_valid_pos(b_obj_arg s, b_obj_arg i0)
     return is_utf8_first_byte(str[i]);
 }
 
-extern "C" LEAN_EXPORT obj_res lean_string_utf8_extract(b_obj_arg s, b_obj_arg b0, b_obj_arg e0) {
-    if (!lean_is_scalar(b0) || !lean_is_scalar(e0)) {
-        /* See comment at string_utf8_get */
-        return s;
-    }
+extern "C" LEAN_EXPORT obj_res lean_string_utf8_extract_fast(b_obj_arg s, b_obj_arg b0, b_obj_arg e0) {
     usize b = lean_unbox(b0);
     usize e = lean_unbox(e0);
+    lean_assert(b <= lean_string_size(s) - 1);
+    lean_assert(e <= lean_string_size(s) - 1);
+    if (b >= e) return lean_mk_string_unchecked("", 0, 0);
+    char const * str = lean_string_cstr(s);
+    return lean_mk_string_from_bytes_unchecked(str + b, e - b);
+}
+
+extern "C" LEAN_EXPORT obj_res lean_string_utf8_extract(b_obj_arg s, b_obj_arg b0, b_obj_arg e0) {
+    /* Replace non-scalar values with SIZE_MAX:
+    Non-scalar values are out of bounds here (see comment at string_utf8_get),
+    including SIZE_MAX, and values that are out of bounds all behave the same here */
+    usize b = lean_is_scalar(b0) ? lean_unbox(b0) : SIZE_MAX;
+    usize e = lean_is_scalar(e0) ? lean_unbox(e0) : SIZE_MAX;
     char const * str = lean_string_cstr(s);
     usize sz = lean_string_size(s) - 1;
     if (b >= e || b >= sz) return lean_mk_string_unchecked("", 0, 0);
@@ -2795,7 +2804,7 @@ extern "C" LEAN_EXPORT object * lean_dbg_sleep(uint32 ms, obj_arg fn) {
     return lean_apply_1(fn, lean_box(0));
 }
 
-extern "C" LEAN_EXPORT object * lean_dbg_trace_if_shared(obj_arg s, obj_arg a) {
+extern "C" LEAN_EXPORT object * lean_dbg_trace_if_shared(b_obj_arg s, obj_arg a) {
     if (!lean_is_scalar(a) && !lean_is_exclusive(a)) {
         io_eprintln(mk_string(std::string("shared RC ") + lean_string_cstr(s)));
     }

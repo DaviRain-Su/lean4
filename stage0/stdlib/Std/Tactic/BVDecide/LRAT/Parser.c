@@ -5205,9 +5205,9 @@ goto v___jp_1193_;
 LEAN_EXPORT lean_object* l_Std_Internal_Parsec_manyCore___at___00__private_Std_Tactic_BVDecide_LRAT_Parser_0__Std_Tactic_BVDecide_LRAT_Parser_Text_parseActions_go_spec__0___boxed(lean_object* v___x_1220_, lean_object* v_acc_1221_, lean_object* v_a_1222_){
 _start:
 {
-uint8_t v___x_2518__boxed_1223_; lean_object* v_res_1224_; 
-v___x_2518__boxed_1223_ = lean_unbox(v___x_1220_);
-v_res_1224_ = l_Std_Internal_Parsec_manyCore___at___00__private_Std_Tactic_BVDecide_LRAT_Parser_0__Std_Tactic_BVDecide_LRAT_Parser_Text_parseActions_go_spec__0(v___x_2518__boxed_1223_, v_acc_1221_, v_a_1222_);
+uint8_t v___x_2510__boxed_1223_; lean_object* v_res_1224_; 
+v___x_2510__boxed_1223_ = lean_unbox(v___x_1220_);
+v_res_1224_ = l_Std_Internal_Parsec_manyCore___at___00__private_Std_Tactic_BVDecide_LRAT_Parser_0__Std_Tactic_BVDecide_LRAT_Parser_Text_parseActions_go_spec__0(v___x_2510__boxed_1223_, v_acc_1221_, v_a_1222_);
 return v_res_1224_;
 }
 }
@@ -10350,11 +10350,13 @@ return v_res_2699_;
 lean_object* runtime_initialize_Init_System_IO(uint8_t builtin);
 lean_object* runtime_initialize_Std_Tactic_BVDecide_LRAT_Actions(uint8_t builtin);
 lean_object* runtime_initialize_Std_Internal_Parsec(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Std_Tactic_BVDecide_LRAT_Parser(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Init_System_IO(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

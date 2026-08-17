@@ -29,7 +29,7 @@ lean_object* l_Lean_Elab_Tactic_Do_ProofMode_MGoal_toExpr(lean_object*);
 lean_object* l_Lean_Meta_mkFreshExprSyntheticOpaqueMVar(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_Expr_mvarId_x21(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Name_mkStr4(lean_object*, lean_object*, lean_object*, lean_object*);
 uint8_t l_Lean_Expr_isAppOfArity(lean_object*, lean_object*, lean_object*);
 lean_object* lean_expr_instantiate1(lean_object*, lean_object*);
@@ -2584,7 +2584,7 @@ v___x_1083_ = l_Lean_Expr_mvarId_x21(v_a_1078_);
 v___x_1084_ = lean_alloc_ctor(1, 2, 0);
 lean_ctor_set(v___x_1084_, 0, v___x_1083_);
 lean_ctor_set(v___x_1084_, 1, v___x_1082_);
-v___x_1085_ = lean_st_ref_set(v_val_1064_, v___x_1084_);
+v___x_1085_ = lean_st_ref_put(v_val_1064_, v___x_1084_);
 if (v_isShared_1081_ == 0)
 {
 v___x_1087_ = v___x_1080_;
@@ -3232,7 +3232,7 @@ goto v_reusejp_1282_;
 v_reusejp_1282_:
 {
 lean_object* v___x_1284_; lean_object* v___x_1285_; lean_object* v___x_1286_; 
-v___x_1284_ = lean_st_ref_set(v___y_1255_, v___x_1283_);
+v___x_1284_ = lean_st_ref_put(v___y_1255_, v___x_1283_);
 v___x_1285_ = lean_box(0);
 v___x_1286_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_1286_, 0, v___x_1285_);
@@ -4315,7 +4315,7 @@ goto v_reusejp_1713_;
 v_reusejp_1713_:
 {
 lean_object* v___x_1715_; lean_object* v___x_1716_; 
-v___x_1715_ = lean_st_ref_set(v___y_1687_, v___x_1714_);
+v___x_1715_ = lean_st_ref_put(v___y_1687_, v___x_1714_);
 v___x_1716_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_1716_, 0, v_r_1708_);
 return v___x_1716_;
@@ -5485,11 +5485,13 @@ return v_res_2238_;
 }
 }
 lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Intro(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Elab_Tactic_Do_ProofMode_Basic(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

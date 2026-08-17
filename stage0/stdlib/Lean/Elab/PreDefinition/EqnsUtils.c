@@ -56,7 +56,7 @@ uint8_t l_Lean_Exception_isInterrupt(lean_object*);
 uint8_t l_Lean_Exception_isRuntime(lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_Kernel_enableDiag(lean_object*, uint8_t);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 uint8_t l_Lean_Kernel_isDiagnosticsEnabled(lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Elab_Eqns_simpMatch_x3f(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lean_Elab_Eqns_simpMatch_x3f___boxed(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
@@ -899,7 +899,7 @@ goto v_reusejp_225_;
 v_reusejp_225_:
 {
 lean_object* v___x_227_; 
-v___x_227_ = lean_st_ref_set(v_a_148_, v___x_226_);
+v___x_227_ = lean_st_ref_put(v_a_148_, v___x_226_);
 v_fileName_179_ = v_fileName_157_;
 v_fileMap_180_ = v_fileMap_158_;
 v_currRecDepth_181_ = v_currRecDepth_160_;
@@ -1409,7 +1409,7 @@ _start:
 lean_object* v___x_417_; lean_object* v___x_418_; lean_object* v___x_419_; lean_object* v___x_420_; lean_object* v___x_421_; lean_object* v___x_422_; 
 v___x_417_ = ((lean_object*)(l___private_Lean_Elab_PreDefinition_EqnsUtils_0__Lean_Elab_Eqns_whnfAux___closed__3));
 v___x_418_ = lean_unsigned_to_nat(18u);
-v___x_419_ = lean_unsigned_to_nat(1898u);
+v___x_419_ = lean_unsigned_to_nat(1896u);
 v___x_420_ = ((lean_object*)(l___private_Lean_Elab_PreDefinition_EqnsUtils_0__Lean_Elab_Eqns_whnfAux___closed__2));
 v___x_421_ = ((lean_object*)(l___private_Lean_Elab_PreDefinition_EqnsUtils_0__Lean_Elab_Eqns_whnfAux___closed__1));
 v___x_422_ = l_mkPanicMessageWithDecl(v___x_421_, v___x_420_, v___x_419_, v___x_418_, v___x_417_);
@@ -1954,11 +1954,13 @@ lean_object* runtime_initialize_Lean_Meta_Tactic_Refl(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Delta(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_SplitIf(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Contradiction(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_PreDefinition_EqnsUtils(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Meta_Basic(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

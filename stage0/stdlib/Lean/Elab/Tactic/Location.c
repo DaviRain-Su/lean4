@@ -44,7 +44,7 @@ lean_object* l_Lean_FVarId_getDecl___redArg(lean_object*, lean_object*, lean_obj
 uint8_t l_Lean_LocalDecl_isImplementationDetail(lean_object*);
 lean_object* l_Lean_Elab_Tactic_withMainContext___boxed(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_PersistentArray_append___redArg(lean_object*, lean_object*);
 lean_object* l_Lean_Elab_Tactic_tryTactic___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_Elab_Tactic_getMainGoal___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
@@ -1420,7 +1420,7 @@ goto v_reusejp_490_;
 v_reusejp_490_:
 {
 lean_object* v___x_492_; lean_object* v___x_493_; lean_object* v___x_495_; 
-v___x_492_ = lean_st_ref_set(v___y_448_, v___x_491_);
+v___x_492_ = lean_st_ref_put(v___y_448_, v___x_491_);
 v___x_493_ = lean_box(0);
 if (v_isShared_467_ == 0)
 {
@@ -1654,7 +1654,7 @@ goto v_reusejp_560_;
 v_reusejp_560_:
 {
 lean_object* v___x_562_; lean_object* v___x_563_; 
-v___x_562_ = lean_st_ref_set(v___y_533_, v___x_561_);
+v___x_562_ = lean_st_ref_put(v___y_533_, v___x_561_);
 v___x_563_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_563_, 0, v_trees_537_);
 return v___x_563_;
@@ -3150,11 +3150,13 @@ return v_res_1143_;
 }
 }
 lean_object* runtime_initialize_Lean_Elab_Tactic_ElabTerm(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Tactic_Location(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Elab_Tactic_ElabTerm(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

@@ -22,7 +22,7 @@ lean_object* lean_st_ref_get(lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_Name_num___override(lean_object*, lean_object*);
 lean_object* lean_nat_add(lean_object*, lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Expr_fvar___override(lean_object*);
 lean_object* l_Lean_LocalContext_mkLocalDecl(lean_object*, lean_object*, lean_object*, lean_object*, uint8_t, uint8_t);
 lean_object* lean_expr_instantiate1(lean_object*, lean_object*);
@@ -644,7 +644,7 @@ goto v_reusejp_136_;
 v_reusejp_136_:
 {
 lean_object* v___x_138_; lean_object* v___x_139_; 
-v___x_138_ = lean_st_ref_set(v___y_110_, v___x_137_);
+v___x_138_ = lean_st_ref_put(v___y_110_, v___x_137_);
 v___x_139_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_139_, 0, v_r_131_);
 return v___x_139_;
@@ -1551,11 +1551,13 @@ return v_res_368_;
 }
 }
 lean_object* runtime_initialize_Lean_Compiler_LCNF_InferType(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Compiler_LCNF_CompatibleTypes(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Compiler_LCNF_InferType(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

@@ -1,5 +1,5 @@
 import Std.Tactic.Do
-import Std.Internal.Do
+import Std.WP
 
 /-!
 Regression test for a *dependent* assertion language `(st : State) → st.Invariant → Prop`. Its order
@@ -10,11 +10,12 @@ it runs out of heartbeats. Extracted from a user report.
 
 set_option mvcgen.warning false
 
-open Std.Internal.Do
+open Std.WP
 
 opaque State : Type
 opaque State.Invariant : State → Prop
 
+@[implicit_reducible]
 def Stateful (a : Type) := State → Option a × State
 
 instance : Monad Stateful where
@@ -47,7 +48,7 @@ instance Stateful.instWP {α : Type} : WP (Stateful α) α StateProp EPost⟨⟩
       | none => True
       | some res => post res stOut h⟩
   wp_trans_monotone x := by
-    simp only [PredTrans.monotone, Lean.Order.PartialOrder.rel, Stateful.run]; grind
+    simp only [Lean.Order.PredTrans.monotone, Lean.Order.PartialOrder.rel, Stateful.run]; grind
 
 theorem Stateful.wpTrans_apply_eq {α : Type} (x : Stateful α)
     (post : α → StateProp) (epost : EPost⟨⟩) (st : State) (h : st.Invariant) :

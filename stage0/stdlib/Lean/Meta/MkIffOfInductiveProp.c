@@ -111,7 +111,7 @@ lean_object* lean_array_mk(lean_object*);
 lean_object* l_Lean_mkAppN(lean_object*, lean_object*);
 lean_object* l_Lean_MVarId_getType(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l___private_Lean_Meta_Basic_0__Lean_Meta_withMVarContextImp(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_MVarId_tryClear(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
 lean_object* l_Lean_MVarId_revert(lean_object*, lean_object*, uint8_t, uint8_t, lean_object*, lean_object*, lean_object*, lean_object*);
@@ -1277,7 +1277,7 @@ goto v_reusejp_186_;
 v_reusejp_186_:
 {
 lean_object* v___x_188_; lean_object* v___x_189_; lean_object* v___x_190_; 
-v___x_188_ = lean_st_ref_set(v___y_159_, v___x_187_);
+v___x_188_ = lean_st_ref_put(v___y_159_, v___x_187_);
 v___x_189_ = lean_box(0);
 v___x_190_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_190_, 0, v___x_189_);
@@ -10055,7 +10055,7 @@ goto v_reusejp_3122_;
 v_reusejp_3122_:
 {
 lean_object* v___x_3124_; lean_object* v___x_3125_; 
-v___x_3124_ = lean_st_ref_set(v___y_3105_, v___x_3123_);
+v___x_3124_ = lean_st_ref_put(v___y_3105_, v___x_3123_);
 v___x_3125_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_3125_, 0, v_fst_3112_);
 return v___x_3125_;
@@ -10969,7 +10969,7 @@ goto v_reusejp_3446_;
 v_reusejp_3446_:
 {
 lean_object* v___x_3448_; lean_object* v___x_3449_; lean_object* v___x_3451_; 
-v___x_3448_ = lean_st_ref_set(v___y_3409_, v___x_3447_);
+v___x_3448_ = lean_st_ref_put(v___y_3409_, v___x_3447_);
 v___x_3449_ = lean_box(0);
 if (v_isShared_3416_ == 0)
 {
@@ -12180,11 +12180,13 @@ lean_object* runtime_initialize_Lean_Meta_Basic(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Elab_Tactic_Basic(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Apply(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Meta_Tactic_Cases(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Meta_MkIffOfInductiveProp(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Meta_Basic(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

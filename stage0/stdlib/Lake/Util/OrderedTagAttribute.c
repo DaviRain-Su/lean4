@@ -51,7 +51,7 @@ lean_object* l___private_Lean_Environment_0__Lean_EnvExtension_getStateUnsafe___
 lean_object* l_Lean_registerPersistentEnvExtensionUnsafe___redArg(lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_PersistentEnvExtension_addEntry___redArg(lean_object*, lean_object*, lean_object*, lean_object*, lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_Attribute_Builtin_ensureNoArgs(lean_object*, lean_object*, lean_object*);
 uint8_t l_Lean_instBEqAttributeKind_beq(uint8_t, uint8_t);
 lean_object* l_Lean_MessageData_ofFormat(lean_object*);
@@ -1223,7 +1223,7 @@ goto v_reusejp_362_;
 v_reusejp_362_:
 {
 lean_object* v___x_364_; lean_object* v___x_365_; lean_object* v___x_367_; 
-v___x_364_ = lean_st_ref_set(v___y_340_, v___x_363_);
+v___x_364_ = lean_st_ref_put(v___y_340_, v___x_363_);
 v___x_365_ = lean_box(0);
 if (v_isShared_344_ == 0)
 {
@@ -1935,11 +1935,13 @@ return v_res_643_;
 }
 }
 lean_object* runtime_initialize_Lean_Attributes(uint8_t builtin);
+void lean_initialize();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lake_Util_OrderedTagAttribute(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize();
 res = runtime_initialize_Lean_Attributes(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

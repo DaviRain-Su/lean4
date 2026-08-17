@@ -59,7 +59,7 @@ lean_object* l_mkPanicMessageWithDecl(lean_object*, lean_object*, lean_object*, 
 lean_object* lean_panic_fn_borrowed(lean_object*, lean_object*);
 lean_object* l_Lake_Toml_RBDict_mkEmpty___redArg(lean_object*);
 lean_object* l_String_Slice_posLE(lean_object*, lean_object*);
-lean_object* lean_string_utf8_extract(lean_object*, lean_object*, lean_object*);
+lean_object* lean_string_utf8_extract_fast(lean_object*, lean_object*, lean_object*);
 LEAN_EXPORT lean_object* l_Lake_Toml_Value_ctorIdx(lean_object*);
 LEAN_EXPORT lean_object* l_Lake_Toml_Value_ctorIdx___boxed(lean_object*);
 LEAN_EXPORT lean_object* l_Lake_Toml_Value_ctorElim___redArg(lean_object*, lean_object*);
@@ -497,6 +497,8 @@ v_s_117_ = lean_ctor_get(v_x_113_, 1);
 lean_inc_ref(v_s_117_);
 lean_dec_ref_known(v_x_113_, 2);
 v___x_118_ = l_Lean_Syntax_structEq(v_ref_114_, v_ref_116_);
+lean_dec(v_ref_116_);
+lean_dec(v_ref_114_);
 if (v___x_118_ == 0)
 {
 lean_dec_ref(v_s_117_);
@@ -537,6 +539,8 @@ v_n_124_ = lean_ctor_get(v_x_113_, 1);
 lean_inc(v_n_124_);
 lean_dec_ref_known(v_x_113_, 2);
 v___x_125_ = l_Lean_Syntax_structEq(v_ref_121_, v_ref_123_);
+lean_dec(v_ref_123_);
+lean_dec(v_ref_121_);
 if (v___x_125_ == 0)
 {
 lean_dec(v_n_124_);
@@ -575,6 +579,8 @@ lean_inc(v_ref_130_);
 v_n_131_ = lean_ctor_get_float(v_x_113_, sizeof(void*)*1);
 lean_dec_ref_known(v_x_113_, 1);
 v___x_132_ = l_Lean_Syntax_structEq(v_ref_128_, v_ref_130_);
+lean_dec(v_ref_130_);
+lean_dec(v_ref_128_);
 if (v___x_132_ == 0)
 {
 return v___x_132_;
@@ -609,6 +615,8 @@ lean_inc(v_ref_137_);
 v_b_138_ = lean_ctor_get_uint8(v_x_113_, sizeof(void*)*1);
 lean_dec_ref_known(v_x_113_, 1);
 v___x_139_ = l_Lean_Syntax_structEq(v_ref_135_, v_ref_137_);
+lean_dec(v_ref_137_);
+lean_dec(v_ref_135_);
 if (v___x_139_ == 0)
 {
 return v___x_139_;
@@ -657,6 +665,8 @@ v_dt_144_ = lean_ctor_get(v_x_113_, 1);
 lean_inc_ref(v_dt_144_);
 lean_dec_ref_known(v_x_113_, 2);
 v___x_145_ = l_Lean_Syntax_structEq(v_ref_141_, v_ref_143_);
+lean_dec(v_ref_143_);
+lean_dec(v_ref_141_);
 if (v___x_145_ == 0)
 {
 lean_dec_ref(v_dt_144_);
@@ -695,6 +705,8 @@ v_xs_151_ = lean_ctor_get(v_x_113_, 1);
 lean_inc_ref(v_xs_151_);
 lean_dec_ref_known(v_x_113_, 2);
 v___x_152_ = l_Lean_Syntax_structEq(v_ref_148_, v_ref_150_);
+lean_dec(v_ref_150_);
+lean_dec(v_ref_148_);
 if (v___x_152_ == 0)
 {
 lean_dec_ref(v_xs_151_);
@@ -748,6 +760,8 @@ v_xs_161_ = lean_ctor_get(v_x_113_, 1);
 lean_inc_ref(v_xs_161_);
 lean_dec_ref_known(v_x_113_, 2);
 v___x_162_ = l_Lean_Syntax_structEq(v_ref_158_, v_ref_160_);
+lean_dec(v_ref_160_);
+lean_dec(v_ref_158_);
 if (v___x_162_ == 0)
 {
 lean_dec_ref(v_xs_161_);
@@ -2533,7 +2547,7 @@ lean_ctor_set(v___x_785_, 1, v___x_783_);
 lean_ctor_set(v___x_785_, 2, v___x_784_);
 v___x_786_ = l_String_Slice_Pos_revSkipWhile___at___00Lake_Toml_ppTable_spec__0(v___x_785_, v___x_784_);
 lean_dec_ref_known(v___x_785_, 3);
-v___x_787_ = lean_string_utf8_extract(v___x_782_, v___x_783_, v___x_786_);
+v___x_787_ = lean_string_utf8_extract_fast(v___x_782_, v___x_783_, v___x_786_);
 lean_dec(v___x_786_);
 lean_dec_ref(v___x_782_);
 v___x_788_ = lean_string_push(v___x_787_, v___x_780_);
@@ -2570,11 +2584,13 @@ lean_object* runtime_initialize_Init_Data_String_TakeDrop(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_String_Search(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_String_Defs(uint8_t builtin);
 lean_object* runtime_initialize_Init_Data_ToString_Macro(uint8_t builtin);
+void lean_initialize();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lake_Toml_Data_Value(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize();
 res = runtime_initialize_Init_Data_Float_Float(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);

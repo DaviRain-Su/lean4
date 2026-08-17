@@ -35,7 +35,7 @@ extern lean_object* l_Lean_NameSet_empty;
 lean_object* lean_st_mk_ref(lean_object*);
 lean_object* lean_st_ref_take(lean_object*);
 lean_object* l_Lean_NameSet_insert(lean_object*, lean_object*);
-lean_object* lean_st_ref_set(lean_object*, lean_object*);
+lean_object* lean_st_ref_put(lean_object*, lean_object*);
 lean_object* l_Lean_registerTraceClass(lean_object*, uint8_t, lean_object*);
 lean_object* l_Lean_Name_mkStr1(lean_object*);
 lean_object* l_Lean_registerTagAttribute(lean_object*, lean_object*, lean_object*, lean_object*, uint8_t, lean_object*);
@@ -1054,7 +1054,7 @@ lean_object* v___x_389_; lean_object* v___x_390_; lean_object* v___x_391_; lean_
 v___x_389_ = l_Lean_Elab_builtinIncrementalElabs;
 v___x_390_ = lean_st_ref_take(v___x_389_);
 v___x_391_ = l_Lean_NameSet_insert(v___x_390_, v_decl_387_);
-v___x_392_ = lean_st_ref_set(v___x_389_, v___x_391_);
+v___x_392_ = lean_st_ref_put(v___x_389_, v___x_391_);
 v___x_393_ = lean_alloc_ctor(0, 1, 0);
 lean_ctor_set(v___x_393_, 0, v___x_392_);
 return v___x_393_;
@@ -1732,11 +1732,13 @@ return v_res_707_;
 }
 lean_object* runtime_initialize_Lean_Elab_DeclModifiers(uint8_t builtin);
 lean_object* runtime_initialize_Lean_Elab_Term_TermElabM(uint8_t builtin);
+void lean_initialize_runtime_module();
 static bool _G_runtime_initialized = false;
 LEAN_EXPORT lean_object* runtime_initialize_Lean_Elab_Term(uint8_t builtin) {
 lean_object * res;
 if (_G_runtime_initialized) return lean_io_result_mk_ok(lean_box(0));
 _G_runtime_initialized = true;
+lean_initialize_runtime_module();
 res = runtime_initialize_Lean_Elab_DeclModifiers(builtin);
 if (lean_io_result_is_error(res)) return res;
 lean_dec_ref(res);
